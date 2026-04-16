@@ -1,0 +1,288 @@
+.card {
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 24px;
+}
+
+.cardTitle {
+  font-size: 12px;
+  font-weight: 600;
+  color: #374151;
+  margin: 0 0 16px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.planHeaderRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.planBadge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 14px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: capitalize;
+}
+
+.planBadge.anonymous {
+  background: #f3f4f6;
+  color: #6b7280;
+}
+
+.planBadge.hobby {
+  background: #ede9fe;
+  color: #5b21b6;
+}
+
+.planBadge.pro {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.planBadge.team {
+  background: #d1fae5;
+  color: #065f46;
+}
+
+.planPrice {
+  font-size: 15px;
+  font-weight: 600;
+  color: #111827;
+}
+
+.metaGrid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px 20px;
+  margin: 0 0 16px;
+  font-size: 14px;
+}
+
+.metaGrid dt {
+  margin: 0;
+  color: #9ca3af;
+  font-weight: 500;
+}
+
+.metaGrid dd {
+  margin: 0;
+  color: #111827;
+}
+
+.notice {
+  color: #b45309;
+  font-weight: 500;
+}
+
+.ctaRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.btnPrimary,
+.btnSecondary,
+.btnDanger,
+.btnGhost {
+  padding: 9px 18px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+
+.btnPrimary {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+}
+
+.btnPrimary:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.btnSecondary {
+  background: white;
+  border-color: #e5e7eb;
+  color: #374151;
+}
+
+.btnDanger {
+  background: #fef2f2;
+  border-color: #fecaca;
+  color: #b91c1c;
+}
+
+.btnGhost {
+  background: transparent;
+  border-color: #e5e7eb;
+  color: #6b7280;
+}
+
+.hint,
+.muted {
+  font-size: 13px;
+  color: #6b7280;
+  margin: 0;
+}
+
+.paymentRow {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+  font-size: 15px;
+  color: #111827;
+}
+
+.cardBrand {
+  font-size: 12px;
+  text-transform: uppercase;
+  color: #9ca3af;
+  font-weight: 600;
+}
+
+.exp {
+  color: #6b7280;
+  font-size: 13px;
+}
+
+.invoiceList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.invoiceRow {
+  display: grid;
+  grid-template-columns: 1fr auto auto auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 0;
+  border-bottom: 1px solid #f3f4f6;
+  font-size: 14px;
+}
+
+.invoiceRow:last-child {
+  border-bottom: none;
+}
+
+.invoiceDate {
+  color: #374151;
+}
+
+.invoiceAmt {
+  font-weight: 600;
+  color: #111827;
+}
+
+.invoiceStatus {
+  text-transform: capitalize;
+  color: #6b7280;
+  font-size: 13px;
+}
+
+.invoiceLink {
+  color: #4f46e5;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.invoiceLink:hover {
+  text-decoration: underline;
+}
+
+.modalBackdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(17, 24, 39, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+  padding: 16px;
+}
+
+.modal {
+  background: white;
+  border-radius: 12px;
+  max-width: 520px;
+  width: 100%;
+  padding: 24px;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.15);
+}
+
+.modalTitle {
+  margin: 0 0 12px;
+  font-size: 18px;
+  font-weight: 700;
+  color: #111827;
+}
+
+.modalBody {
+  margin: 0 0 16px;
+  font-size: 14px;
+  line-height: 1.55;
+  color: #4b5563;
+}
+
+.modalActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.planPickGrid {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.planPick {
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 14px 16px;
+}
+
+.planPickCurrent {
+  background: #fafafa;
+}
+
+.planPickHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.planPickBlurb {
+  margin: 0 0 10px;
+  font-size: 13px;
+  color: #6b7280;
+}
+
+.currentPill {
+  font-size: 12px;
+  font-weight: 600;
+  color: #6b7280;
+}
+
+.errorText {
+  color: #b91c1c;
+  font-size: 13px;
+  margin: 0 0 12px;
+}
