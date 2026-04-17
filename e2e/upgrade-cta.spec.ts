@@ -47,7 +47,7 @@ test('D1.1: upgrade banner shown for anonymous tier', async ({ page }) => {
     ok: true,
     user: {
       id: 'usr_anon',
-      email: 'anon@tmp.instant.dev',
+      email: 'anon@tmp.instanode.dev',
       tier: 'anonymous',
       created_at: '2026-04-09T00:00:00Z',
     },
@@ -66,7 +66,7 @@ test('D1.2: anonymous resource card shows expiry countdown', async ({ page }) =>
     ok: true,
     user: {
       id: 'usr_anon',
-      email: 'anon@tmp.instant.dev',
+      email: 'anon@tmp.instanode.dev',
       tier: 'anonymous',
       created_at: '2026-04-09T00:00:00Z',
     },
@@ -88,7 +88,7 @@ test('D1.3: anonymous upgrade banner CTA navigates to billing settings', async (
     ok: true,
     user: {
       id: 'usr_anon',
-      email: 'anon@tmp.instant.dev',
+      email: 'anon@tmp.instanode.dev',
       tier: 'anonymous',
       created_at: '2026-04-09T00:00:00Z',
     },
@@ -127,7 +127,7 @@ test('D1.5: only anonymous resource cards show expiry countdown', async ({ page 
     ok: true,
     user: {
       id: 'usr_anon',
-      email: 'anon@tmp.instant.dev',
+      email: 'anon@tmp.instanode.dev',
       tier: 'anonymous',
       created_at: '2026-04-09T00:00:00Z',
     },

@@ -127,7 +127,7 @@ test.describe('Real onboarding funnel (E2E_REAL=1)', () => {
     onboardingJWT = match[1];
 
     // Unique email per test run so each run creates a fresh account
-    testEmail = `e2e-real-${Date.now()}@instant.dev`;
+    testEmail = `e2e-real-${Date.now()}@instanode.dev`;
 
     console.log(`\n  Services provisioned: ${provisionedServices.map(s => s.type).join(', ') || '(none)'}`);
     console.log(`  JWT (first 40):       ${onboardingJWT.slice(0, 40)}...`);

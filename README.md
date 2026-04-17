@@ -1,4 +1,4 @@
-# instant.dev Dashboard
+# instanode.dev Dashboard
 
 React 18 + TypeScript + Vite frontend for the customer dashboard. This is where users log in, view their provisioned resources, upgrade their plan, and manage their team. It talks exclusively to `dashboard-api/` (port 8081, NodePort 30082) — not directly to the agent-facing `api/`.
 
@@ -71,7 +71,7 @@ src/
 
 When an anonymous user hits a resource limit, `api/` embeds an upgrade URL in the response:
 ```
-https://instant.dev/start?t=<signed-jwt>
+https://instanode.dev/start?t=<signed-jwt>
 ```
 
 That URL hits `api/GET /start`, which validates the JWT and issues a 302 redirect to:
@@ -115,4 +115,4 @@ npx playwright test --headed --project=chromium
 ## Known Gaps
 
 - **RotateCredentials**: the UI calls `POST /api/v1/resources/:id/rotate` on dashboard-api, which proxies to `api/`. Rotation is implemented for Postgres, Redis, and MongoDB.
-- **Razorpay Checkout**: the "Upgrade to Pro" button opens `instant.dev/pricing` when checkout is not configured. A real `POST /api/v1/billing/checkout` endpoint in dashboard-api returns a Razorpay short URL when keys are configured.
+- **Razorpay Checkout**: the "Upgrade to Pro" button opens `instanode.dev/pricing` when checkout is not configured. A real `POST /api/v1/billing/checkout` endpoint in dashboard-api returns a Razorpay short URL when keys are configured.

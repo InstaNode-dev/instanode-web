@@ -82,7 +82,7 @@ test('Journey 1: anonymous provision → upgrade link → claim page → claimed
   expect([200, 201]).toContain(provStatus);
   expect(prov.ok).toBe(true);
   expect(prov.tier).toBe('anonymous');
-  expect(String(prov.note)).toContain('instant.dev/start?t=');
+  expect(String(prov.note)).toContain('instanode.dev/start?t=');
 
   const jwt = extractJWT(String(prov.note));
   const preview = buildPreview(prov, 'redis');

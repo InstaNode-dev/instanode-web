@@ -8,7 +8,7 @@ import type { AuthMeResponse } from '../../src/types/auth';
 export const mockPostgres: Resource = {
   id: 'res_pg_001',
   token: 'tok_pg_001_abc123def456',
-  connection_url: 'postgres://usr_mock:secret@pg.instant.dev:5432/db_mock',
+  connection_url: 'postgres://usr_mock:secret@pg.instanode.dev:5432/db_mock',
   resource_type: 'postgres',
   tier: 'hobby',
   status: 'active',
@@ -128,7 +128,7 @@ export const mockAuthAnonymous: AuthMeResponse = {
   ok: true,
   user: {
     id: 'usr_anon_001',
-    email: 'anon@tmp.instant.dev',
+    email: 'anon@tmp.instanode.dev',
     tier: 'anonymous',
     created_at: '2026-04-09T00:00:00Z',
   },

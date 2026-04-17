@@ -10,7 +10,7 @@ const sampleStacks = {
       slug: 'stk-myapi01',
       name: 'my-api',
       status: 'running',
-      url: 'https://my-api.instant.dev',
+      url: 'https://my-api.instanode.dev',
       created_at: '2026-04-16T12:00:00.000Z',
       team_id: 'mock-team-id',
       logs_service: 'api',

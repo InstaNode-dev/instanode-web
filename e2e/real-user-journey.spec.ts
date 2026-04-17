@@ -5,7 +5,7 @@
  *
  * All requests hit the live instant-api at E2E_API_URL.
  * No page.route() content mocking — only a routing shim that forwards
- * https://instant.dev/* to http://localhost:30080/* so the upgrade URL
+ * https://instanode.dev/* to http://localhost:30080/* so the upgrade URL
  * from the API response can be opened in a real browser tab.
  *
  * dashboard-api is not required — this tests the agent-facing API and
@@ -67,13 +67,13 @@ function expect2xx(status: number, context = '') {
 }
 
 /**
- * Route shim: forward https://instant.dev/* → http://localhost:30080/*
+ * Route shim: forward https://instanode.dev/* → http://localhost:30080/*
  * This is NOT a mock — the real API at localhost handles every request.
  * We only do this so the test can navigate to the exact upgrade URL that
- * appears in API responses (which point to https://instant.dev).
+ * appears in API responses (which point to https://instanode.dev).
  */
 async function withInstantDevRouting(page: import('@playwright/test').Page) {
-  await page.route('https://instant.dev/**', async route => {
+  await page.route('https://instanode.dev/**', async route => {
     const url = new URL(route.request().url());
     const localURL = `${API}${url.pathname}${url.search}${url.hash}`;
     try {
@@ -120,7 +120,7 @@ test.describe('Phase 1 · Anonymous provisioning — all 4 services', () => {
 
     // Upgrade CTA in every anonymous response
     expect(typeof body.note).toBe('string');
-    expect((body.note as string).includes('instant.dev/start?t=')).toBe(true);
+    expect((body.note as string).includes('instanode.dev/start?t=')).toBe(true);
 
     console.log(`✓ Cache token: ${body.token}`);
     console.log(`  Key prefix: ${body.key_prefix}`);
@@ -337,7 +337,7 @@ test.describe('Phase 3 · Upgrade CTA embedded in every response', () => {
 test.describe('Phase 4 · Upgrade landing page (real browser)', () => {
   /**
    * Developer clicks the upgrade URL from their terminal output.
-   * We route https://instant.dev → localhost (the real local API).
+   * We route https://instanode.dev → localhost (the real local API).
    * No response content is fabricated — the real API handles the request.
    */
   test('4.1 · Upgrade URL from API response loads in browser (no 5xx)', async ({ request, page }) => {
@@ -355,7 +355,7 @@ test.describe('Phase 4 · Upgrade landing page (real browser)', () => {
 
     console.log(`Upgrade URL from API: ${upgradeURL.slice(0, 80)}...`);
 
-    // Route https://instant.dev/* → our local API (not mocking content — just DNS routing)
+    // Route https://instanode.dev/* → our local API (not mocking content — just DNS routing)
     await withInstantDevRouting(page);
 
     // Navigate to the exact URL the developer would click
@@ -411,11 +411,11 @@ test.describe('Phase 5 · System integrity', () => {
   /**
    * Health check returns {ok: true}.
    */
-  test('5.3 · GET /healthz returns {ok:true, service:"instant.dev"}', async ({ request }) => {
+  test('5.3 · GET /healthz returns {ok:true, service:"instanode.dev"}', async ({ request }) => {
     const { status, body } = await apiGet(request, '/healthz');
     expect(status).toBe(200);
     expect(body.ok).toBe(true);
-    expect(body.service).toBe('instant.dev');
+    expect(body.service).toBe('instanode.dev');
     console.log(`✓ /healthz OK`);
   });
 
@@ -517,7 +517,7 @@ test.describe('Phase 6 · Complete developer journey (single chained flow)', () 
    *  8.  Invalid JWT → 400          → structured error, not crash
    *  9.  Unknown route → 404        → structured error
    */
-  test('6.0 · Anonymous developer builds an app with instant.dev', async ({ request, page }) => {
+  test('6.0 · Anonymous developer builds an app with instanode.dev', async ({ request, page }) => {
     const ip = uniqueIP();
     console.log(`\n=== Complete developer journey (IP: ${ip}) ===\n`);
 
@@ -576,7 +576,7 @@ test.describe('Phase 6 · Complete developer journey (single chained flow)', () 
     console.log(`    fp=${payload.fp}, services=${(payload.rt as string[]).join(',')}`);
 
     // ── Step 7: Open /start in real browser ──────────────────────────────────
-    const upgradeURL = `https://instant.dev/start?t=${jwt}`;
+    const upgradeURL = `https://instanode.dev/start?t=${jwt}`;
     await withInstantDevRouting(page);
     const startResp = await page.goto(upgradeURL, { waitUntil: 'commit' });
     expect(startResp?.status(), '/start must not 5xx').toBeLessThan(500);
@@ -599,6 +599,6 @@ test.describe('Phase 6 · Complete developer journey (single chained flow)', () 
     console.log(`DB:      ${dbToken}`);
     console.log(`MongoDB: ${nosqlResult.body.token}`);
     console.log(`NATS:    ${queueResult.body.token}`);
-    console.log(`Upgrade: https://instant.dev/start?t=${jwt.slice(0, 40)}...`);
+    console.log(`Upgrade: https://instanode.dev/start?t=${jwt.slice(0, 40)}...`);
   });
 });

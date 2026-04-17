@@ -9,7 +9,7 @@ test.describe('Login page', () => {
 
   test('login page renders without errors', async ({ page }) => {
     await page.goto('/login');
-    await expect(page.locator('h1')).toContainText('instant.dev');
+    await expect(page.locator('h1')).toContainText('instanode.dev');
   });
 
   test('email input and magic link button are visible', async ({ page }) => {

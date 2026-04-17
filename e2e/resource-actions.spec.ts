@@ -22,7 +22,7 @@ import {
 
 const MOCK_ROTATE_RESPONSE = {
   ok: true,
-  connection_url: 'postgres://user:newpassword@pg.instant.dev:5432/mydb',
+  connection_url: 'postgres://user:newpassword@pg.instanode.dev:5432/mydb',
   token: mockPostgres.token,
 };
 

@@ -8,7 +8,7 @@ import react from '@vitejs/plugin-react';
 // to absolute cross-origin and breaking Playwright's page.route() glob matchers.
 const dashboardApiURL = process.env.DASHBOARD_API_URL || 'http://localhost:8081';
 
-// AGENT_API_URL — the agent-facing instant.dev API (port 8080 local, 30080 k8s NodePort).
+// AGENT_API_URL — the agent-facing instanode.dev API (port 8080 local, 30080 k8s NodePort).
 // Handles /claim routes (onboarding, claim preview, claim conversion).
 // Dashboard-api has no /claim routes; these must go directly to the agent API.
 const agentApiURL = process.env.AGENT_API_URL || 'http://localhost:30080';

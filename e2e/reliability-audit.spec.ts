@@ -91,10 +91,10 @@ function futureISO(days = 14): string {
   return new Date(Date.now() + days * 86_400_000).toISOString();
 }
 
-// ── Route shim: forward https://instant.dev/* → local API ────────────────────
+// ── Route shim: forward https://instanode.dev/* → local API ────────────────────
 // Not a mock — the real API handles every forwarded request.
 async function withInstantDevRouting(page: Page) {
-  await page.route('https://instant.dev/**', async route => {
+  await page.route('https://instanode.dev/**', async route => {
     const url = new URL(route.request().url());
     const local = `${API}${url.pathname}${url.search}`;
     try {
@@ -122,11 +122,11 @@ async function mockHobbySession(page: Page, overrides: Partial<AuthMeResponse> =
 // =============================================================================
 
 test.describe('Layer 0 · Infrastructure sanity', () => {
-  test('0.1 · GET /healthz → {ok:true, service:"instant.dev"}', async ({ request }) => {
+  test('0.1 · GET /healthz → {ok:true, service:"instanode.dev"}', async ({ request }) => {
     const { status, body } = await get(request, '/healthz');
     expect(status).toBe(200);
     expect(body.ok).toBe(true);
-    expect(body.service).toBe('instant.dev');
+    expect(body.service).toBe('instanode.dev');
   });
 
   test('0.2 · GET /openapi.json → valid OpenAPI 3.1 with all provisioning paths', async ({ request }) => {
@@ -201,7 +201,7 @@ test.describe('Layer 1 · Provisioning shape — every field, every service', ()
     const note = body.note as string;
     expect(typeof note).toBe('string');
     expect(note.length).toBeGreaterThan(10);
-    expect(note).toContain('instant.dev/start?t=');
+    expect(note).toContain('instanode.dev/start?t=');
 
     // Request tracing header
     const rid = headers['x-request-id'];
@@ -231,7 +231,7 @@ test.describe('Layer 1 · Provisioning shape — every field, every service', ()
     expect(lim.expires_in).toBe('24h');
 
     expect(body.tier).toBe('anonymous');
-    expect((body.note as string)).toContain('instant.dev/start?t=');
+    expect((body.note as string)).toContain('instanode.dev/start?t=');
 
     console.log(`✓ DB: ${url.replace(/:[^@]+@/, ':***@')}`);
   });
@@ -623,7 +623,7 @@ test.describe('Layer 6 · Resource management — rotate, delete, scoping', () =
     );
 
     // Mock rotate — returns new connection_url
-    const newURL = `redis://usr_rotated:newpassword@redis.instant.dev:6379/0`;
+    const newURL = `redis://usr_rotated:newpassword@redis.instanode.dev:6379/0`;
     await page.route(`**/api/v1/resources/${token}/rotate-credentials`, route =>
       route.fulfill({
         status: 200,
@@ -732,7 +732,7 @@ test.describe('Layer 6 · Resource management — rotate, delete, scoping', () =
 test.describe('Layer 7 · Browser UI states', () => {
   const anonAuth: AuthMeResponse = {
     ok: true,
-    user: { id: 'usr_anon', email: 'anon@tmp.instant.dev', tier: 'anonymous', created_at: new Date().toISOString() },
+    user: { id: 'usr_anon', email: 'anon@tmp.instanode.dev', tier: 'anonymous', created_at: new Date().toISOString() },
   };
 
   test('7.1 · Anonymous tier: upgrade banner says "expire/claim"', async ({ page }) => {

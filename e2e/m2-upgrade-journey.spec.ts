@@ -38,7 +38,7 @@ const hobbyRedis: Resource = {
 
 const hobbyPostgres: Resource = {
   id: 'res_pg_hobby_001',
-  token: 'postgres://user:pass@pg.instant.dev:5432/mydb',
+  token: 'postgres://user:pass@pg.instanode.dev:5432/mydb',
   resource_type: 'postgres',
   tier: 'hobby',
   status: 'active',
@@ -60,7 +60,7 @@ const proRedis: Resource = {
 
 const proPostgres: Resource = {
   id: 'res_pg_pro_001',
-  token: 'postgres://pro_user:pass@pg.instant.dev:5432/proddb',
+  token: 'postgres://pro_user:pass@pg.instanode.dev:5432/proddb',
   resource_type: 'postgres',
   tier: 'pro',
   status: 'active',
@@ -376,7 +376,7 @@ test('M2.6: queue resource type renders without crash or undefined label', async
   // The dashboard should handle unknown resource types gracefully (no crash, no "undefined").
   const queueResource = {
     id: 'res_q_001',
-    token: 'nats://usr_abc:pass@nats.instant.dev:4222',
+    token: 'nats://usr_abc:pass@nats.instanode.dev:4222',
     resource_type: 'queue',
     tier: 'anonymous',
     status: 'active',
