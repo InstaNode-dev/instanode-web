@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Pricing - InstaNode</title>
-  <meta name="description" content="InstaNode Developer plan. $12/month. Real Postgres. No account friction.">
+  <meta name="description" content="InstaNode Developer plan. $12/month or $120/year. Real Postgres. No account friction.">
   <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -16,7 +16,7 @@
       min-height: 100vh;
       padding: 40px 20px;
     }
-    .container { max-width: 440px; margin: 0 auto; }
+    .container { max-width: 960px; margin: 0 auto; }
     .header { text-align: center; margin-bottom: 32px; }
     h1 {
       font-size: 1.9rem;
@@ -26,11 +26,34 @@
       margin-bottom: 8px;
     }
     .header p { color: #888; font-size: 0.95rem; }
+
+    .plans {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 20px;
+      max-width: 880px;
+      margin: 0 auto;
+    }
     .plan {
+      position: relative;
       background: #111;
       border: 1px solid #222;
       border-radius: 12px;
       padding: 28px 24px;
+    }
+    .plan.featured { border-color: #2a4a6a; box-shadow: 0 10px 40px rgba(74, 175, 255, 0.08); }
+    .ribbon {
+      position: absolute;
+      top: -10px;
+      right: 16px;
+      background: #4af;
+      color: #060a14;
+      font-size: 0.7rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      padding: 4px 10px;
+      border-radius: 999px;
+      text-transform: uppercase;
     }
     .plan-name {
       font-size: 0.8rem;
@@ -43,7 +66,7 @@
     .price {
       display: flex;
       align-items: baseline;
-      margin-bottom: 20px;
+      margin-bottom: 4px;
     }
     .price .amount {
       font-size: 2.6rem;
@@ -52,6 +75,12 @@
       letter-spacing: -0.02em;
     }
     .price .period { color: #888; margin-left: 6px; font-size: 1rem; }
+    .price-note {
+      color: #6f9dbf;
+      font-size: 0.85rem;
+      margin-bottom: 20px;
+      min-height: 1.3em;
+    }
     ul.features {
       list-style: none;
       margin-bottom: 28px;
@@ -86,6 +115,13 @@
     }
     .btn:hover:not(:disabled) { background: #66bfff; border-color: #66bfff; }
     .btn:disabled { opacity: 0.6; cursor: not-allowed; box-shadow: none; }
+    .btn.secondary {
+      background: transparent;
+      color: #9dc;
+      border: 1px solid #224;
+      box-shadow: none;
+    }
+    .btn.secondary:hover:not(:disabled) { background: #0e1620; border-color: #2a4a6a; }
     .msg {
       margin-top: 14px;
       padding: 10px 14px;
@@ -129,6 +165,9 @@
     }
     footer.site a { color: #666; margin: 0 10px; text-decoration: none; }
     footer.site a:hover { color: #4af; }
+    @media (max-width: 720px) {
+      .plans { grid-template-columns: 1fr; }
+    }
     @media (max-width: 480px) {
       body { padding: 24px 16px; }
       .plan { padding: 24px 20px; }
@@ -143,20 +182,41 @@
       <p>Keep your resources. Lose the limits.</p>
     </div>
 
-    <div class="plan" role="region" aria-label="Developer plan">
-      <div class="plan-name">Developer</div>
-      <div class="price">
-        <span class="amount">$12</span>
-        <span class="period">/month</span>
+    <div class="plans">
+      <div class="plan" role="region" aria-label="Developer monthly plan">
+        <div class="plan-name">Monthly</div>
+        <div class="price">
+          <span class="amount">$12</span>
+          <span class="period">/month</span>
+        </div>
+        <div class="price-note">Billed every month.</div>
+        <ul class="features">
+          <li>Persistent Postgres (no 24h expiry)</li>
+          <li>500 MB storage, 5 concurrent connections</li>
+          <li>1000 webhook requests stored</li>
+          <li>Email support</li>
+        </ul>
+        <button class="btn secondary js-upgrade" type="button" data-plan="developer" data-label="Upgrade to $12/mo">Upgrade to $12/mo</button>
+        <div class="msg" role="status" aria-live="polite" data-msg-for="developer"></div>
       </div>
-      <ul class="features">
-        <li>Persistent Postgres (no 24h expiry)</li>
-        <li>500 MB storage, 5 concurrent connections</li>
-        <li>1000 webhook requests stored</li>
-        <li>Email support</li>
-      </ul>
-      <button id="upgrade-btn" class="btn" type="button">Upgrade to $12/mo Developer</button>
-      <div id="msg" class="msg" role="status" aria-live="polite"></div>
+
+      <div class="plan featured" role="region" aria-label="Developer annual plan">
+        <span class="ribbon">Save 17%</span>
+        <div class="plan-name">Annual</div>
+        <div class="price">
+          <span class="amount">$120</span>
+          <span class="period">/year</span>
+        </div>
+        <div class="price-note">$10/mo equivalent · 2 months free.</div>
+        <ul class="features">
+          <li>Everything in Monthly</li>
+          <li>Locked-in price for 12 months</li>
+          <li>One annual invoice</li>
+          <li>Priority support</li>
+        </ul>
+        <button class="btn js-upgrade" type="button" data-plan="developer-annual" data-label="Upgrade to $120/yr">Upgrade to $120/yr</button>
+        <div class="msg" role="status" aria-live="polite" data-msg-for="developer-annual"></div>
+      </div>
     </div>
 
     <p class="footnote">
@@ -177,8 +237,6 @@
   <script>
     (function () {
       var API_BASE = 'https://api.instanode.dev';
-      var btn = document.getElementById('upgrade-btn');
-      var msgEl = document.getElementById('msg');
       var toastEl = document.getElementById('toast');
 
       // Resource token can come in via ?token=<uuid> (from the /start link the
@@ -192,13 +250,20 @@
         try { return localStorage.getItem('instanode_token'); } catch (e) { return null; }
       })();
 
-      function showMsg(kind, text) {
-        msgEl.className = 'msg ' + kind;
-        msgEl.textContent = text;
+      function msgFor(planID) {
+        return document.querySelector('[data-msg-for="' + planID + '"]');
       }
-      function clearMsg() {
-        msgEl.className = 'msg';
-        msgEl.textContent = '';
+      function showMsg(planID, kind, text) {
+        var el = msgFor(planID);
+        if (!el) return;
+        el.className = 'msg ' + kind;
+        el.textContent = text;
+      }
+      function clearMsg(planID) {
+        var el = msgFor(planID);
+        if (!el) return;
+        el.className = 'msg';
+        el.textContent = '';
       }
       function showToast(text) {
         toastEl.textContent = text;
@@ -206,17 +271,24 @@
         setTimeout(function () { toastEl.classList.remove('show'); }, 3500);
       }
 
-      btn.addEventListener('click', function () {
+      function describePlan(planID) {
+        if (planID === 'developer-annual') return 'Developer plan – $120/year';
+        return 'Developer plan – $12/month';
+      }
+
+      function startCheckout(btn) {
         if (typeof Razorpay === 'undefined') {
-          showMsg('error', 'Payment module failed to load. Check your connection and retry.');
+          showMsg(btn.dataset.plan, 'error', 'Payment module failed to load. Check your connection and retry.');
           return;
         }
 
+        var planID = btn.dataset.plan;
+        var resetLabel = btn.dataset.label;
         btn.disabled = true;
         btn.textContent = 'Preparing checkout…';
-        clearMsg();
+        clearMsg(planID);
 
-        var body = { plan_id: 'developer', currency: 'USD' };
+        var body = { plan_id: planID, currency: 'USD' };
         if (resourceToken) body.token = resourceToken;
 
         fetch(API_BASE + '/billing/create-order', {
@@ -227,8 +299,6 @@
         })
           .then(function (res) {
             if (res.status === 401) {
-              // Not signed in — bounce through the claim page so they can auth
-              // and preserve the token so they come back here after login.
               var dest = '/start' + (resourceToken ? ('?token=' + encodeURIComponent(resourceToken)) : '');
               window.location.href = dest;
               return null;
@@ -248,7 +318,7 @@
               currency: order.currency,
               order_id: order.order_id,
               name: 'InstaNode',
-              description: 'Developer plan – $12/month',
+              description: describePlan(planID),
               prefill: {
                 name: order.name || '',
                 email: order.email || '',
@@ -257,13 +327,12 @@
               theme: { color: '#4af' },
               notes: resourceToken ? { token: resourceToken } : undefined,
               handler: function () {
-                // Webhook upgrades the tier server-side; land on dashboard.
                 window.location.href = '/dashboard?upgraded=1';
               },
               modal: {
                 ondismiss: function () {
                   btn.disabled = false;
-                  btn.textContent = 'Upgrade to $12/mo Developer';
+                  btn.textContent = resetLabel;
                   showToast('Checkout closed. You can retry anytime.');
                 }
               }
@@ -271,17 +340,21 @@
             var rzp = new Razorpay(options);
             rzp.on('payment.failed', function (resp) {
               btn.disabled = false;
-              btn.textContent = 'Upgrade to $12/mo Developer';
+              btn.textContent = resetLabel;
               var reason = (resp && resp.error && (resp.error.description || resp.error.reason)) || 'Payment failed.';
-              showMsg('error', reason + ' Please try again.');
+              showMsg(planID, 'error', reason + ' Please try again.');
             });
             rzp.open();
           })
           .catch(function (err) {
             btn.disabled = false;
-            btn.textContent = 'Upgrade to $12/mo Developer';
-            showMsg('error', 'Could not start checkout: ' + (err && err.message ? err.message : 'unknown error'));
+            btn.textContent = resetLabel;
+            showMsg(planID, 'error', 'Could not start checkout: ' + (err && err.message ? err.message : 'unknown error'));
           });
+      }
+
+      document.querySelectorAll('.js-upgrade').forEach(function (btn) {
+        btn.addEventListener('click', function () { startCheckout(btn); });
       });
     })();
   </script>
