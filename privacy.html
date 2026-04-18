@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Privacy Policy - InstaNode</title>
+  <meta name="description" content="How instanode.dev collects, stores, and protects your data. Plain English, developer-targeted.">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #0a0a0a;
+      color: #e0e0e0;
+      line-height: 1.7;
+      min-height: 100vh;
+    }
+    a { color: #4af; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    .container { max-width: 720px; margin: 0 auto; padding: 0 20px; }
+
+    nav.top {
+      padding: 20px 0;
+      border-bottom: 1px solid #1a1a1a;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 0.9rem;
+    }
+    nav.top .brand { color: #fff; font-weight: 700; letter-spacing: -0.01em; }
+    nav.top .links a { color: #888; margin-left: 18px; }
+    nav.top .links a:hover { color: #4af; text-decoration: none; }
+
+    .doc { padding: 48px 0 32px; }
+    .doc h1 {
+      font-size: 2rem;
+      color: #fff;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      margin-bottom: 8px;
+    }
+    .doc .updated {
+      color: #666;
+      font-size: 0.85rem;
+      margin-bottom: 32px;
+    }
+    .doc h2 {
+      font-size: 1.15rem;
+      color: #fff;
+      margin-top: 32px;
+      margin-bottom: 10px;
+      letter-spacing: -0.01em;
+    }
+    .doc p, .doc li {
+      color: #c8c8c8;
+      font-size: 0.95rem;
+      margin-bottom: 12px;
+    }
+    .doc ul { padding-left: 20px; margin-bottom: 12px; }
+    .doc ul li { margin-bottom: 6px; }
+    .doc code {
+      font-family: "SF Mono", "Fira Code", monospace;
+      font-size: 0.85rem;
+      color: #6bf;
+      background: #111;
+      padding: 2px 6px;
+      border-radius: 3px;
+    }
+    .doc strong { color: #fff; }
+
+    footer {
+      border-top: 1px solid #1a1a1a;
+      padding: 24px 0;
+      text-align: center;
+      color: #444;
+      font-size: 0.8rem;
+      margin-top: 40px;
+    }
+    footer a { color: #666; margin: 0 10px; }
+    footer a:hover { color: #4af; text-decoration: none; }
+
+    @media (max-width: 600px) {
+      .doc h1 { font-size: 1.6rem; }
+      nav.top .links a { margin-left: 12px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <nav class="top">
+      <a href="/" class="brand">instanode.dev</a>
+      <div class="links">
+        <a href="/pricing.html">Pricing</a>
+        <a href="/privacy.html">Privacy</a>
+        <a href="/terms.html">Terms</a>
+      </div>
+    </nav>
+
+    <div class="doc">
+      <h1>Privacy Policy</h1>
+      <div class="updated">Last updated: 2026-04-18</div>
+
+      <p>This is a plain-English privacy policy for <strong>instanode.dev</strong>, a developer tool that provisions ephemeral Postgres databases, Redis caches, and webhook receivers via HTTPS. It is operated by a solo founder as a sole proprietorship based in India.</p>
+
+      <h2>What we collect</h2>
+      <ul>
+        <li><strong>Email address</strong> — only if you sign in. We use GitHub OAuth (<code>client_id Ov23li1CzSDf0s5c1zI9</code>) to read your primary email. Nothing else from your GitHub profile.</li>
+        <li><strong>Payment identifiers</strong> — Razorpay order IDs, subscription IDs, and payment IDs. We never see or store card numbers, CVVs, or bank details. Those live with Razorpay.</li>
+        <li><strong>Provisioning fingerprint</strong> — a SHA-256 hash of your IP's <code>/24</code> subnet (or <code>/48</code> for IPv6) plus the network ASN. We use this only to rate-limit free-tier abuse (5 provisions/day). We do not store raw IPs against your account.</li>
+        <li><strong>Resource connection logs</strong> — query timing, error rates, connection counts on databases we provision for you. Used for debugging and enforcing tier limits. We do not read the contents of your tables, keys, or webhook payloads.</li>
+        <li><strong>Session cookie</strong> — a JWT used to keep you logged in. Expires when you log out or when the token expires.</li>
+      </ul>
+
+      <h2>What we do not collect</h2>
+      <ul>
+        <li>No third-party analytics. No Google Analytics, no Mixpanel, no Segment, no ad pixels.</li>
+        <li>No tracking cookies. The only cookie is your auth session.</li>
+        <li>No data inside your provisioned databases. It's yours. We can see that storage is used, not what's in it.</li>
+      </ul>
+
+      <h2>Where it lives</h2>
+      <p>All infrastructure runs on <strong>DigitalOcean NYC1</strong> (US-East). Data at rest is encrypted via DigitalOcean block storage encryption. Connections to <code>pg.instanode.dev</code> and the API use TLS with certificates issued by Let's Encrypt.</p>
+
+      <h2>Retention</h2>
+      <ul>
+        <li><strong>Anonymous resources</strong> — deleted automatically 24 hours after creation, along with their logs.</li>
+        <li><strong>Claimed (Developer tier) resources</strong> — kept until you delete them or cancel your subscription. After cancellation, resources are retained for 7 days so you can export, then permanently deleted.</li>
+        <li><strong>Account records</strong> — your email and billing references are kept while your account exists, and for up to 12 months after closure for tax and fraud-prevention purposes required by Indian law.</li>
+      </ul>
+
+      <h2>Sub-processors</h2>
+      <p>These are the third parties who touch your data on our behalf:</p>
+      <ul>
+        <li><strong>DigitalOcean</strong> — hosting, block storage, managed databases.</li>
+        <li><strong>Razorpay</strong> — payment processing. Subject to their privacy terms.</li>
+        <li><strong>GitHub</strong> — OAuth login only.</li>
+        <li><strong>Let's Encrypt</strong> — TLS certificate issuance.</li>
+        <li><strong>New Relic</strong> — server performance metrics (if enabled; no user data is forwarded, only aggregate request timings).</li>
+      </ul>
+
+      <h2>Your rights</h2>
+      <p>Under GDPR and comparable laws, you can request: access to the data we hold about you, correction of it, and deletion of it ("right to be forgotten"). Email <a href="mailto:admin@instanode.dev">admin@instanode.dev</a> and we'll action it within 30 days. Deletion of your account also deletes all resources, logs, and fingerprints associated with it.</p>
+
+      <h2>Security</h2>
+      <p>TLS everywhere. AES-256-GCM encryption on stored connection strings. Block-storage encryption at rest. We do not claim SOC 2, ISO 27001, or HIPAA compliance — this is a small operation and we will not pretend otherwise.</p>
+
+      <h2>Changes</h2>
+      <p>If this policy changes materially, we'll update the date at the top and notify signed-in users by email before the change takes effect.</p>
+
+      <h2>Contact</h2>
+      <p>Questions, deletion requests, or anything else: <a href="mailto:admin@instanode.dev">admin@instanode.dev</a>.</p>
+    </div>
+
+    <footer>
+      <a href="/">Home</a>
+      <a href="/pricing.html">Pricing</a>
+      <a href="/privacy.html">Privacy</a>
+      <a href="/terms.html">Terms</a>
+      <p style="margin-top:12px;">instanode.dev</p>
+    </footer>
+  </div>
+</body>
+</html>

@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Terms of Service - InstaNode</title>
+  <meta name="description" content="Terms for using instanode.dev. Plain English, no enterprise legalese.">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #0a0a0a;
+      color: #e0e0e0;
+      line-height: 1.7;
+      min-height: 100vh;
+    }
+    a { color: #4af; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    .container { max-width: 720px; margin: 0 auto; padding: 0 20px; }
+
+    nav.top {
+      padding: 20px 0;
+      border-bottom: 1px solid #1a1a1a;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 0.9rem;
+    }
+    nav.top .brand { color: #fff; font-weight: 700; letter-spacing: -0.01em; }
+    nav.top .links a { color: #888; margin-left: 18px; }
+    nav.top .links a:hover { color: #4af; text-decoration: none; }
+
+    .doc { padding: 48px 0 32px; }
+    .doc h1 {
+      font-size: 2rem;
+      color: #fff;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      margin-bottom: 8px;
+    }
+    .doc .updated {
+      color: #666;
+      font-size: 0.85rem;
+      margin-bottom: 32px;
+    }
+    .doc h2 {
+      font-size: 1.15rem;
+      color: #fff;
+      margin-top: 32px;
+      margin-bottom: 10px;
+      letter-spacing: -0.01em;
+    }
+    .doc p, .doc li {
+      color: #c8c8c8;
+      font-size: 0.95rem;
+      margin-bottom: 12px;
+    }
+    .doc ul { padding-left: 20px; margin-bottom: 12px; }
+    .doc ul li { margin-bottom: 6px; }
+    .doc code {
+      font-family: "SF Mono", "Fira Code", monospace;
+      font-size: 0.85rem;
+      color: #6bf;
+      background: #111;
+      padding: 2px 6px;
+      border-radius: 3px;
+    }
+    .doc strong { color: #fff; }
+
+    footer {
+      border-top: 1px solid #1a1a1a;
+      padding: 24px 0;
+      text-align: center;
+      color: #444;
+      font-size: 0.8rem;
+      margin-top: 40px;
+    }
+    footer a { color: #666; margin: 0 10px; }
+    footer a:hover { color: #4af; text-decoration: none; }
+
+    @media (max-width: 600px) {
+      .doc h1 { font-size: 1.6rem; }
+      nav.top .links a { margin-left: 12px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <nav class="top">
+      <a href="/" class="brand">instanode.dev</a>
+      <div class="links">
+        <a href="/pricing.html">Pricing</a>
+        <a href="/privacy.html">Privacy</a>
+        <a href="/terms.html">Terms</a>
+      </div>
+    </nav>
+
+    <div class="doc">
+      <h1>Terms of Service</h1>
+      <div class="updated">Last updated: 2026-04-18</div>
+
+      <p>These terms apply to your use of <strong>instanode.dev</strong> ("the Service"), operated by a solo founder as a sole proprietorship based in India. By calling the API or signing in, you agree to them.</p>
+
+      <h2>What the Service does</h2>
+      <p>We provision real Postgres databases, Redis caches, and webhook receivers on demand via a simple HTTPS API. Resources are isolated per-token and return a connection string you can use from any standard client.</p>
+
+      <h2>Free tier</h2>
+      <ul>
+        <li>No account required.</li>
+        <li>Up to <strong>5 provisions per day</strong> per network fingerprint.</li>
+        <li>Resources <strong>expire after 24 hours</strong>, along with their data.</li>
+        <li>Postgres: 10 MB storage, 2 connections. Redis: 5 MB. Webhooks: 100 stored.</li>
+        <li>Best-effort availability. No uptime guarantee.</li>
+      </ul>
+
+      <h2>Developer tier — $12/month</h2>
+      <ul>
+        <li>Billed monthly in advance via Razorpay. Auto-renews until cancelled.</li>
+        <li>Resources persist until you delete them or cancel.</li>
+        <li>Cancel anytime from the dashboard. Cancellation stops the next renewal; current period remains active.</li>
+        <li>Higher quotas — see <a href="/pricing.html">pricing</a> for exact limits.</li>
+      </ul>
+
+      <h2>Refunds</h2>
+      <p>If the Service fails to deliver (e.g. prolonged outage, inability to provision) within 7 days of a charge, email <a href="mailto:admin@instanode.dev">admin@instanode.dev</a> for a <strong>pro-rata refund</strong>. We will not refund charges for resources that were provisioned and then deleted by you, or for billing periods where the Service was generally available.</p>
+
+      <h2>Acceptable use</h2>
+      <p>Don't use provisioned resources for:</p>
+      <ul>
+        <li>Cryptocurrency mining or any sustained compute-abuse workloads.</li>
+        <li>Launching DDoS, port-scanning, or other attacks against third parties.</li>
+        <li>Storing or distributing illegal content, malware, CSAM, or content that infringes others' rights.</li>
+        <li>Spamming, phishing, or any unsolicited bulk communication infrastructure.</li>
+        <li>Sustained CPU, disk I/O, or network usage substantially beyond your tier — we reserve the right to throttle or suspend resources that degrade shared infrastructure.</li>
+      </ul>
+
+      <h2>Suspension and termination</h2>
+      <p>We may suspend or terminate your access, with or without notice, for violations of the acceptable-use rules, non-payment, or fraud. We'll refund any unused prepaid balance on termination unless the termination is for abuse.</p>
+      <p>You can terminate your account at any time by deleting it from the dashboard or emailing <a href="mailto:admin@instanode.dev">admin@instanode.dev</a>.</p>
+
+      <h2>Warranty and liability</h2>
+      <p>The Service is provided <strong>"AS IS"</strong>, without warranties of any kind — express or implied — including merchantability, fitness for a particular purpose, or non-infringement. We do not guarantee uptime, durability, or freedom from errors beyond a best-effort level.</p>
+      <p>To the maximum extent permitted by law, our total liability for any claim arising out of or relating to these terms is capped at the amount you paid us in the <strong>12 months preceding the event</strong> giving rise to the claim. We are not liable for indirect, incidental, consequential, or lost-profits damages.</p>
+      <p>You are responsible for backing up data that matters to you. Ephemeral resources will be deleted on schedule and we cannot recover them.</p>
+
+      <h2>Changes</h2>
+      <p>We may update these terms. Material changes will be announced on this page (and by email to paid users) at least 14 days before they take effect. Continued use after the effective date means you accept the changes.</p>
+
+      <h2>Governing law</h2>
+      <p>These terms are governed by the laws of India. Any disputes will be resolved exclusively in the courts of India.</p>
+
+      <h2>Contact</h2>
+      <p>Email <a href="mailto:admin@instanode.dev">admin@instanode.dev</a> for anything — billing, abuse reports, termination, legal notices.</p>
+    </div>
+
+    <footer>
+      <a href="/">Home</a>
+      <a href="/pricing.html">Pricing</a>
+      <a href="/privacy.html">Privacy</a>
+      <a href="/terms.html">Terms</a>
+      <p style="margin-top:12px;">instanode.dev</p>
+    </footer>
+  </div>
+</body>
+</html>
