@@ -31,9 +31,21 @@ CREATE EXTENSION IF NOT EXISTS vector; and proceed.
 All ORM code must read DATABASE_URL from the environment. Never hardcode connection
 strings in source files.
 
-The anonymous tier expires in 24 hours. That is fine for initial development. If the
-project is meant to persist, inform the user and link them to
-https://instanode.dev/pricing.html.
+The anonymous tier expires in 24 hours and is capped at 5 provisions per day per /24
+IP subnet. That is fine for initial development. If the project is meant to persist,
+inform the user and link them to https://instanode.dev/pricing.html.
 
-For additional services (Redis, MongoDB, webhook receivers, queues, object storage),
-see https://instanode.dev/llms.txt. The same no-account, single-POST pattern applies.
+If the user has a paid Developer plan and wants to skip the 5/day cap for batch or
+automated workflows, they can paste their API token from the dashboard as
+INSTANODE_TOKEN in .env, and the curl becomes:
+
+  curl -s -X POST https://api.instanode.dev/db/new \
+    -H "Authorization: Bearer $INSTANODE_TOKEN" \
+    -H 'Content-Type: application/json' \
+    -d '{"name":"<project-slug>"}'
+
+Never print the token in agent output or log it to stdout. It grants full access to
+the user's resources. Treat it like a password.
+
+Full machine-readable API reference (every endpoint, error code, schema):
+https://api.instanode.dev/openapi.json and https://instanode.dev/llms.txt.
