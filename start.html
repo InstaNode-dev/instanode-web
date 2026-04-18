@@ -44,10 +44,12 @@
   <div class="container">
     <h1>Claim Your Database</h1>
     <p>Your database is ready! Sign in with GitHub to access it.</p>
-    <a href="/auth/github/login" class="btn">Login with GitHub</a>
+    <a id="login-btn" href="https://api.instanode.dev/auth/github/login" class="btn">Login with GitHub</a>
   </div>
   <script>
-    // Store token from URL
+    // Carry any ?token= through the OAuth round trip — backend currently
+    // ignores the param, but localStorage lets the dashboard pick it up
+    // post-login and auto-migrate via POST /billing/migrate.
     const urlParams = new URLSearchParams(window.location.search);
     const token = urlParams.get('token');
     if (token) {
