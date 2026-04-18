@@ -15,13 +15,13 @@
       min-height: 100vh;
     }
 
-    :focus:not(:focus-visible) { outline: none; }
+    :focus { outline: none; }
     :focus-visible {
       outline: 2px solid #4af;
       outline-offset: 2px;
-      border-radius: 4px;
     }
     .copy-btn:focus-visible { outline-offset: 4px; }
+    a:focus-visible, .top-nav-links a.login:focus-visible { outline-offset: 3px; }
 
     .container { max-width: 640px; margin: 0 auto; padding: 0 20px; }
 
