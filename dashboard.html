@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Dashboard - InstaNode</title>
-  <meta name="description" content="Your provisioned databases, caches, and webhooks on instanode.dev.">
+  <meta name="description" content="Your provisioned databases and webhooks on instanode.dev.">
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #0a0a0a; color: #e0e0e0; line-height: 1.6; min-height: 100vh; }
@@ -131,23 +131,21 @@
       var prefix = r.key_prefix || (r.token ? String(r.token).slice(0, 8) : 'xxxxxxxx');
       var type = (r.resource_type || r.type || '').toLowerCase();
       if (type === 'postgres') return 'postgres://usr_' + prefix + ':password@pg.instanode.dev:5432/db_' + prefix;
-      if (type === 'redis' || type === 'cache') return 'redis://usr_' + prefix + ':password@redis.instanode.dev:6379';
       if (type === 'webhook') return API + '/webhook/' + (r.token || prefix);
       return '';
     }
     function typeLabel(t) {
       var s = (t || '').toLowerCase();
       if (s === 'postgres') return 'Postgres';
-      if (s === 'redis' || s === 'cache') return 'Redis';
       if (s === 'webhook') return 'Webhook';
       return t || 'Resource';
     }
-    function groupKey(t) { var s = (t || '').toLowerCase(); return s === 'cache' ? 'redis' : (s || 'other'); }
+    function groupKey(t) { var s = (t || '').toLowerCase(); return s || 'other'; }
     function expires(r) { return r.expires_at ? relTime(r.expires_at, 'permanent') : 'permanent'; }
 
     function renderCard(r) {
       var type = (r.resource_type || r.type || '').toLowerCase();
-      var badge = (type === 'postgres' || type === 'redis' || type === 'webhook') ? type : 'other';
+      var badge = (type === 'postgres' || type === 'webhook') ? type : 'other';
       var url = buildUrl(r);
       var id = esc(r.id || r.token || '');
       var statusClass = esc((r.status || '').toLowerCase());
@@ -228,7 +226,7 @@
         var k = groupKey(r.resource_type || r.type);
         (groups[k] = groups[k] || []).push(r);
       });
-      var order = ['postgres', 'redis', 'webhook'];
+      var order = ['postgres', 'webhook'];
       var keys = Object.keys(groups).sort(function (a, b) {
         var ai = order.indexOf(a), bi = order.indexOf(b);
         return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
