@@ -24,6 +24,15 @@
     .copy-btn:focus-visible { outline-offset: 4px; }
     a:focus-visible, .top-nav-links a.login:focus-visible { outline-offset: 3px; }
 
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+      }
+    }
+
     .container { max-width: 640px; margin: 0 auto; padding: 0 20px; }
 
     /* ── Top nav ── */
@@ -114,10 +123,11 @@
       cursor: pointer;
       font-family: inherit;
       font-weight: 700;
-      transition: all 0.15s ease;
+      transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
       box-shadow: 0 10px 30px rgba(74, 175, 255, 0.18);
       letter-spacing: 0.02em;
     }
+    .copy-btn:active { transform: translateY(1px); }
     .copy-btn:hover { background: #66bfff; border-color: #66bfff; }
     .copy-btn.copied { background: #4a4; border-color: #4a4; color: #e6ffe6; }
     .prompt-code {
@@ -352,9 +362,9 @@
       border: 1px solid #222;
       border-radius: 8px;
       padding: 20px;
-      transition: all 0.15s;
+      transition: border-color 0.15s ease, transform 0.15s ease;
     }
-    .article-item:hover { border-color: #4af; }
+    .article-item:hover { border-color: #4af; transform: translateY(-2px); }
     .article-item h3 {
       font-size: 1rem;
       color: #fff;
