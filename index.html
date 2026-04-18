@@ -80,7 +80,10 @@
       line-height: 1.7;
       overflow-x: auto;
       white-space: pre;
+      cursor: pointer;
+      transition: background 0.15s;
     }
+    .prompt-code:hover { background: #0d0d0d; }
     .prompt-code .cm { color: #555; }
     .prompt-code .cmd { color: #ccc; }
     .prompt-code .url { color: #6bf; }
@@ -342,10 +345,9 @@
     <!-- THE PROMPT — the one thing visitors need to copy -->
     <div class="prompt">
       <div class="prompt-header">
-        <span class="prompt-label">Copy setup instructions for my agent</span>
-        <button class="copy-btn" id="copyBtn" onclick="copyPrompt()">Copy</button>
+        <span class="prompt-label">Click to copy setup instructions for my agent</span>
       </div>
-      <div class="prompt-code" id="promptCode"><span class="cmd">curl</span> <span class="url">-s -X POST https://instanode.dev/db/new</span> <span class="cmd">| jq</span></div>
+      <div class="prompt-code" id="promptCode" onclick="copyPrompt()"><span class="cmd">curl</span> <span class="url">-s -X POST https://instanode.dev/db/new</span> <span class="cmd">| jq</span></div>
       <p style="font-size: 0.75rem; color: #666; margin-top: 8px; text-align: center;">For detailed API documentation and examples, see <a href="/llms.txt" style="color: #4af;">/llms.txt</a></p>
     </div>
 
@@ -533,10 +535,9 @@
     function copyPrompt() {
       const text = 'curl -s -X POST ' + API + '/db/new | jq';
       navigator.clipboard.writeText(text).then(() => {
-        const btn = document.getElementById('copyBtn');
-        btn.textContent = 'Copied!';
-        btn.classList.add('copied');
-        setTimeout(() => { btn.textContent = 'Copy'; btn.classList.remove('copied'); }, 2000);
+        const label = document.querySelector('.prompt-label');
+        label.textContent = 'Copied! Now paste into your agent';
+        setTimeout(() => { label.textContent = 'Click to copy setup instructions for my agent'; }, 2000);
       });
     }
 
