@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>About — instanode.dev</title>
+  <meta name="description" content="instanode.dev — built so AI coding agents can give themselves a database in one HTTP call. Solo-founded. Boring stack. Run at minimum viable cost.">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html { color-scheme: dark; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #0a0a0a; color: #e0e0e0; line-height: 1.7; min-height: 100vh; padding: 0 20px 60px; }
+    :focus { outline: none; }
+    :focus-visible { outline: 2px solid #4af; outline-offset: 2px; }
+
+    .container { max-width: 720px; margin: 0 auto; }
+
+    .top-nav { display: flex; align-items: center; justify-content: space-between; padding: 18px 0; border-bottom: 1px solid #1a1a1a; margin-bottom: 40px; }
+    .top-nav .brand { color: #fff; font-weight: 600; text-decoration: none; padding: 10px 0; }
+    .top-nav-links { display: flex; gap: 8px; align-items: center; }
+    .top-nav-links a { color: #888; text-decoration: none; font-size: 0.92rem; padding: 10px 12px; display: inline-flex; align-items: center; min-height: 44px; }
+    .top-nav-links a:hover { color: #fff; }
+    .top-nav-links a[aria-current="page"] { color: #fff; }
+    .top-nav-links a.login { background: #4af; color: #060a14; padding: 10px 18px; border-radius: 6px; font-weight: 500; }
+    .top-nav-links a.login:hover { background: #66bfff; }
+
+    h1 { font-size: 2rem; color: #fff; letter-spacing: -0.02em; margin-bottom: 10px; }
+    h1 + .lede { color: #a0a0a0; font-size: 1.05rem; margin-bottom: 40px; }
+
+    h2 { font-size: 1.1rem; color: #fff; margin: 36px 0 10px; letter-spacing: -0.01em; }
+    p { color: #cfcfcf; margin-bottom: 16px; }
+    p.meta { color: #888; font-size: 0.92rem; }
+    ul { margin: 0 0 16px 20px; color: #cfcfcf; }
+    ul li { margin-bottom: 6px; }
+    code { background: #111; border: 1px solid #1a1a1a; padding: 1px 6px; border-radius: 4px; color: #adf; font-family: "SF Mono", "Fira Code", monospace; font-size: 0.88em; }
+    a { color: #4af; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    .quote { border-left: 3px solid #2a4a6a; padding: 8px 0 8px 16px; margin: 20px 0; color: #cfdce9; font-style: italic; background: rgba(74, 175, 255, 0.03); }
+
+    footer.site { border-top: 1px solid #1a1a1a; padding: 24px 0; margin-top: 56px; text-align: center; color: #444; font-size: 0.82rem; }
+    footer.site a { color: #666; margin: 0 10px; }
+    footer.site a:hover { color: #4af; text-decoration: none; }
+
+    @media (max-width: 480px) {
+      h1 { font-size: 1.6rem; }
+      .top-nav-links { gap: 2px; }
+      .top-nav-links a { padding: 10px 8px; font-size: 0.85rem; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <nav class="top-nav">
+      <a href="/" class="brand">instanode.dev</a>
+      <div class="top-nav-links">
+        <a href="/about.html" aria-current="page">About</a>
+        <a href="/pricing.html">Pricing</a>
+        <a href="/agent.html">For Agents</a>
+        <a href="/dashboard.html" data-auth="in" hidden>Dashboard</a>
+        <a class="login" href="https://api.instanode.dev/auth/github/login" data-auth="out">Sign in</a>
+      </div>
+    </nav>
+
+    <h1>Why instanode.dev exists</h1>
+    <p class="lede">AI coding agents stall the moment they hit "I need a database." instanode.dev removes that stall. One HTTP call, one <code>postgres://</code> URL back, agent keeps going.</p>
+
+    <div class="quote">
+      "Use instanode.dev to get a Postgres database. Run <code>curl -s -X POST https://api.instanode.dev/db/new -H 'Content-Type: application/json' -d '{&quot;name&quot;:&quot;demo&quot;}' | jq</code> and use the connection_url from the response."
+      <br><br>
+      That prompt, pasted into any modern coding agent, is the whole product.
+    </div>
+
+    <h2>The problem</h2>
+    <p>When an agent is writing code with you and needs a database, it does one of three bad things:</p>
+    <ul>
+      <li>Asks you to <code>docker run postgres</code> — fine if you have Docker, broken otherwise, and permanent context clutter either way.</li>
+      <li>Tells you to sign up for Neon/Supabase/Railway — three minutes of browser work that wipes the flow state.</li>
+      <li>Writes the code against <code>process.env.DATABASE_URL</code> and hopes you'll figure it out later — the code doesn't run.</li>
+    </ul>
+    <p>None of these are the agent's fault. They're the fault of infrastructure tools that assume a human is in the loop.</p>
+
+    <h2>The solution</h2>
+    <p>A Postgres provisioner that speaks HTTP, requires zero authentication for the first call, and returns a real, working connection URL. Free tier is 24-hour disposable. Paid tier is $12/month and the database persists forever.</p>
+    <p>pgvector is pre-installed on every database. Connection URLs are standard <code>postgres://user:pass@pg.instanode.dev:5432/db?sslmode=require</code> — any driver works, no proprietary client.</p>
+
+    <h2>Built for agents, not dashboards</h2>
+    <ul>
+      <li><a href="/agent.html">Drop-in <code>CLAUDE.md</code> / <code>.cursorrules</code></a> so agents learn the pattern and propagate it to future projects.</li>
+      <li><a href="/llms.txt">/llms.txt</a> — plain-text API summary, shape designed for LLM ingestion.</li>
+      <li><a href="https://api.instanode.dev/openapi.json">OpenAPI 3.1 spec</a> — every endpoint, every error code, every schema, machine-readable.</li>
+      <li>MCP server — native tools for Claude Code, Cursor, Windsurf, Continue:<br><code>claude mcp add instanode -- npx -y @instanode/mcp@latest</code> (<a href="https://www.npmjs.com/package/@instanode/mcp">npm</a> · <a href="https://github.com/InstaNode-dev/mcp">source</a>)</li>
+      <li>Python SDK — <code>pip install instanode</code> (<a href="https://pypi.org/project/instanode/">PyPI</a>)</li>
+      <li>Framework adapters — plain tool classes for the 3 common agent frameworks:<br>
+        <code>pip install langchain-instanode</code> (<a href="https://pypi.org/project/langchain-instanode/">PyPI</a>)<br>
+        <code>pip install llama-index-tools-instanode</code> (<a href="https://pypi.org/project/llama-index-tools-instanode/">PyPI</a>)<br>
+        <code>pip install crewai-instanode-tools</code> (<a href="https://pypi.org/project/crewai-instanode-tools/">PyPI</a>)
+      </li>
+      <li>Next.js starter — <a href="https://github.com/InstaNode-dev/instanode-nextjs-starter">InstaNode-dev/instanode-nextjs-starter</a> — clone, run <code>./scripts/setup-db.sh</code>, <code>pnpm dev</code>.</li>
+    </ul>
+
+    <footer class="site">
+      <a href="/">Home</a>
+      <a href="/pricing.html">Pricing</a>
+      <a href="/agent.html">For Agents</a>
+      <a href="/privacy.html">Privacy</a>
+      <a href="/terms.html">Terms</a>
+      <p style="margin-top:12px;">instanode.dev</p>
+    </footer>
+  </div>
+
+  <script>
+    // Toggle nav based on session (same pattern as other pages).
+    fetch('https://api.instanode.dev/auth/me', { credentials: 'include' }).then(function (res) {
+      var signedIn = res.ok;
+      document.querySelectorAll('[data-auth="in"]').forEach(function (el) {
+        if (signedIn) el.removeAttribute('hidden'); else el.setAttribute('hidden', '');
+      });
+      document.querySelectorAll('[data-auth="out"]').forEach(function (el) {
+        if (!signedIn) el.removeAttribute('hidden'); else el.setAttribute('hidden', '');
+      });
+    }).catch(function () {});
+  </script>
+</body>
+</html>
