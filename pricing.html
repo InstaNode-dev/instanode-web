@@ -248,8 +248,8 @@
           <li>1000 webhook requests stored</li>
           <li>Email support</li>
         </ul>
-        <button class="btn secondary js-upgrade" type="button" data-plan="developer" data-label="Upgrade to $12/mo">Upgrade to $12/mo</button>
-        <div class="msg" role="status" aria-live="polite" data-msg-for="developer"></div>
+        <button class="btn secondary js-upgrade" type="button" data-plan="monthly" data-label="Subscribe — $12/mo">Subscribe — $12/mo</button>
+        <div class="msg" role="status" aria-live="polite" data-msg-for="monthly"></div>
       </div>
 
       <div class="plan featured" role="region" aria-label="Developer annual plan">
@@ -266,8 +266,8 @@
           <li>One annual invoice</li>
           <li>Priority support</li>
         </ul>
-        <button class="btn js-upgrade" type="button" data-plan="developer-annual" data-label="Upgrade to $120/yr">Upgrade to $120/yr</button>
-        <div class="msg" role="status" aria-live="polite" data-msg-for="developer-annual"></div>
+        <button class="btn js-upgrade" type="button" data-plan="annual" data-label="Subscribe — $120/yr">Subscribe — $120/yr</button>
+        <div class="msg" role="status" aria-live="polite" data-msg-for="annual"></div>
       </div>
     </div>
 
@@ -325,8 +325,8 @@
         setTimeout(function () { toastEl.classList.remove('show'); }, 3500);
       }
 
-      function describePlan(planID) {
-        if (planID === 'developer-annual') return 'Developer plan – $120/year';
+      function describePlan(plan) {
+        if (plan === 'annual') return 'Developer plan – $120/year';
         return 'Developer plan – $12/month';
       }
 
@@ -336,16 +336,16 @@
           return;
         }
 
-        var planID = btn.dataset.plan;
+        var plan = btn.dataset.plan;
         var resetLabel = btn.dataset.label;
         btn.disabled = true;
         btn.textContent = 'Preparing checkout…';
-        clearMsg(planID);
+        clearMsg(plan);
 
-        var body = { plan_id: planID, currency: 'USD' };
+        var body = { plan: plan };
         if (resourceToken) body.token = resourceToken;
 
-        fetch(API_BASE + '/billing/create-order', {
+        fetch(API_BASE + '/billing/create-subscription', {
           method: 'POST',
           credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
@@ -374,22 +374,14 @@
             }
             return res.json();
           })
-          .then(function (order) {
-            if (!order) return; // redirected on 401
+          .then(function (sub) {
+            if (!sub) return; // redirected on 401
             var options = {
-              key: order.key_id,
-              amount: order.amount,
-              currency: order.currency,
-              order_id: order.order_id,
+              key: sub.key_id,
+              subscription_id: sub.subscription_id,
               name: 'InstaNode',
-              description: describePlan(planID),
-              prefill: {
-                name: order.name || '',
-                email: order.email || '',
-                contact: order.contact || ''
-              },
+              description: describePlan(plan),
               theme: { color: '#4af' },
-              notes: resourceToken ? { token: resourceToken } : undefined,
               handler: function () {
                 window.location.href = '/dashboard?upgraded=1';
               },
@@ -405,16 +397,12 @@
             rzp.on('payment.failed', function (resp) {
               btn.disabled = false;
               btn.textContent = resetLabel;
-              // Razorpay's resp.error.description is gateway-controlled text.
-              // Only surface it when it's a short, human-ish string; otherwise
-              // fall back to a generic message so we never paint long SDK
-              // stack traces or vendor error codes into the UI.
               var raw = resp && resp.error && (resp.error.description || resp.error.reason);
               var safe = '';
               if (typeof raw === 'string' && raw.length > 0 && raw.length <= 140) {
                 safe = raw;
               }
-              showMsg(planID, 'error', safe
+              showMsg(plan, 'error', safe
                 ? (safe + ' Please try again.')
                 : 'Payment failed. Please try a different card or retry in a moment.');
             });
@@ -423,14 +411,10 @@
           .catch(function (err) {
             btn.disabled = false;
             btn.textContent = resetLabel;
-            // err.friendly === true means the message came from our own API
-            // via a safe `message` field. Anything else (network failure,
-            // browser block) we render as a generic retry prompt so we
-            // never paint stack traces or CORS strings at the user.
             var text = (err && err.friendly && err.message)
               ? err.message
               : 'Could not reach the checkout service. Please check your connection and retry.';
-            showMsg(planID, 'error', text);
+            showMsg(plan, 'error', text);
           });
       }
 

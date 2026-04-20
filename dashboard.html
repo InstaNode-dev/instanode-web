@@ -338,13 +338,35 @@
     function renderBanner(list) {
       var label = planLabel(currentUser);
       if (label) {
-        $banner.innerHTML = '<div class="banner paid"><span><strong>' + label.line + '</strong>' + nextRenewal(currentUser) + '</span><a href="/pricing.html">Manage plan</a></div>';
+        var status = (currentUser && currentUser.subscription_status) || '';
+        var action = (status === 'active')
+          ? '<a href="#" class="js-cancel-sub">Cancel subscription</a>'
+          : '<a href="/pricing.html">Manage plan</a>';
+        $banner.innerHTML = '<div class="banner paid"><span><strong>' + label.line + '</strong>' + nextRenewal(currentUser) + '</span>' + action + '</div>';
+        var cancelLink = $banner.querySelector('.js-cancel-sub');
+        if (cancelLink) cancelLink.addEventListener('click', cancelSubscription);
         return;
       }
       var hasPaid = Array.isArray(list) && list.some(function (r) { return (r.tier || '').toLowerCase() === 'paid'; });
       $banner.innerHTML = hasPaid
         ? '<div class="banner paid"><span><strong>Developer Plan</strong> · resources are permanent.</span><a href="/pricing.html">Manage plan</a></div>'
         : '<div class="banner free"><span><strong>Free tier</strong> · resources expire in 24h.</span><a href="/pricing.html">Upgrade →</a></div>';
+    }
+
+    function cancelSubscription(e) {
+      if (e) e.preventDefault();
+      if (!confirm('Cancel subscription? You\'ll keep paid access until the end of the current billing period.')) return;
+      fetch(API + '/billing/cancel-subscription', { method: 'POST', credentials: 'include' })
+        .then(function (res) { return res.json().then(function (b) { return { ok: res.ok, body: b }; }); })
+        .then(function (r) {
+          if (r.ok) {
+            alert('Subscription cancelled. You keep paid access until the current period ends.');
+            window.location.reload();
+          } else {
+            alert((r.body && r.body.message) || 'Could not cancel right now. Please retry in a moment.');
+          }
+        })
+        .catch(function () { alert('Could not reach the billing service. Please retry.'); });
     }
 
     function renderResources(list) {
