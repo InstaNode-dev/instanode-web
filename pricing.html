@@ -454,6 +454,32 @@
       document.querySelectorAll('.js-upgrade').forEach(function (btn) {
         btn.addEventListener('click', function () { startCheckout(btn); });
       });
+
+      // If the caller is already on a live subscription, lock the upgrade
+      // buttons and point them at the dashboard — we don't want two
+      // subscriptions on one account (backend also 409s, but failing in
+      // the UI is clearer).
+      fetch(API_BASE + '/api/me/plan', { credentials: 'include' })
+        .then(function (res) { return res.ok ? res.json() : null; })
+        .then(function (plan) {
+          if (!plan) return;
+          var blocking = ['active', 'authenticated', 'pending', 'created'];
+          var st = (plan.subscription_status || '').toLowerCase();
+          if ((plan.plan_tier || '').toLowerCase() === 'paid' && blocking.indexOf(st) !== -1) {
+            document.querySelectorAll('.js-upgrade').forEach(function (btn) {
+              btn.disabled = true;
+              btn.textContent = 'You\'re already subscribed';
+              btn.style.cursor = 'not-allowed';
+              btn.style.opacity = '0.6';
+            });
+            var h = document.createElement('div');
+            h.setAttribute('style', 'background:rgba(29,74,32,0.15);border:1px solid #1d4a20;border-radius:8px;padding:14px 18px;margin:20px 0;color:#cfe8d0;font-size:0.9rem;text-align:center;');
+            h.innerHTML = 'You\'re on <strong>' + (plan.human_label || 'Developer') + '</strong>. <a href="/dashboard.html" style="color:#6bdf8e;font-weight:700;">Manage your plan →</a>';
+            var plans = document.querySelector('.plans') || document.querySelector('main') || document.body.firstElementChild;
+            if (plans && plans.parentNode) plans.parentNode.insertBefore(h, plans);
+          }
+        })
+        .catch(function () {});
     })();
 
     // Toggle nav items by auth state.
