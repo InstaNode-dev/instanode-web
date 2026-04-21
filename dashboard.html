@@ -411,6 +411,32 @@
         : (status === 'halted'
             ? 'Your card was declined. Update it and retry from the pricing page.'
             : 'Your plan is active. Resources are permanent.');
+
+      // Plan switch (monthly ↔ annual) is feature-flagged server-side, so the
+      // pending_plan_change / pending_plan_effective_at fields only appear on
+      // the payload when the flag is on. That gates the switch UI naturally —
+      // if the fields are absent, the trigger button stays hidden.
+      var pending = plan.pending_plan_change || '';
+      var effAt = plan.pending_plan_effective_at || '';
+      var switchEnabled = (typeof plan.pending_plan_change !== 'undefined');
+      var currentPeriod = (plan.plan_period || 'monthly').toLowerCase();
+
+      var rightSide = '';
+      if (pending) {
+        // A switch is already scheduled — show an inline "keep current plan"
+        // action that calls DELETE /billing/change-plan.
+        var effectiveDate = effAt ? (new Date(effAt)).toISOString().slice(0, 10) : '';
+        subText = 'Switch to ' + (pending === 'annual' ? 'Annual' : 'Monthly') +
+                  ' scheduled' + (effectiveDate ? ' for ' + effectiveDate : '') + '.';
+        rightSide = '<a href="#" id="cancel-switch-btn" class="small-btn">Keep current plan</a>';
+      } else if (switchEnabled && status === 'active') {
+        // Offer the opposite-period switch. Annual users see "Switch to monthly";
+        // monthly users see "Switch to annual — save 2 months".
+        var target = currentPeriod === 'annual' ? 'monthly' : 'annual';
+        var label  = target === 'annual' ? 'Switch to annual — save 2 months' : 'Switch to monthly';
+        rightSide = '<a href="#" id="change-plan-btn" data-target="' + target + '" class="small-btn">' + label + '</a>';
+      }
+
       $banner.innerHTML =
         '<div class="banner ' + variant + '">' +
           '<div>' +
@@ -418,7 +444,47 @@
             '<div class="plan-line">' + (plan.human_label || '—') + '</div>' +
             '<div class="plan-sub">' + subText + '</div>' +
           '</div>' +
+          (rightSide ? '<div>' + rightSide + '</div>' : '') +
         '</div>';
+
+      var switchBtn = document.getElementById('change-plan-btn');
+      if (switchBtn) switchBtn.addEventListener('click', onChangePlanClick);
+      var cancelBtn = document.getElementById('cancel-switch-btn');
+      if (cancelBtn) cancelBtn.addEventListener('click', onCancelSwitchClick);
+    }
+
+    function onChangePlanClick(e) {
+      e.preventDefault();
+      var target = e.currentTarget.getAttribute('data-target') || 'annual';
+      var human = target === 'annual' ? 'Annual ($120/yr)' : 'Monthly ($12/mo)';
+      if (!confirm('Schedule switch to ' + human + '? Takes effect at the end of your current billing period. No charge today.')) return;
+      fetch(API + '/billing/change-plan', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ to: target }),
+      })
+        .then(function (res) { return res.json().then(function (b) { return { ok: res.ok, body: b }; }); })
+        .then(function (r) {
+          if (r.ok) { loadPlan(); return; }
+          alert((r.body && r.body.message) || 'Could not schedule the switch. Please retry.');
+        })
+        .catch(function () { alert('Could not reach the billing service. Please retry.'); });
+    }
+
+    function onCancelSwitchClick(e) {
+      e.preventDefault();
+      if (!confirm('Cancel the scheduled plan switch? You\'ll stay on your current plan.')) return;
+      fetch(API + '/billing/change-plan', {
+        method: 'DELETE',
+        credentials: 'include',
+      })
+        .then(function (res) { return res.json().then(function (b) { return { ok: res.ok, body: b }; }); })
+        .then(function (r) {
+          if (r.ok) { loadPlan(); return; }
+          alert((r.body && r.body.message) || 'Could not cancel the switch. Please retry.');
+        })
+        .catch(function () { alert('Could not reach the billing service. Please retry.'); });
     }
 
     function loadPlan() {
