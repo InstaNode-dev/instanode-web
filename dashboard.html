@@ -20,10 +20,20 @@
     nav.top .email { color: #888; font-size: 0.85rem; }
     .ghost-btn { background: transparent; color: #888; border: 1px solid #222; padding: 6px 14px; border-radius: 6px; font-family: inherit; font-size: 0.82rem; cursor: pointer; transition: all 0.15s; }
     .ghost-btn:hover { border-color: #4af; color: #4af; }
-    .banner { margin: 24px 0; padding: 14px 18px; border-radius: 8px; border: 1px solid #222; background: #111; font-size: 0.9rem; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-    .banner.paid { border-color: #1d4a20; background: #0d1a0e; color: #cfe8d0; }
-    .banner.free { border-color: #2a2418; background: #141110; color: #d8c7a0; }
-    .banner a { color: #4af; font-weight: 600; }
+    .banner { margin: 24px 0; padding: 18px 20px; border-radius: 10px; border: 1px solid #222; background: #111; display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+    .banner .plan-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+    .banner .plan-tag { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.12em; padding: 3px 10px; border-radius: 999px; font-weight: 700; }
+    .banner .plan-line { font-size: 1rem; font-weight: 600; color: #fff; }
+    .banner .plan-sub { font-size: 0.82rem; color: #888; margin-top: 2px; }
+    .banner.paid { border-color: #1d4a20; background: #0d1a0e; }
+    .banner.paid .plan-tag { background: #1d4a20; color: #cfe8d0; }
+    .banner.free { border-color: #2a2418; background: #141110; }
+    .banner.free .plan-tag { background: #2a2418; color: #d8c7a0; }
+    .banner.warn { border-color: #4a1818; background: #1a0d0d; }
+    .banner.warn .plan-tag { background: #4a1818; color: #f8a; }
+    .banner a { color: #4af; font-weight: 600; font-size: 0.9rem; }
+    .banner .skeleton { width: 180px; height: 14px; border-radius: 4px; background: linear-gradient(90deg,#1a1a1a,#222,#1a1a1a); background-size:200% 100%; animation: shine 1.2s linear infinite; }
+    @keyframes shine { 0% {background-position: 0 0} 100% {background-position: -200% 0} }
     h1 { font-size: 1.5rem; color: #fff; font-weight: 700; letter-spacing: -0.02em; margin: 24px 0 4px; }
     .subtitle { color: #666; font-size: 0.85rem; margin-bottom: 20px; }
     .group { margin-bottom: 28px; }
@@ -47,6 +57,7 @@
     .small-btn.secondary { background: transparent; color: #888; border-color: #222; }
     .small-btn.secondary:hover { border-color: #4af; color: #4af; background: transparent; }
     .small-btn.copied { background: #4a4; border-color: #4a4; color: #e6ffe6; }
+    .small-btn.primary { padding: 8px 16px; font-size: 0.85rem; display: inline-flex; align-items: center; }
     .small-btn.danger { background: transparent; color: #f88; border: 1px solid #4a1818; }
     .small-btn.danger:hover:not(:disabled) { background: #2a1010; border-color: #6a2626; color: #fbb; }
     .upgrade-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 100; padding: 20px; }
@@ -335,23 +346,107 @@
       var next = new Date(paidAt.getTime() + days * 86400000);
       return ' · next renewal ' + next.toISOString().slice(0, 10);
     }
-    function renderBanner(list) {
-      var label = planLabel(currentUser);
-      if (label) {
-        var status = (currentUser && currentUser.subscription_status) || '';
-        var action = (status === 'active')
+    function renderBannerLoading() {
+      $banner.innerHTML = '<div class="banner"><div><div class="skeleton"></div></div><div class="skeleton" style="width:90px;"></div></div>';
+    }
+
+    // Show the proactive upgrade modal at most once per 24h per browser.
+    // Users who dismissed it recently don't see it again until the cool-down
+    // expires — avoids badgering every page load.
+    var UPGRADE_NAG_KEY = 'instanode_upgrade_nag_until';
+    function shouldNagUpgrade() {
+      try {
+        var until = parseInt(localStorage.getItem(UPGRADE_NAG_KEY) || '0', 10);
+        return !(until && Date.now() < until);
+      } catch (e) { return true; }
+    }
+    function snoozeUpgradeNag(hours) {
+      try { localStorage.setItem(UPGRADE_NAG_KEY, String(Date.now() + hours * 3600 * 1000)); } catch (e) {}
+    }
+    function showFreeTierUpgradeModal() {
+      if (!shouldNagUpgrade()) return;
+      if (document.querySelector('.free-nag-overlay')) return; // already open
+      var overlay = document.createElement('div');
+      overlay.className = 'upgrade-overlay free-nag-overlay';
+      overlay.innerHTML =
+        '<div class="upgrade-modal" role="dialog" aria-modal="true">' +
+        '  <h3>You\'re on the free tier</h3>' +
+        '  <p>Resources expire in 24 hours and you can provision at most 5 per day. Upgrade to <strong>Developer</strong> ($12/mo or $120/yr) for permanent resources, no rate caps, and priority support.</p>' +
+        '  <div class="upgrade-actions">' +
+        '    <button type="button" class="small-btn js-nag-snooze">Maybe later</button>' +
+        '    <a href="/pricing.html" class="small-btn primary">See plans →</a>' +
+        '  </div>' +
+        '</div>';
+      overlay.addEventListener('click', function (e) {
+        if (e.target === overlay) {
+          snoozeUpgradeNag(24);
+          overlay.remove();
+        }
+      });
+      overlay.querySelector('.js-nag-snooze').addEventListener('click', function () {
+        snoozeUpgradeNag(24);
+        overlay.remove();
+      });
+      document.body.appendChild(overlay);
+    }
+
+    function renderBannerFromPlan(plan) {
+      if (!plan) { $banner.innerHTML = ''; return; }
+      var tier = (plan.plan_tier || 'free').toLowerCase();
+      var status = (plan.subscription_status || '').toLowerCase();
+      var variant = 'free';
+      var tagText = 'FREE TIER';
+      var action = '<a href="/pricing.html">Subscribe →</a>';
+      var subText = 'Resources expire in 24 hours. Per-subnet cap: 5 provisions/day.';
+      if (tier === 'paid') {
+        variant = status === 'halted' ? 'warn' : 'paid';
+        tagText = status === 'halted' ? 'PAYMENT HALTED' : (status === 'cancelled' ? 'CANCELLING' : 'ACTIVE');
+        subText = status === 'cancelled'
+          ? 'Paid access continues until the current billing period ends.'
+          : (status === 'halted'
+              ? 'Your card was declined. Update it and retry from the pricing page.'
+              : 'Resources are permanent. Cancel anytime — access continues until period end.');
+        action = (status === 'active')
           ? '<a href="#" class="js-cancel-sub">Cancel subscription</a>'
           : '<a href="/pricing.html">Manage plan</a>';
-        $banner.innerHTML = '<div class="banner paid"><span><strong>' + label.line + '</strong>' + nextRenewal(currentUser) + '</span>' + action + '</div>';
-        var cancelLink = $banner.querySelector('.js-cancel-sub');
-        if (cancelLink) cancelLink.addEventListener('click', cancelSubscription);
-        return;
       }
-      var hasPaid = Array.isArray(list) && list.some(function (r) { return (r.tier || '').toLowerCase() === 'paid'; });
-      $banner.innerHTML = hasPaid
-        ? '<div class="banner paid"><span><strong>Developer Plan</strong> · resources are permanent.</span><a href="/pricing.html">Manage plan</a></div>'
-        : '<div class="banner free"><span><strong>Free tier</strong> · resources expire in 24h.</span><a href="/pricing.html">Upgrade →</a></div>';
+      $banner.innerHTML =
+        '<div class="banner ' + variant + '">' +
+          '<div>' +
+            '<div class="plan-head"><span class="plan-tag">' + tagText + '</span></div>' +
+            '<div class="plan-line">' + (plan.human_label || '—') + '</div>' +
+            '<div class="plan-sub">' + subText + '</div>' +
+          '</div>' +
+          '<div>' + action + '</div>' +
+        '</div>';
+      var cancelLink = $banner.querySelector('.js-cancel-sub');
+      if (cancelLink) cancelLink.addEventListener('click', cancelSubscription);
     }
+
+    function loadPlan() {
+      renderBannerLoading();
+      return fetch(API + '/api/me/plan', { credentials: 'include' })
+        .then(function (res) {
+          if (res.status === 401) { goStart(); return null; }
+          if (!res.ok) throw new Error('plan HTTP ' + res.status);
+          return res.json();
+        })
+        .then(function (plan) {
+          if (plan) {
+            renderBannerFromPlan(plan);
+            if ((plan.plan_tier || '').toLowerCase() !== 'paid') {
+              showFreeTierUpgradeModal();
+            }
+          }
+          return plan;
+        })
+        .catch(function () {
+          $banner.innerHTML = '<div class="banner warn"><div><strong>Could not load plan.</strong><div class="plan-sub">Refresh to retry.</div></div><a href="#" onclick="location.reload()">Retry</a></div>';
+        });
+    }
+
+    // Retained for any legacy caller; simply kicks off the plan fetch.
+    function renderBanner() { loadPlan(); }
 
     function cancelSubscription(e) {
       if (e) e.preventDefault();
@@ -396,8 +491,11 @@
       wireCards();
     }
 
-    function renderError() {
-      $content.innerHTML = '<div class="error">Failed to load resources &mdash; <button type="button" class="small-btn" id="retryBtn">Retry</button></div>';
+    function renderError(err) {
+      var detail = '';
+      if (err && err.name === 'AbortError') detail = ' (timed out after 10s)';
+      else if (err && err.message) detail = ' (' + err.message + ')';
+      $content.innerHTML = '<div class="error">Failed to load resources' + detail + ' &mdash; <button type="button" class="small-btn" id="retryBtn">Retry</button></div>';
       document.getElementById('retryBtn').addEventListener('click', loadResources);
     }
 
@@ -515,20 +613,23 @@
 
     function loadResources() {
       $content.innerHTML = '<p class="subtitle" style="text-align:center;padding:24px 0;">Loading resources&hellip;</p>';
-      fetch(API + '/api/me/resources', { credentials: 'include' })
+      // Hard 10s timeout so a stuck fetch never leaves the UI on "Loading…".
+      var controller = new AbortController();
+      var timer = setTimeout(function () { controller.abort(); }, 10000);
+      fetch(API + '/api/me/resources', { credentials: 'include', signal: controller.signal })
         .then(function (res) {
+          clearTimeout(timer);
           if (res.status === 401) { goStart(); return null; }
           if (!res.ok) throw new Error('HTTP ' + res.status);
           return res.json();
         })
         .then(function (data) {
           if (data === null) return;
-          // Accept raw array OR {resources:[...]}
           var list = Array.isArray(data) ? data : (data && Array.isArray(data.resources) ? data.resources : []);
-          renderBanner(list);
           renderResources(list);
         })
-        .catch(renderError);
+        .catch(function (err) { clearTimeout(timer); renderError(err); });
+      // Plan is loaded separately in the boot path; nothing to do here.
     }
 
     function migrate(tok) {
@@ -590,6 +691,11 @@
             toast('Payment received. Tier will update shortly — refresh in a moment.', 'err');
           }
         }
+        // Plan loads first, independently of resources — the free-tier
+        // upgrade modal needs to decide whether to appear before the user
+        // sees anything else.
+        loadPlan();
+
         var next = Promise.resolve();
         if (claimToken) next = migrate(claimToken).then(function (ok) {
           // Clear the token either way — stale localStorage would otherwise
