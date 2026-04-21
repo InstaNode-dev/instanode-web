@@ -14,9 +14,8 @@ Last updated: 2026-04-19. API version: v1.
 
 instanode.dev provisions real Postgres databases and HTTPS webhook
 receivers over a single HTTP POST. No account, no Docker, no CLI
-required for the free tier. Resources are backed by PgBouncer + Postgres
-17 on managed infrastructure. pgvector is pre-installed on every
-database.
+required for the free tier. Postgres 17 on managed infrastructure;
+pgvector is pre-installed on every database.
 
 Designed for AI coding agents (Claude Code, Cursor, Windsurf, Continue,
 LangChain, LlamaIndex, CrewAI) that need storage or callback endpoints

@@ -103,11 +103,11 @@ Claim is idempotent — running it on an already-claimed token returns
 `200` with the same payload. So you can claim defensively, in a loop,
 on every login event without risk.
 
-**If the user upgrades from free → paid:** the `subscription.charged`
-webhook auto-elevates already-claimed resources (`tier='paid'`,
-`expires_at=NULL`). But any resource still anonymous at the moment of
-upgrade is NOT auto-elevated. Run the same sweep — claim now attaches
-AND elevates in one call.
+**If the user upgrades from free → paid:** resources already linked to
+the account are automatically upgraded to paid + permanent. Any resource
+still anonymous at the moment of upgrade is NOT auto-upgraded — it needs
+a claim. Run the same sweep; a claim after upgrade both attaches AND
+promotes to paid in one call.
 
 ---
 
@@ -183,13 +183,11 @@ Base URL: `https://api.instanode.dev`. All responses are JSON.
 | Anonymous | 10 MB / 2 conn | 100 stored | 24 hours | $0 |
 | Developer | 500 MB / 5 conn | 1000 stored | Permanent | $12/mo or $120/yr |
 
-### Permanence contract
+### Permanence
 
-A resource is permanent iff `expires_at IS NULL` in the database. The
-reaper query is literally `WHERE expires_at IS NOT NULL AND expires_at
-< NOW()`, so any row with `expires_at = NULL` is mathematically
-unreachable by the cleanup path. A claim by a paid user sets
-`expires_at = NULL`. That's it — no other step.
+A claim by a paid user makes the resource permanent — it never expires
+and is never auto-deleted. Free-tier resources expire 24h after
+creation; claiming them as a paid user clears the expiry in one call.
 
 ---
 
