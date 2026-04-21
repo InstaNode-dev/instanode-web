@@ -2,6 +2,18 @@
 
 Static landing page for instanode.dev — hosted on GitHub Pages.
 
+## Git hooks
+
+`.githooks/pre-push` blocks direct pushes to `master` to keep changes flowing
+through PRs. Server-side protection is paywalled on GitHub's Free plan for
+private repos, so this hook is the local stand-in. Opt in once after cloning:
+
+```sh
+git config core.hooksPath .githooks
+```
+
+Emergency bypass: `git push --no-verify`.
+
 ## Architecture
 
 ```
