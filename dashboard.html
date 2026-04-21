@@ -401,17 +401,16 @@
         return;
       }
 
-      // Paid-tier banner stays the tight utility strip.
+      // Paid-tier banner is a tight utility strip. Cancellation is intentionally
+      // NOT self-serve — the support email lives in the footer; users who want
+      // to cancel will find it and the operator processes the request manually.
       var variant = status === 'halted' ? 'warn' : 'paid';
       var tagText = status === 'halted' ? 'PAYMENT HALTED' : (status === 'cancelled' ? 'CANCELLING' : 'ACTIVE');
       var subText = status === 'cancelled'
-        ? 'Paid access continues until the current billing period ends.'
+        ? 'Cancellation is in progress.'
         : (status === 'halted'
             ? 'Your card was declined. Update it and retry from the pricing page.'
-            : 'Resources are permanent. Cancel anytime — access continues until period end.');
-      var action = (status === 'active')
-        ? '<a href="#" class="js-cancel-sub">Cancel subscription</a>'
-        : '<a href="/pricing.html">Manage plan</a>';
+            : 'Your plan is active. Resources are permanent.');
       $banner.innerHTML =
         '<div class="banner ' + variant + '">' +
           '<div>' +
@@ -419,10 +418,7 @@
             '<div class="plan-line">' + (plan.human_label || '—') + '</div>' +
             '<div class="plan-sub">' + subText + '</div>' +
           '</div>' +
-          '<div>' + action + '</div>' +
         '</div>';
-      var cancelLink = $banner.querySelector('.js-cancel-sub');
-      if (cancelLink) cancelLink.addEventListener('click', cancelSubscription);
     }
 
     function loadPlan() {
