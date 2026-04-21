@@ -330,13 +330,46 @@
         return 'Developer plan – $12/month';
       }
 
+      // One-shot upsell: first time a user clicks the monthly button, offer
+      // the annual plan (2 months free). sessionStorage flag so we never
+      // interrupt the same checkout flow twice.
+      function offerAnnualThen(proceedFn, requestedPlan) {
+        if (requestedPlan !== 'monthly') return proceedFn(requestedPlan);
+        try { if (sessionStorage.getItem('annual_upsell_shown') === '1') return proceedFn(requestedPlan); } catch (e) {}
+        try { sessionStorage.setItem('annual_upsell_shown', '1'); } catch (e) {}
+
+        var ov = document.createElement('div');
+        ov.setAttribute('style', 'position:fixed;inset:0;background:rgba(0,0,0,0.7);display:flex;align-items:center;justify-content:center;z-index:9999;padding:20px;');
+        ov.innerHTML =
+          '<div style="background:#0f1420;border:1px solid rgba(74,175,255,0.35);border-radius:12px;padding:28px 26px;max-width:460px;color:#e0e8f0;box-shadow:0 10px 50px rgba(74,175,255,0.15);">' +
+            '<div style="font-size:0.7rem;text-transform:uppercase;letter-spacing:0.12em;color:#6bdf8e;font-weight:700;margin-bottom:8px;">Save $24 / year</div>' +
+            '<h3 style="margin:0 0 10px;font-size:1.25rem;color:#fff;">Switch to annual and get 2 months free</h3>' +
+            '<p style="margin:0 0 14px;color:#b8c8d8;font-size:0.9rem;">Annual works out to <strong style="color:#fff;">$10/month</strong> — same everything as monthly, just billed once a year. Most users stick around past 10 months anyway.</p>' +
+            '<table style="width:100%;border-collapse:collapse;margin:0 0 20px;font-size:0.88rem;">' +
+              '<tr><td style="padding:6px 0;color:#8ca0b4;">Monthly</td><td style="padding:6px 0;text-align:right;">$12 × 12 = <strong style="color:#fff;">$144/yr</strong></td></tr>' +
+              '<tr><td style="padding:6px 0;color:#8ca0b4;">Annual</td><td style="padding:6px 0;text-align:right;color:#6bdf8e;font-weight:700;">$120/yr (save $24)</td></tr>' +
+            '</table>' +
+            '<div style="display:flex;gap:10px;justify-content:flex-end;">' +
+              '<button type="button" class="js-keep-monthly" style="background:transparent;color:#8ca0b4;border:1px solid #2a3a4a;padding:9px 16px;border-radius:6px;font-family:inherit;font-size:0.85rem;cursor:pointer;">Keep monthly</button>' +
+              '<button type="button" class="js-go-annual" style="background:linear-gradient(135deg,#4af 0%,#58f 100%);color:#051022;border:none;padding:9px 20px;border-radius:6px;font-family:inherit;font-size:0.85rem;font-weight:700;cursor:pointer;">Switch to annual →</button>' +
+            '</div>' +
+          '</div>';
+        ov.querySelector('.js-keep-monthly').addEventListener('click', function () { ov.remove(); proceedFn('monthly'); });
+        ov.querySelector('.js-go-annual').addEventListener('click', function () { ov.remove(); proceedFn('annual'); });
+        document.body.appendChild(ov);
+      }
+
       function startCheckout(btn) {
         if (typeof Razorpay === 'undefined') {
           showMsg(btn.dataset.plan, 'error', 'Payment module failed to load. Check your connection and retry.');
           return;
         }
 
-        var plan = btn.dataset.plan;
+        var requestedPlan = btn.dataset.plan;
+        offerAnnualThen(function (plan) { _startCheckout(btn, plan); }, requestedPlan);
+      }
+
+      function _startCheckout(btn, plan) {
         var resetLabel = btn.dataset.label;
         btn.disabled = true;
         btn.textContent = 'Preparing checkout…';

@@ -27,13 +27,33 @@
     .banner .plan-sub { font-size: 0.82rem; color: #888; margin-top: 2px; }
     .banner.paid { border-color: #1d4a20; background: #0d1a0e; }
     .banner.paid .plan-tag { background: #1d4a20; color: #cfe8d0; }
-    .banner.free { border-color: #2a2418; background: #141110; }
-    .banner.free .plan-tag { background: #2a2418; color: #d8c7a0; }
     .banner.warn { border-color: #4a1818; background: #1a0d0d; }
     .banner.warn .plan-tag { background: #4a1818; color: #f8a; }
     .banner a { color: #4af; font-weight: 600; font-size: 0.9rem; }
     .banner .skeleton { width: 180px; height: 14px; border-radius: 4px; background: linear-gradient(90deg,#1a1a1a,#222,#1a1a1a); background-size:200% 100%; animation: shine 1.2s linear infinite; }
     @keyframes shine { 0% {background-position: 0 0} 100% {background-position: -200% 0} }
+
+    /* Free-tier upsell banner — visually richer so the upgrade path is obvious. */
+    .upsell { margin: 24px 0; padding: 22px 24px; border-radius: 12px; position: relative; overflow: hidden;
+      background: linear-gradient(135deg, rgba(74,175,255,0.08) 0%, rgba(88,105,255,0.12) 100%);
+      border: 1px solid rgba(74,175,255,0.3); }
+    .upsell::before { content: ''; position: absolute; inset: 0; background: radial-gradient(circle at 85% 0%, rgba(74,175,255,0.14), transparent 55%); pointer-events: none; }
+    .upsell-grid { display: grid; grid-template-columns: 1fr auto; gap: 24px; align-items: center; position: relative; }
+    @media (max-width: 640px) { .upsell-grid { grid-template-columns: 1fr; } }
+    .upsell .tag { display: inline-block; font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.14em; padding: 3px 10px; border-radius: 999px; font-weight: 700; background: rgba(250,190,100,0.15); color: #f5c87a; margin-bottom: 10px; }
+    .upsell h3 { color: #fff; font-size: 1.15rem; font-weight: 700; letter-spacing: -0.01em; margin: 0 0 6px; }
+    .upsell p { color: #b8c8d8; font-size: 0.88rem; margin: 0 0 12px; }
+    .upsell ul { list-style: none; display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 0; padding: 0; font-size: 0.82rem; color: #c8d4e0; }
+    .upsell ul li { position: relative; padding-left: 16px; }
+    .upsell ul li::before { content: '✓'; position: absolute; left: 0; color: #6bdf8e; font-weight: 700; }
+    .upsell-cta { text-align: right; min-width: 170px; }
+    @media (max-width: 640px) { .upsell-cta { text-align: left; } }
+    .upsell-price { font-size: 1.6rem; font-weight: 700; color: #fff; letter-spacing: -0.01em; line-height: 1; }
+    .upsell-price .per { font-size: 0.75rem; color: #8ca0b4; font-weight: 500; }
+    .upsell-annual { font-size: 0.78rem; color: #8ca0b4; margin: 4px 0 12px; }
+    .upsell-annual strong { color: #6bdf8e; }
+    .upsell-btn { display: inline-block; background: linear-gradient(135deg, #4af 0%, #58f 100%); color: #051022; font-weight: 700; padding: 10px 22px; border-radius: 8px; font-size: 0.9rem; letter-spacing: 0.01em; text-decoration: none; box-shadow: 0 4px 14px rgba(74,175,255,0.3); transition: transform 0.1s, box-shadow 0.1s; }
+    .upsell-btn:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(74,175,255,0.45); text-decoration: none; }
     h1 { font-size: 1.5rem; color: #fff; font-weight: 700; letter-spacing: -0.02em; margin: 24px 0 4px; }
     .subtitle { color: #666; font-size: 0.85rem; margin-bottom: 20px; }
     .group { margin-bottom: 28px; }
@@ -350,66 +370,48 @@
       $banner.innerHTML = '<div class="banner"><div><div class="skeleton"></div></div><div class="skeleton" style="width:90px;"></div></div>';
     }
 
-    // Show the proactive upgrade modal at most once per 24h per browser.
-    // Users who dismissed it recently don't see it again until the cool-down
-    // expires — avoids badgering every page load.
-    var UPGRADE_NAG_KEY = 'instanode_upgrade_nag_until';
-    function shouldNagUpgrade() {
-      try {
-        var until = parseInt(localStorage.getItem(UPGRADE_NAG_KEY) || '0', 10);
-        return !(until && Date.now() < until);
-      } catch (e) { return true; }
-    }
-    function snoozeUpgradeNag(hours) {
-      try { localStorage.setItem(UPGRADE_NAG_KEY, String(Date.now() + hours * 3600 * 1000)); } catch (e) {}
-    }
-    function showFreeTierUpgradeModal() {
-      if (!shouldNagUpgrade()) return;
-      if (document.querySelector('.free-nag-overlay')) return; // already open
-      var overlay = document.createElement('div');
-      overlay.className = 'upgrade-overlay free-nag-overlay';
-      overlay.innerHTML =
-        '<div class="upgrade-modal" role="dialog" aria-modal="true">' +
-        '  <h3>You\'re on the free tier</h3>' +
-        '  <p>Resources expire in 24 hours and you can provision at most 5 per day. Upgrade to <strong>Developer</strong> ($12/mo or $120/yr) for permanent resources, no rate caps, and priority support.</p>' +
-        '  <div class="upgrade-actions">' +
-        '    <button type="button" class="small-btn js-nag-snooze">Maybe later</button>' +
-        '    <a href="/pricing.html" class="small-btn primary">See plans →</a>' +
-        '  </div>' +
-        '</div>';
-      overlay.addEventListener('click', function (e) {
-        if (e.target === overlay) {
-          snoozeUpgradeNag(24);
-          overlay.remove();
-        }
-      });
-      overlay.querySelector('.js-nag-snooze').addEventListener('click', function () {
-        snoozeUpgradeNag(24);
-        overlay.remove();
-      });
-      document.body.appendChild(overlay);
-    }
-
     function renderBannerFromPlan(plan) {
       if (!plan) { $banner.innerHTML = ''; return; }
       var tier = (plan.plan_tier || 'free').toLowerCase();
       var status = (plan.subscription_status || '').toLowerCase();
-      var variant = 'free';
-      var tagText = 'FREE TIER';
-      var action = '<a href="/pricing.html">Subscribe →</a>';
-      var subText = 'Resources expire in 24 hours. Per-subnet cap: 5 provisions/day.';
-      if (tier === 'paid') {
-        variant = status === 'halted' ? 'warn' : 'paid';
-        tagText = status === 'halted' ? 'PAYMENT HALTED' : (status === 'cancelled' ? 'CANCELLING' : 'ACTIVE');
-        subText = status === 'cancelled'
-          ? 'Paid access continues until the current billing period ends.'
-          : (status === 'halted'
-              ? 'Your card was declined. Update it and retry from the pricing page.'
-              : 'Resources are permanent. Cancel anytime — access continues until period end.');
-        action = (status === 'active')
-          ? '<a href="#" class="js-cancel-sub">Cancel subscription</a>'
-          : '<a href="/pricing.html">Manage plan</a>';
+
+      // Free-tier: richer upsell banner with pricing front-and-centre.
+      if (tier !== 'paid') {
+        $banner.innerHTML =
+          '<div class="upsell">' +
+            '<div class="upsell-grid">' +
+              '<div>' +
+                '<span class="tag">Free tier</span>' +
+                '<h3>Upgrade to Developer — keep everything you build</h3>' +
+                '<p>No more 24-hour expirations. No per-subnet provisioning cap. Priority support.</p>' +
+                '<ul>' +
+                  '<li>Permanent resources</li>' +
+                  '<li>500 MB storage per database</li>' +
+                  '<li>5 concurrent connections</li>' +
+                  '<li>Unlimited provisioning</li>' +
+                '</ul>' +
+              '</div>' +
+              '<div class="upsell-cta">' +
+                '<div class="upsell-price">$12<span class="per"> / month</span></div>' +
+                '<div class="upsell-annual">or <strong>$120 / year</strong> — 2 months free</div>' +
+                '<a href="/pricing.html" class="upsell-btn">Upgrade →</a>' +
+              '</div>' +
+            '</div>' +
+          '</div>';
+        return;
       }
+
+      // Paid-tier banner stays the tight utility strip.
+      var variant = status === 'halted' ? 'warn' : 'paid';
+      var tagText = status === 'halted' ? 'PAYMENT HALTED' : (status === 'cancelled' ? 'CANCELLING' : 'ACTIVE');
+      var subText = status === 'cancelled'
+        ? 'Paid access continues until the current billing period ends.'
+        : (status === 'halted'
+            ? 'Your card was declined. Update it and retry from the pricing page.'
+            : 'Resources are permanent. Cancel anytime — access continues until period end.');
+      var action = (status === 'active')
+        ? '<a href="#" class="js-cancel-sub">Cancel subscription</a>'
+        : '<a href="/pricing.html">Manage plan</a>';
       $banner.innerHTML =
         '<div class="banner ' + variant + '">' +
           '<div>' +
@@ -432,12 +434,7 @@
           return res.json();
         })
         .then(function (plan) {
-          if (plan) {
-            renderBannerFromPlan(plan);
-            if ((plan.plan_tier || '').toLowerCase() !== 'paid') {
-              showFreeTierUpgradeModal();
-            }
-          }
+          if (plan) renderBannerFromPlan(plan);
           return plan;
         })
         .catch(function () {
