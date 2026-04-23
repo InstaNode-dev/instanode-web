@@ -129,7 +129,7 @@
       <a href="/" class="brand">instanode.dev</a>
       <div class="right">
         <span class="email" id="userEmail"></span>
-        <button class="ghost-btn" id="logoutBtn" type="button">Sign out</button>
+        <button class="ghost-btn" id="logoutBtn" type="button" hidden>Sign out</button>
       </div>
     </nav>
     <h1>Your resources</h1>
@@ -713,12 +713,28 @@
     // webhook arrives a few seconds after the browser redirect here, so the
     // first /auth/me call can still report plan_tier='free'. We retry until
     // we see 'paid' or we give up (20s).
+    //
+    // AbortController with a 10s hard cap so a CORS-blocked or network-
+    // stalled request never leaves the page hanging on "Loading…" forever.
+    // On timeout or network error, we bounce to /start rather than show a
+    // half-rendered dashboard with a phantom "Sign out" button.
     function fetchMe() {
-      return fetch(API + '/auth/me', { credentials: 'include' }).then(function (res) {
-        if (res.status === 401) { goStart(); return null; }
-        if (!res.ok) throw new Error('HTTP ' + res.status);
-        return res.json();
-      });
+      var controller = new AbortController();
+      var timer = setTimeout(function () { controller.abort(); }, 10000);
+      return fetch(API + '/auth/me', { credentials: 'include', signal: controller.signal })
+        .then(function (res) {
+          clearTimeout(timer);
+          if (res.status === 401) { goStart(); return null; }
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          return res.json();
+        })
+        .catch(function (err) {
+          clearTimeout(timer);
+          // Network failure / CORS block / timeout — can't authenticate, so
+          // send the user through login rather than rendering a broken shell.
+          goStart();
+          return null;
+        });
     }
     function waitForPaid(maxMs) {
       var deadline = Date.now() + maxMs;
@@ -738,6 +754,11 @@
     (upgradedFlag ? waitForPaid(20000) : fetchMe())
       .then(function (user) {
         if (!user) return;
+        // Only reveal the Sign-out button once we've confirmed the user is
+        // actually signed in — prevents the phantom logout UI on a failed
+        // auth fetch.
+        var logoutBtn = document.getElementById('logoutBtn');
+        if (logoutBtn) logoutBtn.hidden = false;
         currentUser = user;
         if (user.email) $email.textContent = user.email;
         if (upgradedFlag) {
