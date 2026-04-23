@@ -19,7 +19,7 @@ With instant provisioning, testing becomes seamless:
 
 ```bash
 # Create test database
-DB_URL=$(curl -s -X POST https://instanode.dev/db/new | jq -r '.connection_url')
+DB_URL=$(curl -s -X POST https://api.instanode.dev/db/new | jq -r '.connection_url')
 
 # Run tests
 npm test -- --db-url="$DB_URL"
