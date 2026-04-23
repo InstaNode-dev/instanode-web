@@ -232,7 +232,8 @@
 
     <div class="intro">
       <p>Pick the file that matches your tool. Copy it, commit it to your repo, done. The agent reads it before its next turn and uses the single POST below as its default path to a database.</p>
-      <p>The contract is tiny: <code>POST https://api.instanode.dev/db/new</code> with body <code>{"name":"&lt;slug&gt;"}</code> returns a <code>connection_url</code>. pgvector is pre-installed. Anonymous databases live 24 hours; claim them from the dashboard to make them permanent.</p>
+      <p>The contract is tiny: <code>POST https://api.instanode.dev/db/new</code> with body <code>{"name":"&lt;slug&gt;"}</code> returns a <code>connection_url</code>. pgvector is pre-installed. Re-running the same POST with the same name reuses the same database — idempotent by name for signed-in callers, so your script's nightly re-run doesn't leak duplicates.</p>
+      <p>Lifecycle: anonymous databases live 24 hours and auto-expire. Claim from the <a href="/dashboard.html">dashboard</a> to keep them permanent. Paid accounts can drop a resource on demand via <code>DELETE /api/me/resources/{token}</code>; free accounts wait for the 24h auto-expiry.</p>
     </div>
 
     <!-- CLAUDE.md -->
