@@ -49,7 +49,7 @@ AI tutors can track:
 An agent can provision a database in seconds:
 
 ```bash
-curl -s -X POST https://instanode.dev/db/new | jq
+curl -s -X POST https://api.instanode.dev/db/new | jq
 ```
 
 Then immediately start storing and retrieving persistent data, enabling sophisticated memory capabilities without any infrastructure overhead.

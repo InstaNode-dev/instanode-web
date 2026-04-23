@@ -18,7 +18,7 @@ Each of these steps requires natural language processing and code generation, bu
 With services like instanode.dev, agents can provision a fully functional Postgres database with a single command:
 
 ```bash
-curl -s -X POST https://instanode.dev/db/new | jq
+curl -s -X POST https://api.instanode.dev/db/new | jq
 ```
 
 This returns a ready-to-use connection URL, eliminating the need for any setup code. Agents receive:

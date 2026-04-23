@@ -436,6 +436,7 @@
         <a href="/about.html">About</a>
         <a href="/pricing.html">Pricing</a>
         <a href="/agent.html">For Agents</a>
+        <a href="https://github.com/InstaNode-dev/instanode" target="_blank" rel="noopener">GitHub</a>
         <a href="/dashboard.html" data-auth="in" hidden>Dashboard</a>
         <a class="login" href="https://api.instanode.dev/auth/github/login" data-auth="out">Sign in</a>
       </div>
@@ -443,7 +444,7 @@
 
     <div class="hero">
       <h1>Free, instant database for agents</h1>
-      <p>One command. Real database. No account needed.</p>
+      <p>One command. Your AI coding agent gets a real Postgres database — no signup, no Docker, no config.</p>
     </div>
 
     <!-- THE PROMPT — the one thing visitors need to copy -->
@@ -451,7 +452,7 @@
       <div class="prompt-header">
         <button class="copy-btn" id="copyBtn" onclick="copyPrompt()"><strong>Copy AI Agent Instructions</strong></button>
       </div>
-      <div class="prompt-code" id="promptCode"><span class="cmd">curl</span> <span class="url">-s -X POST https://instanode.dev/db/new</span> <span class="cmd">\</span>
+      <div class="prompt-code" id="promptCode"><span class="cmd">curl</span> <span class="url">-s -X POST https://api.instanode.dev/db/new</span> <span class="cmd">\</span>
   <span class="cmd">-H</span> <span class="str">'Content-Type: application/json'</span> <span class="cmd">\</span>
   <span class="cmd">-d</span> <span class="str">'{"name":"my-side-project"}'</span> <span class="cmd">| jq</span></div>
       <p style="font-size: 0.75rem; color: #666; margin-top: 8px; text-align: center;">For detailed API documentation and examples, see <a href="/llms.txt" style="color: #4af;">/llms.txt</a></p>
@@ -511,7 +512,7 @@
     <div class="agents">
       <h2>Built for AI agents</h2>
       <p>Give your coding assistant this prompt. It provisions the database and writes working code.</p>
-      <div class="prompt-inline">Use instanode.dev to get a Postgres database. Run: curl -s -X POST https://instanode.dev/db/new -H 'Content-Type: application/json' -d '{"name":"<project>"}' | jq and use the connection_url from the response.</div>
+      <div class="prompt-inline">Use instanode.dev to get a Postgres database. Run: curl -s -X POST https://api.instanode.dev/db/new -H 'Content-Type: application/json' -d '{"name":"<project>"}' | jq and use the connection_url from the response.</div>
       <div class="agent-links">
         <a href="/llms.txt">llms.txt</a>
         <a href="https://github.com/InstaNode-dev/mcp">MCP Server</a>
