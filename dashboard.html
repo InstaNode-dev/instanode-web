@@ -704,9 +704,17 @@
     }
 
     document.getElementById('logoutBtn').addEventListener('click', function () {
-      fetch(API + '/auth/logout', { method: 'POST', credentials: 'include', redirect: 'manual' })
-        .catch(function () {})
-        .then(function () { location.href = '/'; });
+      // Top-level form POST so the browser follows the server's 302 + applies
+      // the clear-session Set-Cookie natively. Earlier fetch() + redirect:'manual'
+      // approach returned an opaque filtered response across origins, and
+      // browsers apply Set-Cookie on those inconsistently — the cookie often
+      // wasn't cleared, so after "Sign out" the user landed on / still
+      // authenticated and the Dashboard link reappeared.
+      var form = document.createElement('form');
+      form.method = 'POST';
+      form.action = API + '/auth/logout';
+      document.body.appendChild(form);
+      form.submit();
     });
 
     // Poll /auth/me a few times when the user just paid — the Razorpay
