@@ -7,7 +7,7 @@
   <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16.png">
   <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
   <title>Pricing - InstaNode</title>
-  <meta name="description" content="InstaNode Developer plan. $12/month or $120/year. Real Postgres. No account friction.">
+  <meta name="description" content="InstaNode Developer plan. $12/month or $120/year (₹200/month or ₹2,199/year for India). Real Postgres. No account friction.">
   <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -238,35 +238,35 @@
       <div class="plan" role="region" aria-label="Developer monthly plan">
         <div class="plan-name">Monthly</div>
         <div class="price">
-          <span class="amount">$12</span>
+          <span class="amount" data-price-slot="monthly-amount">$12</span>
           <span class="period">/month</span>
         </div>
-        <div class="price-note">Billed every month.</div>
+        <div class="price-note" data-price-slot="monthly-note">Billed every month.</div>
         <ul class="features">
           <li>Persistent Postgres (no 24h expiry)</li>
           <li>500 MB storage, 5 concurrent connections</li>
           <li>1000 webhook requests stored</li>
           <li>Email support</li>
         </ul>
-        <button class="btn secondary js-upgrade" type="button" data-plan="monthly" data-label="Subscribe — $12/mo">Subscribe — $12/mo</button>
+        <button class="btn secondary js-upgrade" type="button" data-plan="monthly" data-label="Subscribe — $12/mo" data-price-slot="monthly-btn">Subscribe — $12/mo</button>
         <div class="msg" role="status" aria-live="polite" data-msg-for="monthly"></div>
       </div>
 
       <div class="plan featured" role="region" aria-label="Developer annual plan">
-        <span class="ribbon">Save 17%</span>
+        <span class="ribbon" data-price-slot="annual-ribbon">Save 17%</span>
         <div class="plan-name">Annual</div>
         <div class="price">
-          <span class="amount">$120</span>
+          <span class="amount" data-price-slot="annual-amount">$120</span>
           <span class="period">/year</span>
         </div>
-        <div class="price-note">$10/mo equivalent · 2 months free.</div>
+        <div class="price-note" data-price-slot="annual-note">$10/mo equivalent · 2 months free.</div>
         <ul class="features">
           <li>Everything in Monthly</li>
           <li>Locked-in price for 12 months</li>
           <li>One annual invoice</li>
           <li>Priority support</li>
         </ul>
-        <button class="btn js-upgrade" type="button" data-plan="annual" data-label="Subscribe — $120/yr">Subscribe — $120/yr</button>
+        <button class="btn js-upgrade" type="button" data-plan="annual" data-label="Subscribe — $120/yr" data-price-slot="annual-btn">Subscribe — $120/yr</button>
         <div class="msg" role="status" aria-live="polite" data-msg-for="annual"></div>
       </div>
     </div>
@@ -304,6 +304,76 @@
         try { return localStorage.getItem('instanode_token'); } catch (e) { return null; }
       })();
 
+      // ── Currency detection (timezone-driven) ────────────────────────────
+      //
+      // India gets INR pricing (₹200/mo, ₹2,199/yr); everyone else sees USD
+      // ($12/mo, $120/yr). We read the browser's IANA tz name because a
+      // VPN/WiFi IP-geo lookup is expensive and often wrong for mobile users.
+      // Authenticated users with a locked-in plan_currency override the
+      // timezone guess via /api/me/plan below — once you've subscribed in a
+      // currency, you can't switch, so the page must show the locked price.
+      var PRICES = {
+        USD: {
+          monthly: { amount: '$12', note: 'Billed every month.', btn: 'Subscribe — $12/mo', describe: 'Developer plan – $12/month' },
+          annual:  { amount: '$120', note: '$10/mo equivalent · 2 months free.', btn: 'Subscribe — $120/yr', describe: 'Developer plan – $120/year' },
+          ribbon:  'Save 17%',
+          upsell:  {
+            headline: 'Save $24 / year',
+            eqPerMonth: '$10/month',
+            rowMonthly: '$12 × 12 = <strong style="color:#fff;">$144/yr</strong>',
+            rowAnnual:  '$120/yr (save $24)'
+          }
+        },
+        INR: {
+          monthly: { amount: '₹200', note: 'Billed every month.', btn: 'Subscribe — ₹200/mo', describe: 'Developer plan – ₹200/month' },
+          annual:  { amount: '₹2,199', note: '₹183/mo equivalent · almost 1 month free.', btn: 'Subscribe — ₹2,199/yr', describe: 'Developer plan – ₹2,199/year' },
+          ribbon:  'Save ~8%',
+          upsell:  {
+            headline: 'Save ₹201 / year',
+            eqPerMonth: '₹183/month',
+            rowMonthly: '₹200 × 12 = <strong style="color:#fff;">₹2,400/yr</strong>',
+            rowAnnual:  '₹2,199/yr (save ₹201)'
+          }
+        }
+      };
+
+      function detectCurrency() {
+        try {
+          var tz = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+          // Kolkata is the canonical India tz; Asia/Calcutta is the legacy alias.
+          if (tz === 'Asia/Kolkata' || tz === 'Asia/Calcutta') return 'INR';
+        } catch (e) {}
+        return 'USD';
+      }
+
+      var currency = detectCurrency();
+
+      function applyCurrency(cur) {
+        currency = cur === 'INR' ? 'INR' : 'USD';
+        var p = PRICES[currency];
+        var set = function (slot, text) {
+          document.querySelectorAll('[data-price-slot="' + slot + '"]').forEach(function (el) { el.textContent = text; });
+        };
+        set('monthly-amount', p.monthly.amount);
+        set('monthly-note', p.monthly.note);
+        set('annual-amount', p.annual.amount);
+        set('annual-note', p.annual.note);
+        set('annual-ribbon', p.ribbon);
+        document.querySelectorAll('[data-price-slot="monthly-btn"]').forEach(function (b) {
+          b.textContent = p.monthly.btn;
+          b.setAttribute('data-label', p.monthly.btn);
+        });
+        document.querySelectorAll('[data-price-slot="annual-btn"]').forEach(function (b) {
+          b.textContent = p.annual.btn;
+          b.setAttribute('data-label', p.annual.btn);
+        });
+      }
+
+      // Paint the detected currency immediately so the static USD HTML never
+      // flashes for an INR visitor — set() writes synchronously and the page
+      // has already rendered the DOM by the time this IIFE runs.
+      applyCurrency(currency);
+
       function msgFor(planID) {
         return document.querySelector('[data-msg-for="' + planID + '"]');
       }
@@ -326,28 +396,28 @@
       }
 
       function describePlan(plan) {
-        if (plan === 'annual') return 'Developer plan – $120/year';
-        return 'Developer plan – $12/month';
+        return PRICES[currency][plan === 'annual' ? 'annual' : 'monthly'].describe;
       }
 
       // One-shot upsell: first time a user clicks the monthly button, offer
-      // the annual plan (2 months free). sessionStorage flag so we never
-      // interrupt the same checkout flow twice.
+      // the annual plan (2 months free for USD, almost 1 month free for INR).
+      // sessionStorage flag so we never interrupt the same checkout flow twice.
       function offerAnnualThen(proceedFn, requestedPlan) {
         if (requestedPlan !== 'monthly') return proceedFn(requestedPlan);
         try { if (sessionStorage.getItem('annual_upsell_shown') === '1') return proceedFn(requestedPlan); } catch (e) {}
         try { sessionStorage.setItem('annual_upsell_shown', '1'); } catch (e) {}
 
+        var u = PRICES[currency].upsell;
         var ov = document.createElement('div');
         ov.setAttribute('style', 'position:fixed;inset:0;background:rgba(0,0,0,0.7);display:flex;align-items:center;justify-content:center;z-index:9999;padding:20px;');
         ov.innerHTML =
           '<div style="background:#0f1420;border:1px solid rgba(74,175,255,0.35);border-radius:12px;padding:28px 26px;max-width:460px;color:#e0e8f0;box-shadow:0 10px 50px rgba(74,175,255,0.15);">' +
-            '<div style="font-size:0.7rem;text-transform:uppercase;letter-spacing:0.12em;color:#6bdf8e;font-weight:700;margin-bottom:8px;">Save $24 / year</div>' +
-            '<h3 style="margin:0 0 10px;font-size:1.25rem;color:#fff;">Switch to annual and get 2 months free</h3>' +
-            '<p style="margin:0 0 14px;color:#b8c8d8;font-size:0.9rem;">Annual works out to <strong style="color:#fff;">$10/month</strong> — same everything as monthly, just billed once a year. Most users stick around past 10 months anyway.</p>' +
+            '<div style="font-size:0.7rem;text-transform:uppercase;letter-spacing:0.12em;color:#6bdf8e;font-weight:700;margin-bottom:8px;">' + u.headline + '</div>' +
+            '<h3 style="margin:0 0 10px;font-size:1.25rem;color:#fff;">Switch to annual and save</h3>' +
+            '<p style="margin:0 0 14px;color:#b8c8d8;font-size:0.9rem;">Annual works out to <strong style="color:#fff;">' + u.eqPerMonth + '</strong> — same everything as monthly, just billed once a year.</p>' +
             '<table style="width:100%;border-collapse:collapse;margin:0 0 20px;font-size:0.88rem;">' +
-              '<tr><td style="padding:6px 0;color:#8ca0b4;">Monthly</td><td style="padding:6px 0;text-align:right;">$12 × 12 = <strong style="color:#fff;">$144/yr</strong></td></tr>' +
-              '<tr><td style="padding:6px 0;color:#8ca0b4;">Annual</td><td style="padding:6px 0;text-align:right;color:#6bdf8e;font-weight:700;">$120/yr (save $24)</td></tr>' +
+              '<tr><td style="padding:6px 0;color:#8ca0b4;">Monthly</td><td style="padding:6px 0;text-align:right;">' + u.rowMonthly + '</td></tr>' +
+              '<tr><td style="padding:6px 0;color:#8ca0b4;">Annual</td><td style="padding:6px 0;text-align:right;color:#6bdf8e;font-weight:700;">' + u.rowAnnual + '</td></tr>' +
             '</table>' +
             '<div style="display:flex;gap:10px;justify-content:flex-end;">' +
               '<button type="button" class="js-keep-monthly" style="background:transparent;color:#8ca0b4;border:1px solid #2a3a4a;padding:9px 16px;border-radius:6px;font-family:inherit;font-size:0.85rem;cursor:pointer;">Keep monthly</button>' +
@@ -375,7 +445,7 @@
         btn.textContent = 'Preparing checkout…';
         clearMsg(plan);
 
-        var body = { plan: plan };
+        var body = { plan: plan, currency: currency };
         if (resourceToken) body.token = resourceToken;
 
         fetch(API_BASE + '/billing/create-subscription', {
@@ -458,11 +528,16 @@
       // If the caller is already on a live subscription, lock the upgrade
       // buttons and point them at the dashboard — we don't want two
       // subscriptions on one account (backend also 409s, but failing in
-      // the UI is clearer).
+      // the UI is clearer). plan_currency from the API overrides the
+      // timezone guess: a US user on a VPN from India still sees their
+      // USD-locked plan, and vice versa — matches the backend lock-in.
       fetch(API_BASE + '/api/me/plan', { credentials: 'include' })
         .then(function (res) { return res.ok ? res.json() : null; })
         .then(function (plan) {
           if (!plan) return;
+          if (plan.plan_currency === 'USD' || plan.plan_currency === 'INR') {
+            applyCurrency(plan.plan_currency);
+          }
           var blocking = ['active', 'authenticated', 'pending', 'created'];
           var st = (plan.subscription_status || '').toLowerCase();
           if ((plan.plan_tier || '').toLowerCase() === 'paid' && blocking.indexOf(st) !== -1) {
