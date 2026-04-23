@@ -31,7 +31,7 @@
       border-bottom: 1px solid #1a1a1a;
     }
     .top-nav .brand { color: #fff; font-weight: 600; text-decoration: none; padding: 10px 0; }
-    .top-nav-links { display: flex; gap: 8px; align-items: center; }
+    .top-nav-links { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
     .top-nav-links a {
       color: #888;
       text-decoration: none;
@@ -50,6 +50,11 @@
       font-weight: 500;
     }
     .top-nav-links a.login:hover { background: #66bfff; }
+    @media (max-width: 520px) {
+      .top-nav-links { gap: 2px; }
+      .top-nav-links a { padding: 10px 6px; font-size: 0.82rem; }
+      .top-nav-links a.login { padding: 10px 12px; }
+    }
 
     .hero { padding: 56px 0 24px; text-align: center; }
     .hero h1 {
