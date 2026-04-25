@@ -401,13 +401,27 @@
         return;
       }
 
-      // Paid-tier banner is a tight utility strip. Cancellation is intentionally
-      // NOT self-serve — the support email lives in the footer; users who want
-      // to cancel will find it and the operator processes the request manually.
+      // Paid-tier banner is a tight utility strip. Cancellation is NOT a
+      // self-serve action in this product — the user revokes their auto-pay
+      // mandate at their bank or in Razorpay, Razorpay fires
+      // subscription.cancelled to us, our handler stores the cancellation
+      // along with current_period_end. We display the resulting state.
       var variant = status === 'halted' ? 'warn' : 'paid';
       var tagText = status === 'halted' ? 'PAYMENT HALTED' : (status === 'cancelled' ? 'CANCELLING' : 'ACTIVE');
+      // For 'cancelled', show the until-date prominently when we have it —
+      // matches what the cancellation email already says, so users see the
+      // same guarantee in-app and don't lose track of when free-tier kicks in.
+      var periodEndDate = '';
+      if (plan.current_period_end) {
+        var d = new Date(plan.current_period_end);
+        if (!isNaN(d.getTime())) {
+          periodEndDate = d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+        }
+      }
       var subText = status === 'cancelled'
-        ? 'Cancellation is in progress.'
+        ? (periodEndDate
+            ? 'Paid access continues until ' + periodEndDate + '. After that you\'re back on the free tier.'
+            : 'Cancellation is in progress.')
         : (status === 'halted'
             ? 'Your card was declined. Update it and retry from the pricing page.'
             : 'Your plan is active. Resources are permanent.');
