@@ -1,0 +1,8 @@
+# GitHub Pages serves these files; this _headers is documentation only.
+# GitHub does not honor Netlify-style _headers files at runtime — kept here
+# so future readers (or a Netlify/Cloudflare Pages migration) have a record
+# of the intended Content-Type for plain-text assets the LLM crawlers fetch.
+/llms.txt
+  Content-Type: text/plain; charset=utf-8
+/llms-full.txt
+  Content-Type: text/plain; charset=utf-8

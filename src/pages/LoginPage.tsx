@@ -1,179 +1,227 @@
-import { useState, type FormEvent } from 'react';
-import { Navigate, useNavigate, useSearchParams } from 'react-router-dom';
-import { useQueryClient } from '@tanstack/react-query';
-import { useAuth, AUTH_QUERY_KEY } from '../hooks/useAuth';
-import { loginMagicLink, loginGitHub, fetchMe, startGoogleOAuth } from '../api/auth';
-import { setAccessToken } from '../api/client';
-import styles from './LoginPage.module.css';
+import { useState } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
+import { Brand } from '../components/Common'
+import { setToken, clearToken, fetchMe } from '../api'
+
+const OAUTH_API_BASE_DEFAULT = 'https://api.instanode.dev'
+const OAUTH_CALLBACK_PATH = '/login/callback'
+
+function resolveApiBase(): string {
+  return (typeof window !== 'undefined' && (window as any).__INSTANODE_API_URL__) || OAUTH_API_BASE_DEFAULT
+}
+
+function startGitHubOAuth() {
+  const apiBase = resolveApiBase()
+  const returnTo = encodeURIComponent(window.location.origin + OAUTH_CALLBACK_PATH)
+  window.location.href = `${apiBase}/auth/github/start?return_to=${returnTo}`
+}
 
 export function LoginPage() {
-  const { isAuthenticated, isLoading } = useAuth();
-  const navigate = useNavigate();
-  const queryClient = useQueryClient();
-  const [searchParams] = useSearchParams();
-  const redirectTo = searchParams.get('redirect') ?? '/dashboard';
-  const [email, setEmail] = useState('');
-  const [status, setStatus] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
-  const [errorMsg, setErrorMsg] = useState('');
-  const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const navigate = useNavigate()
+  const loc = useLocation() as { state?: { from?: string } }
+  const [token, setTokenInput] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  const [showTokenForm, setShowTokenForm] = useState(false)
 
-  if (isLoading) {
-    return <div className={styles.loading} aria-live="polite">Loading…</div>;
-  }
+  const [email, setEmail] = useState('')
+  const [emailBusy, setEmailBusy] = useState(false)
+  const [emailSent, setEmailSent] = useState(false)
+  const [emailErr, setEmailErr] = useState<string | null>(null)
 
-  // Suppress the already-authenticated guard during an active login flow so that
-  // setQueryData(AUTH_QUERY_KEY, ...) doesn't trigger a premature redirect to /dashboard
-  // before navigate(redirectTo) fires (which may be /claim?t=... in the onboarding funnel).
-  if (isAuthenticated && !isLoggingIn) {
-    return <Navigate to={redirectTo} replace />;
-  }
-
-  const handleMagicLink = async (e: FormEvent) => {
-    e.preventDefault();
-    if (!email.trim()) return;
-    setStatus('sending');
-    setErrorMsg('');
-    try {
-      const res = await loginMagicLink(email.trim());
-      // If the server returned an access_token directly (MVP shortcut),
-      // store it and navigate to dashboard immediately.
-      if ('access_token' in res && res.access_token) {
-        setIsLoggingIn(true);
-        setAccessToken(res.access_token as string);
-        // Immediately hydrate the auth cache with real user data.
-        // Without this, React Query serves the stale null (from the failed
-        // pre-login refresh) to the next page, making it think unauthenticated.
-        try {
-          const meData = await fetchMe();
-          queryClient.setQueryData(AUTH_QUERY_KEY, meData);
-        } catch {
-          // Non-fatal — the next page will re-try auth on mount
-        }
-        void navigate(redirectTo, { replace: true });
-        return;
-      }
-      // Otherwise show "check your inbox" (magic-link flow).
-      setStatus('sent');
-    } catch (err) {
-      setStatus('error');
-      setErrorMsg(err instanceof Error ? err.message : 'Something went wrong. Try again.');
+  const submitEmail = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setEmailErr(null)
+    if (!email.includes('@')) {
+      setEmailErr('Enter a valid email.')
+      return
     }
-  };
+    setEmailBusy(true)
+    try {
+      const apiBase = resolveApiBase()
+      const url = apiBase + '/auth/email/start'
+      const returnTo = window.location.origin + OAUTH_CALLBACK_PATH
+      const resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim(), return_to: returnTo }),
+      })
+      // Backend deliberately returns 202 regardless of whether email exists.
+      if (resp.status >= 400) {
+        const body = await resp.json().catch(() => null)
+        throw new Error((body && body.message) || resp.statusText)
+      }
+      setEmailSent(true)
+    } catch (e: any) {
+      setEmailErr(e?.message ?? 'Could not send the magic link.')
+    } finally {
+      setEmailBusy(false)
+    }
+  }
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setErr(null)
+    if (!token.trim()) {
+      setErr('Paste a Personal Access Token to continue.')
+      return
+    }
+    setBusy(true)
+    setToken(token.trim())
+    try {
+      await fetchMe()
+      const dest = loc.state?.from && loc.state.from !== '/login' ? loc.state.from : '/app'
+      navigate(dest, { replace: true })
+    } catch (e: any) {
+      clearToken()
+      setErr(
+        e?.status === 401
+          ? 'Token rejected. Mint a fresh PAT or use the claim link from your agent.'
+          : `Couldn't reach the API: ${e?.message ?? 'unknown error'}`,
+      )
+      setBusy(false)
+    }
+  }
 
   return (
-    <div className={styles.page}>
-      <div className={styles.card}>
-        <div className={styles.brand}>
-          <span className={styles.brandIcon}>⚡</span>
-          <h1 className={styles.brandName}>instant.dev</h1>
-          <p className={styles.tagline}>Zero-click developer infrastructure</p>
+    <div className="auth-shell">
+      <div className="auth-card">
+        <div style={{ marginBottom: 28 }}>
+          <Brand />
+        </div>
+        <h1>Sign in.</h1>
+        <p>
+          Continue with GitHub or your email. Anonymous resources are claimed via the
+          link in your agent's response — not from this page.
+        </p>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 18 }}>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            style={{ width: '100%', justifyContent: 'center', gap: 10 }}
+            onClick={startGitHubOAuth}
+            data-testid="oauth-github"
+          >
+            <span aria-hidden="true" style={{ color: 'var(--accent)', fontFamily: 'var(--font-mono)' }}>▢</span>
+            <span>Continue with GitHub</span>
+          </button>
         </div>
 
-        {status === 'sent' ? (
-          <div className={styles.sentState} data-testid="magic-link-sent">
-            <span className={styles.sentIcon}>📬</span>
-            <h2 className={styles.sentTitle}>Check your inbox</h2>
-            <p className={styles.sentBody}>
-              We sent a magic link to <strong>{email}</strong>. Click it to sign in.
-            </p>
-            <button
-              className={styles.resendBtn}
-              onClick={() => setStatus('idle')}
-            >
-              Use a different email
-            </button>
+        {/* Magic-link form */}
+        <div style={{ marginTop: 12, marginBottom: 14 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, color: 'var(--text-faint)', fontSize: 11.5, fontFamily: 'var(--font-mono)' }}>
+            <span style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+            <span>or</span>
+            <span style={{ flex: 1, height: 1, background: 'var(--border)' }} />
           </div>
-        ) : (
-          <>
-            <form onSubmit={(e) => void handleMagicLink(e)} className={styles.form} noValidate>
-              <div className={styles.fieldGroup}>
-                <label htmlFor="email" className={styles.label}>
-                  Email address
-                </label>
+          {emailSent ? (
+            <div role="status" data-testid="magic-link-sent" style={{ padding: '10px 12px', borderLeft: '2px solid var(--accent)', fontSize: 13, fontFamily: 'var(--font-mono)', color: 'var(--text)' }}>
+              Check your inbox — we sent a sign-in link to <strong>{email}</strong>. Expires in 15 min.
+            </div>
+          ) : (
+            <form onSubmit={submitEmail}>
+              <div className="form-row">
+                <label htmlFor="email">email</label>
                 <input
                   id="email"
                   type="email"
-                  className={styles.input}
-                  placeholder="you@company.com"
+                  autoComplete="email"
+                  placeholder="founder@example.com"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  required
-                  autoComplete="email"
+                  disabled={emailBusy}
                   data-testid="email-input"
                 />
               </div>
-
-              {status === 'error' && (
-                <p className={styles.error} role="alert" data-testid="login-error">
-                  {errorMsg}
-                </p>
+              {emailErr && (
+                <div role="alert" data-testid="email-error" style={{ marginBottom: 10, padding: '10px 12px', borderLeft: '2px solid var(--rose)', fontSize: 12.5, fontFamily: 'var(--font-mono)', color: 'var(--text)' }}>
+                  {emailErr}
+                </div>
               )}
-
               <button
+                className="btn btn-secondary"
+                style={{ width: '100%', justifyContent: 'center' }}
                 type="submit"
-                className={styles.primaryBtn}
-                disabled={status === 'sending' || !email.trim()}
-                data-testid="magic-link-btn"
+                disabled={emailBusy}
+                data-testid="email-submit"
               >
-                {status === 'sending' ? 'Signing in…' : 'Sign in'}
+                {emailBusy ? 'Sending…' : 'Email me a magic link →'}
               </button>
             </form>
+          )}
+        </div>
 
-            <div className={styles.divider}>
-              <span className={styles.dividerText}>or</span>
+        <button
+          type="button"
+          onClick={() => setShowTokenForm((v) => !v)}
+          style={{
+            background: 'transparent',
+            border: 'none',
+            padding: 0,
+            margin: '4px 0 14px',
+            color: 'var(--text-faint)',
+            fontSize: 12,
+            fontFamily: 'var(--font-mono)',
+            cursor: 'pointer',
+            textAlign: 'left',
+            width: '100%',
+          }}
+          aria-expanded={showTokenForm}
+          aria-controls="pat-form"
+          data-testid="toggle-token-form"
+        >
+          {showTokenForm ? '− hide token field' : '+ or have a token?'}
+        </button>
+
+        {showTokenForm && (
+          <form onSubmit={submit} id="pat-form">
+            <div className="form-row">
+              <label htmlFor="token">token</label>
+              <input
+                id="token"
+                type="password"
+                autoComplete="off"
+                placeholder="ink_•••••••••••••••"
+                value={token}
+                onChange={(e) => setTokenInput(e.target.value)}
+                autoFocus
+                disabled={busy}
+                data-testid="token-input"
+              />
             </div>
 
-            <div className={styles.oauthRow}>
-              {import.meta.env.VITE_GOOGLE_CLIENT_ID ? (
-                <button
-                  type="button"
-                  className={styles.googleBtn}
-                  onClick={() => startGoogleOAuth(redirectTo)}
-                  data-testid="google-oauth-btn"
-                >
-                  <svg className={styles.googleIcon} viewBox="0 0 24 24" aria-hidden="true">
-                    <path
-                      fill="#4285F4"
-                      d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
-                    />
-                    <path
-                      fill="#34A853"
-                      d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-                    />
-                    <path
-                      fill="#FBBC05"
-                      d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"
-                    />
-                    <path
-                      fill="#EA4335"
-                      d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
-                    />
-                  </svg>
-                  Continue with Google
-                </button>
-              ) : null}
-              <button
-                type="button"
-                className={styles.githubBtn}
-                onClick={() => void loginGitHub()}
-                data-testid="github-oauth-btn"
-              >
-                <svg className={styles.githubIcon} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                  <path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z" />
-                </svg>
-                Continue with GitHub
-              </button>
-            </div>
+            {err && (
+              <div role="alert" data-testid="login-error" style={{ marginBottom: 12, padding: '10px 12px', borderLeft: '2px solid var(--rose)', fontSize: 12.5, fontFamily: 'var(--font-mono)', color: 'var(--text)' }}>
+                {err}
+              </div>
+            )}
 
-            <p className={styles.footer}>
-              By signing in you agree to our{' '}
-              <a href="https://instant.dev/terms" target="_blank" rel="noopener noreferrer">Terms</a>
-              {' '}and{' '}
-              <a href="https://instant.dev/privacy" target="_blank" rel="noopener noreferrer">Privacy Policy</a>.
+            <button
+              className="btn btn-primary"
+              style={{ width: '100%', justifyContent: 'center' }}
+              type="submit"
+              disabled={busy}
+              data-testid="login-submit"
+            >
+              {busy ? 'Verifying…' : 'Continue →'}
+            </button>
+
+            <p
+              style={{
+                marginTop: 20,
+                fontSize: 11.5,
+                color: 'var(--text-faint)',
+                fontFamily: 'var(--font-mono)',
+                lineHeight: 1.55,
+              }}
+            >
+              no token? run <code style={{ color: 'var(--accent)' }}>POST /db/new</code> from your agent —
+              the response carries a <code style={{ color: 'var(--accent)' }}>claim_url</code> that mints one.
             </p>
-          </>
+          </form>
         )}
       </div>
     </div>
-  );
+  )
 }

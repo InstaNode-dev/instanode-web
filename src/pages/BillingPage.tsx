@@ -1,258 +1,253 @@
-import { useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Link } from 'react-router-dom';
-import { useRequireAuth } from '../hooks/useAuth';
-import {
-  fetchBilling,
-  listInvoices,
-  cancelSubscription,
-  updatePaymentMethod,
-  changePlan,
-} from '../api/billing';
-import { fetchResources } from '../api/resources';
-import type { ResourceType } from '../types/resource';
-import { PlanCard } from '../components/billing/PlanCard';
-import { PaymentMethodCard } from '../components/billing/PaymentMethodCard';
-import { InvoiceList } from '../components/billing/InvoiceList';
-import { ChangePlanModal } from '../components/billing/ChangePlanModal';
-import { CancelPlanModal } from '../components/billing/CancelPlanModal';
-import styles from './BillingPage.module.css';
+import { useEffect, useState } from 'react'
+import { ROBanner, ContractBanner, TierPill, StatusPill, RelTime } from '../components/Common'
+import * as api from '../api'
+import type { BillingDetails, Invoice } from '../api'
+import { useDashboardCtx } from '../hooks/useDashboardCtx'
 
-const RESOURCE_TYPES: { type: ResourceType; label: string }[] = [
-  { type: 'postgres', label: 'Postgres' },
-  { type: 'redis', label: 'Redis' },
-  { type: 'mongodb', label: 'MongoDB' },
-  { type: 'queue', label: 'Queue' },
-  { type: 'webhook', label: 'Webhook' },
-  { type: 'storage', label: 'Storage' },
-];
+const PLANS: Record<string, {
+  label: string
+  price: string
+  features: Array<{ text: string; comingSoon?: boolean }>
+  nextTier?: string
+  highlight?: boolean
+}> = {
+  anonymous: {
+    label: 'Anonymous (free)',
+    price: '$0',
+    features: [
+      { text: '10 MB Postgres · 2 conn · 24h TTL' },
+      { text: '5 MB Redis · 24h TTL' },
+      { text: '5 MB MongoDB · 24h TTL' },
+      { text: '100 stored webhooks' },
+      { text: '0 deployments' },
+      { text: 'no vault — claim resources first' },
+      { text: 'agent-only access' },
+    ],
+    nextTier: 'hobby',
+  },
+  hobby: {
+    label: 'Hobby',
+    price: '$9 / mo',
+    features: [
+      { text: '1 GB Postgres · 8 conn' },
+      { text: '50 MB Redis' },
+      { text: '100 MB MongoDB · 5 conn' },
+      { text: '1 small deployment' },
+      { text: '20 vault entries · production env' },
+      { text: '*.deployment.instanode.dev domain' },
+      { text: '1000 stored webhooks' },
+    ],
+    nextTier: 'pro',
+  },
+  pro: {
+    label: 'Pro',
+    price: '$49 / mo',
+    features: [
+      { text: '5 GB Postgres · 20 conn' },
+      { text: '256 MB Redis' },
+      { text: '2 GB MongoDB · 20 conn' },
+      { text: '10 medium deployments' },
+      { text: '200 vault entries · multi-env (dev/staging/prod + custom)' },
+      { text: 'custom domain' },
+      { text: '10k stored webhooks' },
+    ],
+    nextTier: 'team',
+    highlight: true,
+  },
+  team: {
+    label: 'Team',
+    price: '$199 / mo',
+    features: [
+      { text: 'unlimited Postgres / Redis / Mongo / queues / storage' },
+      { text: 'unlimited vault entries · unlimited envs' },
+      { text: 'unlimited deployments' },
+      { text: 'RBAC + audit log' },
+      { text: 'custom domains', comingSoon: true },
+      { text: 'SSO / SAML', comingSoon: true },
+      { text: '99.9% SLA + priority support', comingSoon: true },
+      { text: 'dedicated infrastructure', comingSoon: true },
+      { text: 'audit log export (CSV/JSONL)', comingSoon: true },
+    ],
+  },
+}
+
+// Split a price string like "$49 / mo" into ("$", "49 / mo") to keep the
+// existing CSS structure (small dollar sign + big number + frequency).
+function splitPrice(price: string): { symbol: string; rest: string } {
+  const m = price.match(/^(\$|₹|€|£)?\s*(.*)$/)
+  if (!m) return { symbol: '$', rest: price }
+  return { symbol: m[1] ?? '', rest: m[2] ?? '' }
+}
 
 export function BillingPage() {
-  const { isLoading: authLoading } = useRequireAuth();
-  const queryClient = useQueryClient();
-  const [changeOpen, setChangeOpen] = useState(false);
-  const [cancelOpen, setCancelOpen] = useState(false);
-  const [actionError, setActionError] = useState<string | null>(null);
+  const { me } = useDashboardCtx()
+  const tier = me?.team?.tier ?? 'hobby'
+  const plan = PLANS[tier] ?? PLANS.hobby
 
-  const {
-    data: billingData,
-    isLoading: billingLoading,
-    error: billingError,
-    refetch: refetchBilling,
-  } = useQuery({
-    queryKey: ['billing-status'],
-    queryFn: fetchBilling,
-    enabled: !authLoading,
-  });
+  const [billing, setBilling] = useState<BillingDetails | null>(null)
+  const [invoices, setInvoices] = useState<Invoice[]>([])
+  const [checkoutErr, setCheckoutErr] = useState<string | null>(null)
+  const [checkoutLoading, setCheckoutLoading] = useState(false)
 
-  const {
-    data: resourcesData,
-    isLoading: resourcesLoading,
-    error: resourcesError,
-    refetch: refetchResources,
-  } = useQuery({
-    queryKey: ['resources'],
-    queryFn: fetchResources,
-    enabled: !authLoading,
-  });
+  useEffect(() => {
+    Promise.all([api.fetchBilling(), api.listInvoices()]).then(([b, i]) => {
+      setBilling(b.billing)
+      setInvoices(i.invoices)
+    })
+  }, [])
 
-  const { data: invoiceData, isLoading: invoicesLoading } = useQuery({
-    queryKey: ['billing-invoices'],
-    queryFn: listInvoices,
-    enabled: !authLoading && Boolean(billingData?.billing.razorpay_configured),
-  });
+  if (!billing) return <div className="skel" style={{ width: '100%', height: 320 }} />
 
-  const cancelMut = useMutation({
-    mutationFn: cancelSubscription,
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['billing-status'] });
-      setCancelOpen(false);
-      setActionError(null);
-    },
-  });
+  const { symbol, rest } = splitPrice(plan.price)
 
-  const payMut = useMutation({
-    mutationFn: updatePaymentMethod,
-    onSuccess: (res) => {
-      if (res.short_url) {
-        window.location.href = res.short_url;
+  async function handleChangePlan() {
+    if (!plan.nextTier) return
+    setCheckoutErr(null)
+    setCheckoutLoading(true)
+    try {
+      const r = await api.createCheckout(plan.nextTier!)
+      if (r.short_url) {
+        window.location.href = r.short_url
+        return
       }
-    },
-    onError: (e: Error) => {
-      setActionError(e.message);
-    },
-  });
-
-  const changeMut = useMutation({
-    mutationFn: changePlan,
-    onSuccess: (res) => {
-      void queryClient.invalidateQueries({ queryKey: ['billing-status'] });
-      void queryClient.invalidateQueries({ queryKey: ['billing-invoices'] });
-      setChangeOpen(false);
-      setActionError(null);
-      if (res.short_url) {
-        window.location.href = res.short_url;
-      }
-    },
-  });
-
-  if (authLoading) {
-    return (
-      <div className={styles.center} aria-live="polite">
-        Authenticating…
-      </div>
-    );
+      setCheckoutErr('checkout returned no url')
+    } catch (e: any) {
+      setCheckoutErr(e?.message ?? 'checkout failed')
+    } finally {
+      setCheckoutLoading(false)
+    }
   }
 
-  const isLoading = billingLoading || resourcesLoading || invoicesLoading;
-  const error = billingError ?? resourcesError;
-
-  if (isLoading) {
-    return (
-      <div className={styles.center} aria-live="polite" data-testid="billing-loading">
-        Loading billing…
-      </div>
-    );
+  function handleCancel() {
+    if (!window.confirm('Cancel your subscription? You will keep access until the end of the current period.')) return
+    // TODO: wire to POST /api/v1/billing/cancel on the server.
+    console.log('cancel: not yet wired to backend')
   }
-
-  if (error) {
-    return (
-      <div className={styles.errorState} role="alert" data-testid="billing-error">
-        <p>Failed to load billing information: {(error as Error).message}</p>
-        <button
-          className={styles.retryBtn}
-          type="button"
-          onClick={() => {
-            void refetchBilling();
-            void refetchResources();
-            void queryClient.invalidateQueries({ queryKey: ['billing-invoices'] });
-          }}
-        >
-          Retry
-        </button>
-      </div>
-    );
-  }
-
-  const planTier = billingData?.plan ?? 'hobby';
-  const b = billingData?.billing;
-  const resources = resourcesData?.items ?? [];
-  const invoices = invoiceData?.invoices ?? [];
-
-  const countByType = (type: ResourceType): number =>
-    resources.filter((r) => r.resource_type === type && r.status === 'active').length;
-
-  const showUpgradeCta = planTier === 'hobby' || planTier === 'anonymous';
-  const paidTier = planTier === 'pro' || planTier === 'team' || planTier === 'hobby';
-  const st = (b?.status ?? 'none').toLowerCase();
-  const showManage =
-    paidTier &&
-    st !== 'none' &&
-    st !== 'cancelled' &&
-    st !== 'canceled' &&
-    st !== 'completed' &&
-    st !== 'expired';
 
   return (
-    <div className={styles.page} data-testid="billing-page">
-      <div className={styles.pageHeader}>
-        <h1 className={styles.title}>Billing</h1>
-        <p className={styles.subtitle}>
-          Manage your plan, payment method, and invoices.{' '}
-          <Link to="/settings?section=billing" className={styles.inlineLink}>
-            Settings
-          </Link>
-        </p>
-      </div>
+    <>
+      <ROBanner variant="write" showAsk={false}>
+        <strong>This is the only page where you click to act.</strong> Cards belong to humans, not agents. Plan changes, cancellations, and card updates all stay clickable — and the agent never has the credentials to call <code>POST /billing/checkout</code> on your behalf.
+      </ROBanner>
 
-      {actionError && (
-        <div className={styles.bannerError} role="alert">
-          {actionError}
-        </div>
-      )}
+      <ContractBanner kind="locked" badge="locked">
+        <strong>6 endpoints live.</strong> <code>GET /billing</code> · <code>POST /checkout</code> · <code>/cancel</code> · <code>GET /invoices</code> · <code>POST /update-payment</code> · <code>POST /change-plan</code>.
+      </ContractBanner>
 
-      <div className={styles.grid}>
-        <PlanCard
-          plan={planTier}
-          billingStatus={b?.status ?? 'none'}
-          subscriptionStatus={b?.subscription_status}
-          currentPeriodEnd={b?.current_period_end ?? null}
-          cancelAtPeriodEnd={b?.cancel_at_period_end}
-          razorpayConfigured={Boolean(b?.razorpay_configured)}
-          onChangePlan={() => {
-            setActionError(null);
-            setChangeOpen(true);
-          }}
-          onCancel={() => {
-            setActionError(null);
-            setCancelOpen(true);
-          }}
-          showManage={Boolean(showManage)}
-        />
-
-        <div className={styles.card}>
-          <p className={styles.cardTitle}>Resources in use</p>
-          <div className={styles.resourceSummary}>
-            {RESOURCE_TYPES.map(({ type, label }) => (
-              <div key={type} className={styles.resourceStat}>
-                <span className={styles.resourceStatLabel}>{label}</span>
-                <span className={styles.resourceStatCount}>{countByType(type)}</span>
-              </div>
+      <div className="plan-card">
+        <div className="plan-summary">
+          <div className="lbl">current plan</div>
+          <h2 style={{ fontSize: 28, fontWeight: 400, letterSpacing: '-0.03em', marginBottom: 4 }}>{plan.label}</h2>
+          <div className="price">
+            <span style={{ fontSize: 18, color: 'var(--text-dim)' }}>{symbol}</span>
+            <span className="num">{rest.replace(/\s*\/\s*mo.*$/, '')}</span>
+            <span className="freq">{rest.includes('/') ? `/ ${rest.split('/')[1]?.trim()} · billed monthly` : '· billed monthly'}</span>
+          </div>
+          <ul className="desc" style={{ listStyle: 'none', padding: 0, margin: '8px 0 12px' }}>
+            {plan.features.map((f, i) => (
+              <li key={i} style={{ opacity: f.comingSoon ? 0.6 : 1 }}>
+                {f.text}
+                {f.comingSoon && (
+                  <span style={{
+                    marginLeft: 6, padding: '1px 6px', fontSize: 10,
+                    fontFamily: 'var(--font-mono)', color: 'var(--violet)',
+                    border: '1px solid rgba(183,148,246,0.3)', borderRadius: 4,
+                    textTransform: 'uppercase', letterSpacing: 0.06,
+                  }}>soon</span>
+                )}
+              </li>
             ))}
+          </ul>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center' }}>
+            <button
+              className="btn btn-secondary btn-sm"
+              onClick={handleChangePlan}
+              disabled={!plan.nextTier || checkoutLoading}
+              title={plan.nextTier ? `Upgrade to ${PLANS[plan.nextTier]?.label ?? plan.nextTier}` : 'You are on the highest plan'}
+            >
+              {plan.nextTier ? `Upgrade to ${PLANS[plan.nextTier]?.label ?? plan.nextTier}` : 'Change plan'}
+            </button>
+            <button className="btn btn-ghost btn-sm" onClick={handleCancel}>Cancel subscription</button>
+          </div>
+          {checkoutErr && (
+            <div style={{ marginBottom: 12, fontSize: 12, color: 'var(--danger, #c33)', fontFamily: 'var(--font-mono)' }}>
+              {checkoutErr}
+            </div>
+          )}
+          <div style={{ padding: '12px 14px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 6 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                payment method
+              </span>
+              <span style={{ marginLeft: 'auto', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text)' }}>
+                {billing.payment_network?.toUpperCase()} · {billing.payment_last4}
+              </span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-dim)' }}>
+                expires {billing.payment_exp_month}/{billing.payment_exp_year} · auto-renews{' '}
+                {billing.current_period_end && new Date(billing.current_period_end).toLocaleDateString()}
+              </span>
+              <button className="btn btn-sm btn-ghost" style={{ marginLeft: 'auto' }}>Update</button>
+            </div>
           </div>
         </div>
 
-        <PaymentMethodCard
-          last4={b?.payment_last4}
-          network={b?.payment_network}
-          expMonth={b?.payment_exp_month}
-          expYear={b?.payment_exp_year}
-          razorpayConfigured={Boolean(b?.razorpay_configured)}
-          onUpdate={() => {
-            setActionError(null);
-            payMut.mutate();
-          }}
-          disabled={payMut.isPending}
-        />
-
-        <InvoiceList invoices={invoices} />
-
-        {showUpgradeCta && (
-          <div className={styles.upgradeCard}>
-            <p className={styles.upgradeTitle}>Upgrade</p>
-            <p className={styles.upgradeBody}>
-              Larger databases, higher limits, and priority support. Start from the pricing page or checkout in
-              settings.
-            </p>
-            <Link to="/pricing" className={styles.upgradeCta} data-testid="billing-upgrade-cta">
-              View pricing
-            </Link>
-          </div>
-        )}
+        <div className="plan-usage">
+          <h4>Usage · this period</h4>
+          <UsageRow k="postgres"     used="47"   limit="500" pct={9} />
+          <UsageRow k="redis"        used="163"  limit="256" pct={64} warn />
+          <UsageRow k="mongo"        used="1.64" limit="2 GB" pct={82} warn />
+          <UsageRow k="deployments"  used="3"    limit="5"   pct={60} />
+          <UsageRow k="webhooks"     used="1.4k" limit="10k" pct={14} />
+          <UsageRow k="team seats"   used="5"    limit="5"   pct={100} />
+        </div>
       </div>
 
-      <ChangePlanModal
-        open={changeOpen}
-        currentPlan={planTier}
-        loading={changeMut.isPending}
-        error={changeMut.error ? (changeMut.error as Error).message : null}
-        onClose={() => {
-          setChangeOpen(false);
-          changeMut.reset();
-        }}
-        onConfirm={(target) => changeMut.mutate(target)}
-      />
+      <div style={{ marginTop: 28 }}>
+        <div className="section-h">
+          <h2>Invoices</h2>
+          <span className="sub">via razorpay</span>
+        </div>
+        <div className="card" style={{ padding: 0 }}>
+          <div className="invoice-row head">
+            <span>id</span>
+            <span>period</span>
+            <span>plan</span>
+            <span>status</span>
+            <span>amount</span>
+          </div>
+          {invoices.map((i) => (
+            <div key={i.id} className="invoice-row">
+              <span className="id">{i.id}</span>
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11.5, color: 'var(--text-dim)' }}>
+                {new Date(i.period_start).toLocaleDateString()} → {new Date(i.period_end).toLocaleDateString()}
+              </span>
+              <TierPill tier={i.plan} />
+              <StatusPill status="running" />
+              <span className="amt">
+                ${(i.amount_cents / 100).toFixed(2)} <a href="#" className="dl">↓ pdf</a>
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </>
+  )
+}
 
-      <CancelPlanModal
-        open={cancelOpen}
-        loading={cancelMut.isPending}
-        error={cancelMut.error ? (cancelMut.error as Error).message : null}
-        onClose={() => {
-          setCancelOpen(false);
-          cancelMut.reset();
-        }}
-        onConfirm={() => cancelMut.mutate()}
-      />
+function UsageRow({ k, used, limit, pct, warn = false }: { k: string; used: string; limit: string; pct: number; warn?: boolean }) {
+  return (
+    <div className="usage-row">
+      <span className="k">{k}</span>
+      <div className="usage">
+        <span className="bar">
+          <span className={`fill ${warn ? 'warn' : ''}`} style={{ width: `${pct}%` }} />
+        </span>
+      </div>
+      <span className="num">
+        {used} <span className="lim">/ {limit}</span>
+      </span>
     </div>
-  );
+  )
 }

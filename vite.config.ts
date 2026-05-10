@@ -1,48 +1,39 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
-// DASHBOARD_API_URL — the upstream dashboard-api to proxy to (default: local docker-compose).
-// Handles /api and /auth routes (session management, resource listing).
-// Set this as a system env var or in Playwright's webServer env config.
-// Do NOT use VITE_API_BASE_URL here — that would expose it to the browser, changing fetch URLs
-// to absolute cross-origin and breaking Playwright's page.route() glob matchers.
-const dashboardApiURL = process.env.DASHBOARD_API_URL || 'http://localhost:8081';
+// AGENT_API_URL — the agent-facing instanode.dev API (defaults to the live
+// cluster; override locally with AGENT_API_URL=http://localhost:30080).
+// All dashboard fetches go through this single upstream — no separate
+// dashboard-api in this build of the project.
+const agentApiURL = process.env.AGENT_API_URL || 'http://api.instanode.dev';
 
-// AGENT_API_URL — the agent-facing instanode.dev API (port 8080 local, 30080 k8s NodePort).
-// Handles /claim routes (onboarding, claim preview, claim conversion).
-// Dashboard-api has no /claim routes; these must go directly to the agent API.
-const agentApiURL = process.env.AGENT_API_URL || 'http://localhost:30080';
-
+// In tests we set VITE_NO_PROXY=1 so Playwright's page.route() globs match
+// against same-origin URLs and don't accidentally hit the live cluster.
 const proxy = process.env.VITE_NO_PROXY
   ? {}
   : {
-      '/api': { target: dashboardApiURL, changeOrigin: true },
-      '/stacks': { target: agentApiURL, changeOrigin: true },
-      '/auth': {
-        target: dashboardApiURL,
-        changeOrigin: true,
-        // SPA route — must not be proxied to dashboard-api (React reads ?code=)
-        bypass(req) {
-          const path = req.url?.split('?')[0] ?? '';
-          if (path === '/auth/google/callback') {
-            return '/index.html';
-          }
-        },
-      },
+      '/api': { target: agentApiURL, changeOrigin: true },
+      '/auth': { target: agentApiURL, changeOrigin: true },
       '/claim': { target: agentApiURL, changeOrigin: true },
+      '/db': { target: agentApiURL, changeOrigin: true },
+      '/cache': { target: agentApiURL, changeOrigin: true },
+      '/nosql': { target: agentApiURL, changeOrigin: true },
+      '/queue': { target: agentApiURL, changeOrigin: true },
+      '/storage': { target: agentApiURL, changeOrigin: true },
+      '/webhook': { target: agentApiURL, changeOrigin: true },
+      '/.well-known': { target: agentApiURL, changeOrigin: true },
     };
 
 export default defineConfig({
   plugins: [react()],
   server: {
-    port: 3000,
+    port: 5173,
     proxy,
   },
   test: {
     globals: true,
     environment: 'jsdom',
-    setupFiles: ['./src/test-setup.ts'],
-    // Playwright E2E lives under e2e/ — do not collect those files as Vitest suites.
+    setupFiles: [],
     include: ['src/**/*.{test,spec}.{ts,tsx}'],
     exclude: ['e2e/**', 'node_modules/**', 'dist/**'],
     passWithNoTests: true,
