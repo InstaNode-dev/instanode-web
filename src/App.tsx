@@ -44,10 +44,13 @@ function AuthGate({ children }: { children: JSX.Element }) {
 // MarketingPage inlines its own nav. So routes mount the page directly —
 // no extra shell wrapper needed (would cause double nav rendering).
 
-export function App() {
+// AppRoutes is the route tree without the surrounding router. Exported so
+// the SSR entry (src/entry-server.tsx) can mount it under <StaticRouter>
+// for build-time pre-rendering. The browser-side wrapper below stays the
+// same — this is just an extraction, no route changes.
+export function AppRoutes() {
   return (
-    <BrowserRouter>
-      <Routes>
+    <Routes>
         {/* ─── public marketing surfaces ─────────────────────────── */}
         <Route path="/" element={<MarketingPage />} />
         <Route path="/pricing" element={<PricingPage />} />
@@ -99,6 +102,13 @@ export function App() {
 
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
+  )
+}
+
+export function App() {
+  return (
+    <BrowserRouter>
+      <AppRoutes />
     </BrowserRouter>
   )
 }
