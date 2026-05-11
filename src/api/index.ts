@@ -396,26 +396,67 @@ export async function deleteCustomDomain(stackSlug: string, id: string): Promise
   )
 }
 
-// ─── Billing (fixture — backend has /api/v1/billing/* but the dashboard
-//     needs a richer shape than today's API exposes) ─────────────────────
+// ─── Billing (LIVE for checkout + invoices; partial-fixture for state) ───
+//
+// fetchBilling   — plan tier is REAL (from /api/v1/whoami). Renewal date,
+//                  payment method, billing email all come from fixtures
+//                  because the agent API doesn't yet expose a GET
+//                  /api/v1/billing endpoint that aggregates this. Open
+//                  follow-up: add the endpoint, then drop FIXTURE_BILLING
+//                  here. See `dashboard/AGENT_API_NOTES.md` for the
+//                  expected shape.
+//
+// listInvoices   — LIVE. Calls GET /api/v1/billing/invoices on the agent
+//                  API; falls back to FIXTURE_INVOICES on 503 (billing
+//                  not configured, e.g. local dev without Razorpay keys)
+//                  so the UI stays usable. Returns an empty list when
+//                  the team has no subscription yet.
+//
+// createCheckout — LIVE. Calls POST /api/v1/billing/checkout, creates a
+//                  real Razorpay subscription, and returns the hosted
+//                  payment short_url. The caller (BillingPage) redirects
+//                  the user to short_url to complete payment. Errors
+//                  propagate as APIError so the page's checkoutErr state
+//                  can surface them inline.
+
 export async function fetchBilling(): Promise<{ ok: true; plan: string; billing: BillingDetails }> {
   try {
     const me = await fetchMe()
-    return fake({ ok: true as const, plan: me.user.tier, billing: FIXTURE_BILLING })
+    return { ok: true as const, plan: me.user.tier, billing: FIXTURE_BILLING }
   } catch {
-    return fake({ ok: true as const, plan: 'hobby', billing: FIXTURE_BILLING })
+    return { ok: true as const, plan: 'hobby', billing: FIXTURE_BILLING }
   }
 }
 
+type InvoicesResp = { ok: boolean; invoices?: Invoice[] }
+
 export async function listInvoices(): Promise<{ ok: true; invoices: Invoice[] }> {
-  return fake({ ok: true as const, invoices: FIXTURE_INVOICES })
+  try {
+    const r = await call<InvoicesResp>('/api/v1/billing/invoices')
+    return { ok: true, invoices: r.invoices ?? [] }
+  } catch (e: any) {
+    // 503 = billing_not_configured (no Razorpay keys in this env). Fall
+    // back to the fixture list so the page renders something usable in
+    // local dev. Any other error propagates so the UI shows a real
+    // failure state.
+    if (e?.status === 503) return { ok: true, invoices: FIXTURE_INVOICES }
+    throw e
+  }
 }
 
-export async function createCheckout(plan: string): Promise<{ ok: true; short_url: string }> {
-  // [FIXTURE] backend /api/v1/billing/checkout exists but currently returns
-  // either a short_url or a 503 when Razorpay is unconfigured. Stubbed for
-  // now so the UI flow is testable in isolation.
-  return fake({ ok: true as const, short_url: `https://rzp.io/p/stub-${plan}` })
+export async function createCheckout(
+  plan: string,
+): Promise<{ ok: true; short_url: string; subscription_id?: string }> {
+  const r = await call<{ ok: boolean; short_url: string; subscription_id?: string }>(
+    '/api/v1/billing/checkout',
+    { method: 'POST', body: JSON.stringify({ plan }) },
+  )
+  return { ok: true, short_url: r.short_url, subscription_id: r.subscription_id }
+}
+
+export async function cancelSubscription(): Promise<{ ok: true }> {
+  await call<{ ok: boolean }>('/api/v1/billing/cancel', { method: 'POST' })
+  return { ok: true }
 }
 
 // ─── Vault (LIVE — listing keys works, value reveal lives on detail) ────
