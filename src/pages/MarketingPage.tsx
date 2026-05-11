@@ -14,6 +14,22 @@
  */
 
 import { Brand } from '../components/Common'
+import { USE_CASES } from '../content/useCases'
+
+/* Curated subset of cases for the homepage showcase — one strong exemplar
+ * per major archetype so a visitor sees the catalogue's range without
+ * scrolling past 100+ cards. The slugs are stable (kebab-case of the
+ * canonical title) and validated at build time: if any slug below is
+ * missing from .content/use-cases/, the homepage card simply doesn't
+ * render — no broken links. */
+const HOMEPAGE_USECASE_SLUGS = [
+  'ephemeral-test-database-for-a-risky-migration',
+  'one-afternoon-mvp-backend',
+  'coding-agent-cross-session-memory',
+  'langgraph-fan-out-research-agents',
+  'devin-style-pr-bot-fleet',
+  'stripe-event-entitlements',
+]
 
 // Anchors and route paths used throughout the page. Centralized so we don't
 // scatter hardcoded string fragments — easy to update when /pricing or /docs
@@ -324,6 +340,43 @@ export function MarketingPage() {
                 <div className="claim-btn">Claim these resources →</div>
               </div>
             </article>
+          </div>
+        </div>
+      </section>
+
+      {/* ---------- use cases ---------- */}
+      <section className="mkt-section" id="use-cases-teaser">
+        <div className="mkt-wrap">
+          <div className="mkt-section-head">
+            <div className="mkt-section-tag">Use cases · 100+ shapes the platform fits</div>
+            <h2 className="mkt-section-title">
+              From throwaway test DBs to <span className="mkt-accent">agent swarms</span>.
+            </h2>
+            <p className="mkt-section-sub">
+              Coding agents that need memory, hackathon teams that need a backend in three curls,
+              multi-agent frameworks that need a message bus, indie founders shipping on Sunday
+              night. Six exemplar shapes below; the full catalogue covers 100+.
+            </p>
+          </div>
+
+          <div className="mkt-uc-grid">
+            {HOMEPAGE_USECASE_SLUGS
+              .map((slug) => USE_CASES.find((u) => u.slug === slug))
+              .filter((u): u is NonNullable<typeof u> => Boolean(u))
+              .map((u) => (
+                <a key={u.slug} href={`/use-cases/${u.slug}`} className="mkt-uc-card">
+                  <span className="mkt-uc-cat">{u.category}</span>
+                  <span className="mkt-uc-title">{u.title}</span>
+                  <span className="mkt-uc-scenario">{u.scenario}</span>
+                  <span className="mkt-uc-cta">See how →</span>
+                </a>
+              ))}
+          </div>
+
+          <div className="mkt-uc-foot">
+            <a href="/use-cases" className="btn btn-secondary">
+              See all {USE_CASES.length} use cases →
+            </a>
           </div>
         </div>
       </section>
@@ -1010,6 +1063,64 @@ const MKT_CSS = `
   font-size: 12.5px;
   font-weight: 600;
   border-radius: 6px;
+}
+
+/* ---------- use cases grid ---------- */
+.mkt-uc-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+  margin-bottom: 24px;
+}
+@media (max-width: 980px) { .mkt-uc-grid { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 640px) { .mkt-uc-grid { grid-template-columns: 1fr; } }
+
+.mkt-uc-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 18px 20px;
+  border: 1px solid var(--border-hi);
+  border-radius: 10px;
+  background: var(--surface);
+  text-decoration: none;
+  color: inherit;
+  transition: border-color 120ms, transform 120ms;
+}
+.mkt-uc-card:hover {
+  border-color: var(--accent);
+  transform: translateY(-1px);
+}
+.mkt-uc-cat {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+.mkt-uc-title {
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: -0.005em;
+  color: var(--text);
+}
+.mkt-uc-scenario {
+  font-size: 13px;
+  color: var(--text-dim);
+  line-height: 1.5;
+  flex: 1;
+}
+.mkt-uc-cta {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--accent);
+  margin-top: 4px;
+}
+
+.mkt-uc-foot {
+  display: flex;
+  justify-content: center;
+  margin-top: 8px;
 }
 
 /* ---------- pricing ---------- */

@@ -10,7 +10,8 @@
 
 import { useParams, Navigate } from 'react-router-dom'
 import { PublicShell } from '../layout/PublicShell'
-import { POSTS, type Post } from '../content/posts'
+import { POSTS } from '../content/posts'
+import { renderMarkdown } from '../lib/markdown'
 
 export function BlogPostPage() {
   const { slug } = useParams<{ slug: string }>()
@@ -27,7 +28,9 @@ export function BlogPostPage() {
           <h1 className="post-title">{post.title}</h1>
           <p className="post-author">By {post.author}</p>
         </header>
-        <div className="post-body">{renderMarkdown(post.body, post)}</div>
+        <div className="post-body">
+          {renderMarkdown(post.body, { baseHeading: 'h2', keyPrefix: post.slug })}
+        </div>
         <footer className="post-foot">
           <a href="/blog" className="post-foot-link">More posts</a>
           <a href="/docs" className="post-foot-link">Read the docs →</a>
@@ -35,62 +38,6 @@ export function BlogPostPage() {
       </article>
     </PublicShell>
   )
-}
-
-// renderMarkdown is intentionally minimal. It splits on blank lines into
-// block-level elements and pattern-matches each block. Inline formatting is
-// limited to `code`, **bold**, and naked URLs. No HTML is parsed; every
-// rendered node is a React element of a known type.
-function renderMarkdown(md: string, post: Post): React.ReactNode {
-  const blocks = md.trim().split(/\n\n+/)
-  return blocks.map((block, i) => {
-    const key = `${post.slug}-${i}`
-    if (block.startsWith('### ')) return <h3 key={key}>{inline(block.slice(4))}</h3>
-    if (block.startsWith('## ')) return <h2 key={key}>{inline(block.slice(3))}</h2>
-    if (block.startsWith('# ')) return <h1 key={key}>{inline(block.slice(2))}</h1>
-    if (block.startsWith('```')) {
-      const inner = block.replace(/^```\w*\n?/, '').replace(/\n?```$/, '')
-      return <pre key={key}><code>{inner}</code></pre>
-    }
-    if (block.startsWith('- ') || block.startsWith('* ')) {
-      const items = block.split('\n').filter((l) => l.startsWith('- ') || l.startsWith('* '))
-      return (
-        <ul key={key}>
-          {items.map((item, j) => (
-            <li key={`${key}-${j}`}>{inline(item.slice(2))}</li>
-          ))}
-        </ul>
-      )
-    }
-    return <p key={key}>{inline(block)}</p>
-  })
-}
-
-// inline handles `code`, **bold**, and plain text. Splits on tokens then
-// rebuilds with appropriate React elements.
-function inline(text: string): React.ReactNode {
-  const parts: React.ReactNode[] = []
-  let rest = text
-  let key = 0
-  while (rest.length > 0) {
-    const code = rest.match(/^(.*?)`([^`]+)`(.*)$/)
-    if (code) {
-      if (code[1]) parts.push(code[1])
-      parts.push(<code key={`c-${key++}`}>{code[2]}</code>)
-      rest = code[3]
-      continue
-    }
-    const bold = rest.match(/^(.*?)\*\*(.+?)\*\*(.*)$/)
-    if (bold) {
-      if (bold[1]) parts.push(bold[1])
-      parts.push(<strong key={`b-${key++}`}>{bold[2]}</strong>)
-      rest = bold[3]
-      continue
-    }
-    parts.push(rest)
-    break
-  }
-  return parts
 }
 
 function formatDate(iso: string): string {

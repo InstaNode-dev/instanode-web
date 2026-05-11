@@ -15,6 +15,7 @@
  * public domain. */
 
 import { PublicShell } from '../layout/PublicShell'
+import { renderMarkdown } from '../lib/markdown'
 
 type Section = {
   id: string
@@ -94,66 +95,15 @@ export function DocsPage() {
                   {s.title}
                 </a>
               </h2>
-              <div className="docs-section-body">{renderDocsMarkdown(s.body, s.id)}</div>
+              <div className="docs-section-body">
+                {renderMarkdown(s.body, { baseHeading: 'h3', keyPrefix: s.id })}
+              </div>
             </section>
           ))}
         </article>
       </div>
     </PublicShell>
   )
-}
-
-// Same minimal markdown handling as BlogPostPage, kept self-contained so the
-// pages don't share a parser yet (premature abstraction; revisit if a third
-// page wants the same rendering).
-function renderDocsMarkdown(md: string, sectionID: string): React.ReactNode {
-  const blocks = md.trim().split(/\n\n+/)
-  return blocks.map((block, i) => {
-    const key = `${sectionID}-${i}`
-    if (block.startsWith('### ')) return <h3 key={key}>{inline(block.slice(4))}</h3>
-    if (block.startsWith('## ')) return <h3 key={key}>{inline(block.slice(3))}</h3>
-    if (block.startsWith('```')) {
-      const inner = block.replace(/^```\w*\n?/, '').replace(/\n?```$/, '')
-      return <pre key={key}><code>{inner}</code></pre>
-    }
-    if (block.startsWith('- ') || block.startsWith('* ')) {
-      const items = block.split('\n').filter((l) => l.startsWith('- ') || l.startsWith('* '))
-      return (
-        <ul key={key}>
-          {items.map((item, j) => (
-            <li key={`${key}-${j}`}>{inline(item.slice(2))}</li>
-          ))}
-        </ul>
-      )
-    }
-    if (block.startsWith('|')) return <pre key={key} className="docs-table"><code>{block}</code></pre>
-    return <p key={key}>{inline(block)}</p>
-  })
-}
-
-function inline(text: string): React.ReactNode {
-  const parts: React.ReactNode[] = []
-  let rest = text
-  let key = 0
-  while (rest.length > 0) {
-    const code = rest.match(/^(.*?)`([^`]+)`(.*)$/)
-    if (code) {
-      if (code[1]) parts.push(code[1])
-      parts.push(<code key={`c-${key++}`}>{code[2]}</code>)
-      rest = code[3]
-      continue
-    }
-    const bold = rest.match(/^(.*?)\*\*(.+?)\*\*(.*)$/)
-    if (bold) {
-      if (bold[1]) parts.push(bold[1])
-      parts.push(<strong key={`b-${key++}`}>{bold[2]}</strong>)
-      rest = bold[3]
-      continue
-    }
-    parts.push(rest)
-    break
-  }
-  return parts
 }
 
 function DocsStyles() {
@@ -183,7 +133,7 @@ function DocsStyles() {
       .docs-section-body code { background: var(--ink); border: 1px solid var(--border); color: var(--text); padding: 1px 6px; border-radius: 4px; font-size: 13.5px; font-family: var(--font-mono); }
       .docs-section-body pre { background: var(--code-bg); color: var(--text); border: 1px solid var(--border); padding: 16px 20px; border-radius: 8px; overflow-x: auto; font-size: 13px; line-height: 1.55; margin: 16px 0; }
       .docs-section-body pre code { background: transparent; padding: 0; color: inherit; }
-      .docs-section-body pre.docs-table { background: transparent; color: inherit; padding: 0; font-size: 14px; }
+      .docs-section-body pre.md-table { background: transparent; color: inherit; padding: 0; font-size: 14px; }
       .docs-section-body strong { font-weight: 600; }
     `}</style>
   )
