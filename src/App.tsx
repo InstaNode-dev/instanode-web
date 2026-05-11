@@ -1,7 +1,10 @@
+import { lazy, Suspense } from 'react'
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom'
-import { AppShell } from './layout/AppShell'
 
-// Public marketing surfaces
+// Public marketing surfaces — eagerly imported. A marketing visitor might
+// click any of these from the homepage nav, so keeping them in the main
+// chunk avoids a network round-trip on first interaction. These are also
+// the routes that get statically pre-rendered by scripts/prerender.mjs.
 import { MarketingPage } from './pages/MarketingPage'
 import { PricingPage } from './pages/PricingPage'
 import { ForAgentsPage } from './pages/ForAgentsPage'
@@ -12,24 +15,65 @@ import { DocsPage } from './pages/DocsPage'
 import { UseCasesPage } from './pages/UseCasesPage'
 import { UseCaseDetailPage } from './pages/UseCaseDetailPage'
 
-// Auth surfaces
+// Auth surfaces — eagerly imported. A marketing visitor can land on /login
+// directly (deep link, "Sign in" button), and the login form is small.
 import { LoginPage } from './pages/LoginPage'
 import { LoginCallbackPage } from './pages/LoginCallbackPage'
 import { ClaimPage } from './pages/ClaimPage'
 
-// Authenticated dashboard surfaces
-import { OverviewPage } from './pages/OverviewPage'
-import { ResourcesPage } from './pages/ResourcesPage'
-import { ResourceDetailPage } from './pages/ResourceDetailPage'
-import { DeploymentsPage } from './pages/DeploymentsPage'
-import { DeployDetailPage } from './pages/DeployDetailPage'
-import { StacksPage } from './pages/StacksPage'
-import { VaultPage } from './pages/VaultPage'
-import { TeamPage } from './pages/TeamPage'
-import { BillingPage } from './pages/BillingPage'
-import { SettingsPage } from './pages/SettingsPage'
-import { AgentPage } from './pages/AgentPage'
-import { ContractsPage } from './pages/ContractsPage'
+// Authenticated dashboard surfaces — lazy-loaded. These pages only render
+// behind AuthGate (token must be present), so a marketing visitor never
+// needs the bytes. Each React.lazy() call ends up in its own chunk; Rollup
+// splits these out of the main bundle and the browser fetches them on
+// demand when the user navigates into /app/*.
+//
+// AppShell is also lazy-loaded because it's exclusively the chrome for
+// /app/* — the nav rail, breadcrumbs, scope pills. A marketing visitor on
+// the homepage never sees it, so its ~10 KB of JSX + the useDashboardCtx
+// hook tree it pulls in don't need to ship in the entry bundle.
+//
+// All page components use named exports, so we adapt them to React.lazy's
+// default-export contract inline. The chunkName comment is a hint for
+// rollup so the emitted file has a recognizable name in dist/assets/.
+const AppShell = lazy(() =>
+  import('./layout/AppShell').then((m) => ({ default: m.AppShell })),
+)
+const OverviewPage = lazy(() =>
+  import(/* webpackChunkName: "app-overview" */ './pages/OverviewPage').then((m) => ({ default: m.OverviewPage })),
+)
+const ResourcesPage = lazy(() =>
+  import('./pages/ResourcesPage').then((m) => ({ default: m.ResourcesPage })),
+)
+const ResourceDetailPage = lazy(() =>
+  import('./pages/ResourceDetailPage').then((m) => ({ default: m.ResourceDetailPage })),
+)
+const DeploymentsPage = lazy(() =>
+  import('./pages/DeploymentsPage').then((m) => ({ default: m.DeploymentsPage })),
+)
+const DeployDetailPage = lazy(() =>
+  import('./pages/DeployDetailPage').then((m) => ({ default: m.DeployDetailPage })),
+)
+const StacksPage = lazy(() =>
+  import('./pages/StacksPage').then((m) => ({ default: m.StacksPage })),
+)
+const VaultPage = lazy(() =>
+  import('./pages/VaultPage').then((m) => ({ default: m.VaultPage })),
+)
+const TeamPage = lazy(() =>
+  import('./pages/TeamPage').then((m) => ({ default: m.TeamPage })),
+)
+const BillingPage = lazy(() =>
+  import('./pages/BillingPage').then((m) => ({ default: m.BillingPage })),
+)
+const SettingsPage = lazy(() =>
+  import('./pages/SettingsPage').then((m) => ({ default: m.SettingsPage })),
+)
+const AgentPage = lazy(() =>
+  import('./pages/AgentPage').then((m) => ({ default: m.AgentPage })),
+)
+const ContractsPage = lazy(() =>
+  import('./pages/ContractsPage').then((m) => ({ default: m.ContractsPage })),
+)
 
 import { getToken } from './api'
 
@@ -42,6 +86,24 @@ function AuthGate({ children }: { children: JSX.Element }) {
   return children
 }
 
+// AppLoadingFallback — shown while a lazy-loaded /app/* chunk is in flight.
+// Tiny inline style so it renders even before the page's own CSS resolves.
+// In practice this fallback is on screen for ~50-150ms on a warm cache.
+function AppLoadingFallback() {
+  return (
+    <div
+      style={{
+        padding: '2rem',
+        fontFamily: 'system-ui, sans-serif',
+        color: 'var(--text-muted, #888)',
+        fontSize: '0.875rem',
+      }}
+    >
+      Loading…
+    </div>
+  )
+}
+
 // PricingPage and ForAgentsPage both wrap themselves in <PublicShell>, and
 // MarketingPage inlines its own nav. So routes mount the page directly —
 // no extra shell wrapper needed (would cause double nav rendering).
@@ -50,6 +112,12 @@ function AuthGate({ children }: { children: JSX.Element }) {
 // the SSR entry (src/entry-server.tsx) can mount it under <StaticRouter>
 // for build-time pre-rendering. The browser-side wrapper below stays the
 // same — this is just an extraction, no route changes.
+//
+// SSR note: scripts/prerender.mjs only renders public routes (see its
+// PRERENDER_ROUTES list — no /app/* paths). React.lazy resolves to a
+// Suspense fallback during SSR for unrendered chunks, but since SSG never
+// visits an /app route, the lazy components are never invoked server-side
+// and the build still emits 115 HTML files.
 export function AppRoutes() {
   return (
     <Routes>
@@ -70,11 +138,17 @@ export function AppRoutes() {
         <Route path="/claim" element={<ClaimPage />} />
 
         {/* ─── authenticated dashboard at /app/* ─────────────────── */}
+        {/* Suspense wraps the whole /app subtree so any lazy page below
+            shows the same fallback while its chunk loads. We place it
+            inside AuthGate so unauthenticated users redirect to /login
+            without ever triggering a chunk fetch. */}
         <Route
           path="/app"
           element={
             <AuthGate>
-              <AppShell />
+              <Suspense fallback={<AppLoadingFallback />}>
+                <AppShell />
+              </Suspense>
             </AuthGate>
           }
         >
