@@ -92,10 +92,14 @@ She sends the URL to her friend at 12:14 AM and goes to bed.
 
 ## What that 90 seconds usually costs
 
-Every alternative Maya didn't read is a tutorial. Heroku wants the Procfile.
-Fly Machines wants \`flyctl launch\` and a config file. Railway and Render
-want her to push to a Git remote. Each of them is a fine product. None of
-them are obvious in the dark on a Sunday at midnight.
+Every alternative Maya didn't read assumes she's awake. Heroku still wants
+a \`Procfile\`, a \`runtime.txt\`, and a credit card before her first push —
+fifteen minutes of yak-shaving on a laptop at midnight. Fly's
+\`flyctl launch\` is fast, but its first run drops her in an interactive
+prompt about regions she didn't know she had to pick. Render and Railway
+want her to \`git push\`, which means a new repo, a new remote, and reading
+their auto-detected build settings before anything happens. None of these
+are bad products. All of them assume she'll wait until tomorrow.
 
 The instanode endpoints fit in muscle memory: \`/db/new\`, \`/cache/new\`,
 \`/deploy/new\`. Maya read zero documentation this session. The platform
