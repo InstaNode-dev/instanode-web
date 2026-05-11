@@ -27,6 +27,7 @@
 
 import { build } from 'vite'
 import { readFile, writeFile, mkdir, rm } from 'fs/promises'
+import { existsSync, readdirSync } from 'fs'
 import { resolve, dirname } from 'path'
 import { fileURLToPath } from 'url'
 
@@ -44,13 +45,15 @@ const SSR_DIST = resolve(ROOT, 'dist-ssr')
  * intentionally absent; they require client-only APIs (localStorage) and
  * have no crawler value. */
 async function loadRoutes() {
-  // Read the posts module's source and pull slug strings out with a regex.
-  // We deliberately do NOT import posts.ts here — that would need a TS
-  // loader in Node. The SSR bundle handles TS for the render call; this
-  // little parse only needs slugs.
-  const src = await readFile(resolve(ROOT, 'src/content/posts.ts'), 'utf-8')
-  const slugMatches = [...src.matchAll(/slug:\s*['"]([^'"]+)['"]/g)]
-  const slugs = slugMatches.map((m) => m[1])
+  // Slugs come from .content/blog/<slug>.md filenames. fetch-content.mjs
+  // populates .content/ from InstaNode-dev/content before prerender runs
+  // (via the `prebuild` script in package.json). Adding a post in the
+  // content repo automatically expands the prerender route list — no
+  // change needed here.
+  const blogDir = resolve(ROOT, '.content/blog')
+  const slugs = existsSync(blogDir)
+    ? readdirSync(blogDir).filter((f) => f.endsWith('.md')).map((f) => f.replace(/\.md$/, ''))
+    : []
   return [
     '/',
     '/pricing',
