@@ -378,6 +378,21 @@ export function MarketingPage() {
               See all {USE_CASES.length} use cases →
             </a>
           </div>
+
+          {/* Wedge-walkthrough callout — the new "Sixty seconds…" post is the
+              concrete demonstration of "spin up an app in one prompt." Promoted
+              here so visitors don't have to find it through /blog. */}
+          <a href="/blog/sixty-seconds-one-prompt-one-working-app" className="mkt-wedge-callout">
+            <span className="mkt-wedge-eyebrow">Build note · 4 min read</span>
+            <span className="mkt-wedge-title">
+              Sixty seconds, one prompt, one working app
+            </span>
+            <span className="mkt-wedge-body">
+              Devika, a non-developer, asked her agent to build an expense tracker.
+              Postgres + FastAPI + a real HTTPS URL. Three curls and the build
+              took 90 seconds — including the deploy. Read the walkthrough →
+            </span>
+          </a>
         </div>
       </section>
 
@@ -1121,6 +1136,43 @@ const MKT_CSS = `
   display: flex;
   justify-content: center;
   margin-top: 8px;
+}
+
+/* Wedge walkthrough callout — sits below the use-cases grid */
+.mkt-wedge-callout {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 36px;
+  padding: 24px 28px;
+  border: 1px solid var(--border-hi);
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgba(0, 228, 142, 0.04), transparent 60%);
+  text-decoration: none;
+  color: inherit;
+  transition: border-color 120ms, transform 120ms;
+}
+.mkt-wedge-callout:hover {
+  border-color: var(--accent);
+  transform: translateY(-1px);
+}
+.mkt-wedge-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+}
+.mkt-wedge-title {
+  font-size: 19px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+.mkt-wedge-body {
+  font-size: 14px;
+  color: var(--text-dim);
+  line-height: 1.55;
 }
 
 /* ---------- pricing ---------- */
