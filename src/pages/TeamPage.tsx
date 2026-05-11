@@ -38,7 +38,7 @@ export function TeamPage() {
       <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr', gap: 16 }}>
         <div>
           <div className="section-h">
-            <h2>Members · {members.length} of unlimited</h2>
+            <h2>Members · {members.length}</h2>
             <PromptPill label="invite teammate" />
           </div>
 
@@ -97,7 +97,7 @@ export function TeamPage() {
 
           <Card title="Plan limit" style={{ marginTop: 16 }}>
             <p style={{ fontSize: 12.5, color: 'var(--text-dim)', lineHeight: 1.55, marginBottom: 12 }}>
-              Pro tier · 5 of unlimited team seats. Team tier removes the limit.
+              Pro tier · 5 team seats. Higher seat limits ship with the Team tier (coming soon).
             </p>
             <Link to="/billing" className="btn btn-secondary btn-sm" style={{ display: 'inline-flex' }}>
               View billing →
