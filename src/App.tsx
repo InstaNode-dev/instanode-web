@@ -1,25 +1,50 @@
 import { lazy, Suspense } from 'react'
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 
-// Public marketing surfaces — eagerly imported. A marketing visitor might
-// click any of these from the homepage nav, so keeping them in the main
-// chunk avoids a network round-trip on first interaction. These are also
-// the routes that get statically pre-rendered by scripts/prerender.mjs.
+// Homepage — eagerly imported. It's the cold-load path and the most-visited
+// public surface, so it stays in the main entry chunk.
 import { MarketingPage } from './pages/MarketingPage'
-import { PricingPage } from './pages/PricingPage'
-import { ForAgentsPage } from './pages/ForAgentsPage'
-import { StatusPage } from './pages/StatusPage'
-import { BlogPage } from './pages/BlogPage'
-import { BlogPostPage } from './pages/BlogPostPage'
-import { DocsPage } from './pages/DocsPage'
-import { UseCasesPage } from './pages/UseCasesPage'
-import { UseCaseDetailPage } from './pages/UseCaseDetailPage'
 
 // Auth surfaces — eagerly imported. A marketing visitor can land on /login
 // directly (deep link, "Sign in" button), and the login form is small.
 import { LoginPage } from './pages/LoginPage'
 import { LoginCallbackPage } from './pages/LoginCallbackPage'
 import { ClaimPage } from './pages/ClaimPage'
+
+// Secondary public marketing surfaces — lazy-loaded on the client so Rollup
+// splits each one into its own chunk and a homepage visitor never pays for
+// the bytes of pages they didn't navigate to. A click on the nav fetches
+// the chunk on demand.
+//
+// SSR note: scripts/prerender.mjs uses src/entry-server.tsx, which defines
+// its OWN AppRoutes with synchronous imports — so renderToString sees real
+// components and the pre-rendered HTML contains every word of content.
+// React.lazy() during renderToString would otherwise resolve to the
+// Suspense fallback and ship empty HTML to crawlers, killing SEO.
+const PricingPage = lazy(() =>
+  import('./pages/PricingPage').then((m) => ({ default: m.PricingPage })),
+)
+const ForAgentsPage = lazy(() =>
+  import('./pages/ForAgentsPage').then((m) => ({ default: m.ForAgentsPage })),
+)
+const StatusPage = lazy(() =>
+  import('./pages/StatusPage').then((m) => ({ default: m.StatusPage })),
+)
+const BlogPage = lazy(() =>
+  import('./pages/BlogPage').then((m) => ({ default: m.BlogPage })),
+)
+const BlogPostPage = lazy(() =>
+  import('./pages/BlogPostPage').then((m) => ({ default: m.BlogPostPage })),
+)
+const DocsPage = lazy(() =>
+  import('./pages/DocsPage').then((m) => ({ default: m.DocsPage })),
+)
+const UseCasesPage = lazy(() =>
+  import('./pages/UseCasesPage').then((m) => ({ default: m.UseCasesPage })),
+)
+const UseCaseDetailPage = lazy(() =>
+  import('./pages/UseCaseDetailPage').then((m) => ({ default: m.UseCaseDetailPage })),
+)
 
 // Authenticated dashboard surfaces — lazy-loaded. These pages only render
 // behind AuthGate (token must be present), so a marketing visitor never
@@ -104,23 +129,35 @@ function AppLoadingFallback() {
   )
 }
 
+// PublicLoadingFallback — shown while a lazy-loaded public marketing page
+// chunk is in flight (e.g. /pricing, /docs, /blog). We render an empty
+// span instead of "Loading…" text so a flash of loader copy never appears
+// over the layout for a sub-100ms chunk fetch on a warm cache.
+//
+// Note: this fallback only ever appears in the browser. The SSG path in
+// scripts/prerender.mjs uses src/entry-server.tsx, which declares its own
+// route tree with synchronous imports — so renderToString resolves real
+// content into every pre-rendered HTML file and crawlers never see this.
+function PublicLoadingFallback() {
+  return <span aria-hidden="true" />
+}
+
 // PricingPage and ForAgentsPage both wrap themselves in <PublicShell>, and
 // MarketingPage inlines its own nav. So routes mount the page directly —
 // no extra shell wrapper needed (would cause double nav rendering).
 
-// AppRoutes is the route tree without the surrounding router. Exported so
-// the SSR entry (src/entry-server.tsx) can mount it under <StaticRouter>
-// for build-time pre-rendering. The browser-side wrapper below stays the
-// same — this is just an extraction, no route changes.
+// AppRoutes is the browser-side route tree. The SSR entry
+// (src/entry-server.tsx) declares its own equivalent tree with synchronous
+// imports — see the comment at the top of that file for why.
 //
-// SSR note: scripts/prerender.mjs only renders public routes (see its
-// PRERENDER_ROUTES list — no /app/* paths). React.lazy resolves to a
-// Suspense fallback during SSR for unrendered chunks, but since SSG never
-// visits an /app route, the lazy components are never invoked server-side
-// and the build still emits 115 HTML files.
+// The outer <Suspense> here catches the lazy public pages (Pricing, Blog,
+// Docs, etc.) while their chunks load. The inner <Suspense> inside the
+// /app route handles the lazy /app/* pages — kept separate so a click in
+// /app doesn't blank the marketing shell.
 export function AppRoutes() {
   return (
-    <Routes>
+    <Suspense fallback={<PublicLoadingFallback />}>
+      <Routes>
         {/* ─── public marketing surfaces ─────────────────────────── */}
         <Route path="/" element={<MarketingPage />} />
         <Route path="/pricing" element={<PricingPage />} />
@@ -180,6 +217,7 @@ export function AppRoutes() {
 
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
+    </Suspense>
   )
 }
 
