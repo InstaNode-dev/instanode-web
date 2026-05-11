@@ -23,6 +23,12 @@
  * Auth-gated routes (/app/*, /login*, /claim) are NOT pre-rendered — they
  * have no SEO value and rendering them in Node would crash on localStorage
  * access. The existing dist/index.html SPA fallback covers them.
+ *
+ * Additional artifacts emitted at dist/ root:
+ *   - llms.txt, llms-full.txt — LLM-oriented content manifest + dump
+ *   - sitemap.xml — every public URL (HTML + .md mirrors) for crawler
+ *     discovery; auth-gated routes excluded
+ *   - robots.txt — allow all, disallow auth-gated paths, point at sitemap
  */
 
 import { build } from 'vite'
@@ -170,11 +176,128 @@ async function main() {
   await writeAggregate(mdRoutes)
   console.log('prerender: wrote llms-full.txt aggregate')
 
-  // Step 8: clean up the SSR bundle — it's only needed during this script.
+  // Step 8: emit sitemap.xml + robots.txt at the dist root so Google,
+  // Bing, and generative-engine crawlers (Perplexity, ChatGPT search)
+  // can discover every public URL — both the HTML routes and their
+  // .md mirrors. See writeSitemapAndRobots() for the per-route
+  // <changefreq> policy and the auth-gated route skip list.
+  const sitemapUrlCount = await writeSitemapAndRobots(routes, mdRoutes)
+  console.log(`prerender: wrote sitemap.xml (${sitemapUrlCount} URLs) + robots.txt`)
+
+  // Step 9: clean up the SSR bundle — it's only needed during this script.
   // Leaving it in dist-ssr would inflate the GH Pages upload by ~400 KB.
   await rm(SSR_DIST, { recursive: true, force: true })
 
   console.log(`prerender: ${written} files written. SEO-ready.`)
+}
+
+/* SITE_ORIGIN — base URL for every <loc> in sitemap.xml. No trailing slash;
+ * route paths already start with '/'. Kept as a const so swapping to a
+ * preview origin during testing is a one-line change. */
+const SITE_ORIGIN = 'https://instanode.dev'
+
+/* AUTH_GATED_PREFIXES — routes excluded from sitemap.xml AND disallowed in
+ * robots.txt. These pages render only behind a logged-in session and have
+ * zero crawler value. Even if a crawler stumbled onto one, it would index
+ * the empty SPA shell. Keep this list in lockstep with the App.tsx auth
+ * guards. */
+const AUTH_GATED_PREFIXES = ['/app/', '/login', '/claim']
+
+/* isAuthGated — returns true if `route` is auth-gated and should be
+ * excluded from sitemap.xml. Matches by prefix because /app/* has many
+ * dynamic children. /login and /claim are exact-match-or-suffix to also
+ * catch /login?next=foo (the bare path is what ends up in the sitemap
+ * though — query strings are stripped upstream). */
+function isAuthGated(route) {
+  return AUTH_GATED_PREFIXES.some((p) =>
+    p.endsWith('/') ? route.startsWith(p) : route === p || route.startsWith(p + '/'),
+  )
+}
+
+/* changefreqFor — pick a sensible <changefreq> per route. Search engines
+ * treat this as a hint, not a contract — pages that change more often get
+ * recrawled sooner. Policy:
+ *   - /blog and /use-cases (index pages): daily — new entries appear here
+ *   - /blog/:slug, /use-cases/:slug (detail pages): weekly — occasional
+ *     fix-ups, mostly stable
+ *   - /pricing, /docs, /for-agents: monthly — copy is intentional and rare
+ *   - /, /status, anything else: weekly — homepage updates with new posts;
+ *     /status is mostly static but reflects incident state
+ *
+ * .md mirror routes inherit the same policy as their HTML counterparts:
+ * /blog.md is `daily` (mirrors /blog), /pricing.md is `monthly`
+ * (mirrors /pricing). The trailing `.md` is stripped before matching, and
+ * the special root mirror `/index.md` is normalized to `/`. */
+function changefreqFor(route) {
+  // Normalize .md mirror back to its HTML equivalent for policy lookup.
+  // /index.md → /, /pricing.md → /pricing, /blog/foo.md → /blog/foo.
+  let key = route
+  if (key === '/index.md') key = '/'
+  else if (key.endsWith('.md')) key = key.slice(0, -3)
+
+  if (key === '/blog' || key === '/use-cases') return 'daily'
+  if (key.startsWith('/blog/') || key.startsWith('/use-cases/')) return 'weekly'
+  if (key === '/pricing' || key === '/docs' || key === '/for-agents') return 'monthly'
+  return 'weekly'
+}
+
+/* writeSitemapAndRobots — emit dist/sitemap.xml and dist/robots.txt.
+ *
+ *   routes:   the HTML route list from loadRoutes() (e.g. '/blog/foo')
+ *   mdRoutes: the .md mirror list from emitMarkdownRoutes()
+ *             (e.g. {route: '/blog/foo.md', ...})
+ *
+ * Returns the total URL count written into sitemap.xml so the caller can
+ * log it. Both files live at the dist root; GH Pages / Vite preview serve
+ * them as-is at /sitemap.xml and /robots.txt. */
+async function writeSitemapAndRobots(routes, mdRoutes) {
+  const today = new Date().toISOString().slice(0, 10) // YYYY-MM-DD per ISO 8601
+
+  // Build the URL set: every HTML route + every .md mirror, minus
+  // auth-gated paths. Deduped via a Set so the order is preserved and a
+  // route appearing in both lists (shouldn't happen, but cheap insurance)
+  // only emits once.
+  const seen = new Set()
+  const entries = []
+  const addEntry = (route) => {
+    if (isAuthGated(route)) return
+    if (seen.has(route)) return
+    seen.add(route)
+    entries.push({ route, changefreq: changefreqFor(route) })
+  }
+  for (const r of routes) addEntry(r)
+  for (const { route } of mdRoutes) addEntry(route)
+
+  // XML body. Each <loc> is SITE_ORIGIN + route — no trailing slash.
+  // Stable ordering means the file is diffable across builds.
+  const xmlEntries = entries
+    .map(({ route, changefreq }) => {
+      const loc = `${SITE_ORIGIN}${route}`
+      return `  <url>\n    <loc>${loc}</loc>\n    <lastmod>${today}</lastmod>\n    <changefreq>${changefreq}</changefreq>\n  </url>`
+    })
+    .join('\n')
+
+  const sitemap =
+    `<?xml version="1.0" encoding="UTF-8"?>\n` +
+    `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n` +
+    `${xmlEntries}\n` +
+    `</urlset>\n`
+
+  await writeFile(resolve(DIST, 'sitemap.xml'), sitemap, 'utf-8')
+
+  // robots.txt — allow everything that isn't auth-gated, then point at
+  // the sitemap. Disallow entries match the AUTH_GATED_PREFIXES list so
+  // the two stay in sync.
+  const robots =
+    `User-agent: *\n` +
+    `Allow: /\n` +
+    AUTH_GATED_PREFIXES.map((p) => `Disallow: ${p}`).join('\n') +
+    `\n\n` +
+    `Sitemap: ${SITE_ORIGIN}/sitemap.xml\n`
+
+  await writeFile(resolve(DIST, 'robots.txt'), robots, 'utf-8')
+
+  return entries.length
 }
 
 /* emitMarkdownRoutes — writes the .md mirror for every HTML route.
