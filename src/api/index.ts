@@ -1,6 +1,6 @@
 // Real API surface — talks to api.instanode.dev (via Vite proxy in dev,
 // same-origin in prod). Endpoints that do NOT exist on the live backend
-// (vault list, activity feed, dashboard-team, members CRUD) fall back to
+// (vault list, activity feed, team metadata, members CRUD) fall back to
 // fixtures so the dashboard remains usable end-to-end while engineering
 // catches up. Each fallback is annotated `[FIXTURE]` in the comment.
 

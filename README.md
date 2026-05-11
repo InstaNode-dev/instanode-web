@@ -1,14 +1,14 @@
 # instanode.dev Dashboard
 
-React 18 + TypeScript + Vite frontend for the customer dashboard. This is where users log in, view their provisioned resources, upgrade their plan, and manage their team. It talks exclusively to `dashboard-api/` (port 8081, NodePort 30082) — not directly to the agent-facing `api/`.
+React 18 + TypeScript + Vite frontend for the customer dashboard. This is where users log in, view their provisioned resources, upgrade their plan, and manage their team. It talks directly to the agent-facing API at `api.instanode.dev`.
 
 ---
 
-## Why Two APIs?
+## Architecture
 
-`api/` (port 8080) is designed for agents and automation: anonymous-friendly, no sessions, simple HTTP, no cookies. It intentionally has no concept of "logged-in user."
+The dashboard is a single-page app that calls the agent API at `api.instanode.dev` for every operation: auth, claim, billing, team management, resource CRUD, and stacks. There is no intermediate backend — the browser holds a bearer token (`localStorage.instanode.token`) and includes it on every request.
 
-`dashboard-api/` (port 8081) is designed for humans: it manages JWT sessions, team membership, billing state, and exposes resource management UI that proxies reads from the platform database. The two services have different auth models, different latency tolerances, and different security concerns. Keeping them separate means a bug in the human-facing session layer cannot affect agent provisioning, and vice versa.
+In dev, Vite proxies `/api`, `/auth`, `/claim`, `/db`, `/cache`, `/nosql`, `/queue`, `/storage`, `/webhook`, `/.well-known` to `AGENT_API_URL` (default `http://api.instanode.dev`). In prod, the dashboard ships as a static bundle on GitHub Pages and issues cross-origin fetches directly to `https://api.instanode.dev` (set via the `VITE_API_URL` build env).
 
 ---
 
@@ -20,9 +20,9 @@ npm install
 npm run dev      # Vite dev server at http://localhost:5173
 ```
 
-Requires `dashboard-api` running and reachable at `http://localhost:30082` (k8s NodePort). If you're not running k8s, start it with docker-compose:
+To point the dev proxy at a local k8s cluster:
 ```bash
-cd infra && docker compose up -d
+AGENT_API_URL=http://localhost:30080 npm run dev
 ```
 
 To run unit tests:
@@ -37,16 +37,16 @@ npm test
 ```
 src/
 ├── hooks/
-│   ├── useAuth.ts          # JWT session management — login, logout, auto-refresh
-│   └── useResources.ts     # Fetches and caches the resource list from dashboard-api
+│   ├── useAuth.ts          # Bearer-token session management
+│   └── useResources.ts     # Fetches and caches the resource list
 ├── pages/
-│   ├── LoginPage.tsx       # GitHub OAuth / magic link entry point
+│   ├── LoginPage.tsx       # Email magic link / PAT entry point
 │   ├── DashboardPage.tsx   # Main resource list view
 │   ├── ClaimPage.tsx       # Anonymous → account conversion (arrives via /start?t=jwt)
 │   ├── BillingPage.tsx     # Plan status + upgrade flow
 │   ├── SettingsPage.tsx    # Team name, member management
 │   ├── ResourceDetailPage.tsx  # Per-resource view + rotate credentials
-│   └── DeployPage.tsx      # (Phase 6) Container deploy entrypoint
+│   └── DeployPage.tsx      # Container deploy entrypoint
 └── components/
     ├── Layout/             # Sidebar + top nav shell
     ├── ResourceCard/       # Resource summary card used in DashboardPage
@@ -59,27 +59,26 @@ src/
 
 ## Auth Flow
 
-1. User clicks "Login with GitHub" on `LoginPage` — browser goes to `dashboard-api/auth/github`.
-2. OAuth redirect returns to `dashboard-api/auth/callback`, which issues a JWT and sets a `__session` HttpOnly cookie.
-3. `useAuth.ts` calls `/auth/me` on mount to hydrate session state. The JWT is kept in memory (not localStorage) to avoid XSS exposure.
-4. `useAuth.ts` silently calls `/auth/refresh` every 23 hours to extend the session without prompting the user.
-5. On logout, `/auth/logout` clears the cookie and the in-memory token.
+1. User pastes a PAT or completes the email magic-link flow on `LoginPage`.
+2. The bearer token is stored in `localStorage.instanode.token` and attached as `Authorization: Bearer <token>` on every subsequent request.
+3. `useAuth.ts` calls `GET /auth/me` on mount to hydrate session state.
+4. On 401, the client clears the token, stores the current path under `instanode.return_to`, and redirects to `/login`.
 
 ---
 
 ## The Claim Page (Anonymous to Account)
 
-When an anonymous user hits a resource limit, `api/` embeds an upgrade URL in the response:
+When an anonymous user hits a resource limit, the agent API embeds an upgrade URL in the response:
 ```
 https://instanode.dev/start?t=<signed-jwt>
 ```
 
-That URL hits `api/GET /start`, which validates the JWT and issues a 302 redirect to:
+That URL hits `GET /start` on the agent API, which validates the JWT and issues a 302 redirect to:
 ```
 http://localhost:5173/claim?t=<jwt>
 ```
 
-`ClaimPage.tsx` picks up the `t` parameter, lets the user choose a login method, and calls `api/POST /claim` to atomically convert the anonymous session into a full account. The JWT in the claim is single-use — a second call returns 409 Conflict, preventing double-conversion.
+`ClaimPage.tsx` picks up the `t` parameter, lets the user choose a login method, and calls `POST /claim` on the agent API to atomically convert the anonymous session into a full account. The JWT in the claim is single-use — a second call returns 409 Conflict, preventing double-conversion.
 
 ---
 
@@ -88,7 +87,7 @@ http://localhost:5173/claim?t=<jwt>
 107 tests covering auth guards, the upgrade journey, and resource interactions.
 
 ```bash
-# Requires: Vite dev server running (npm run dev) + k8s API at localhost:30080
+# Requires: Vite dev server running (npm run dev) + agent API at localhost:30080
 E2E_API_URL=http://localhost:30080 npx playwright test --project=chromium
 
 # Run a single spec
@@ -106,7 +105,8 @@ npx playwright test --headed --project=chromium
 
 | Variable | Purpose | Default |
 |---|---|---|
-| `VITE_API_URL` | dashboard-api base URL | `http://localhost:30082` |
+| `AGENT_API_URL` | Upstream the Vite dev proxy points at | `http://api.instanode.dev` |
+| `VITE_API_URL` | Build-time override for the production bundle | `https://api.instanode.dev` |
 | `VITE_NO_PROXY` | Disables Vite proxy (set to `1` in E2E) | unset |
 | `E2E_API_URL` | Agent API base URL used by Playwright tests | `http://localhost:30080` |
 
@@ -114,5 +114,5 @@ npx playwright test --headed --project=chromium
 
 ## Known Gaps
 
-- **RotateCredentials**: the UI calls `POST /api/v1/resources/:id/rotate` on dashboard-api, which proxies to `api/`. Rotation is implemented for Postgres, Redis, and MongoDB.
-- **Razorpay Checkout**: the "Upgrade to Pro" button opens `instanode.dev/pricing` when checkout is not configured. A real `POST /api/v1/billing/checkout` endpoint in dashboard-api returns a Razorpay short URL when keys are configured.
+- **RotateCredentials**: the UI calls `POST /api/v1/resources/:id/rotate-credentials` on the agent API. Rotation is implemented for Postgres, Redis, and MongoDB.
+- **Razorpay Checkout**: the "Upgrade to Pro" button calls `POST /api/v1/billing/checkout` on the agent API and redirects to the returned Razorpay short URL. When Razorpay isn't configured (503), the button falls back to `instanode.dev/pricing`.

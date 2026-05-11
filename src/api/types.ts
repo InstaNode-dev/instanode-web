@@ -1,7 +1,6 @@
 // ------------------------------------------------------------------
-// Types — mirror the locked dashboard-api + proto contracts exactly.
-// Source of truth: /InstaNode/proto/dashboard/v1/dashboard.proto
-//                  /InstaNode/dashboard-api/internal/handlers/*
+// Types — mirror the agent API JSON shapes the dashboard consumes.
+// Source of truth: /InstaNode/api/internal/handlers/*
 // ------------------------------------------------------------------
 
 export type Tier = 'anonymous' | 'hobby' | 'pro' | 'team' | 'growth'

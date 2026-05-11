@@ -1,6 +1,6 @@
 // Stubbed API client — adds a small fake-network delay so loading states
-// behave like the real thing. Swap this for `apiFetch()` against
-// dashboard-api when backend is ready.
+// behave like the real thing. Swap this for `apiFetch()` against the agent
+// API when wiring an endpoint that's still fixture-backed.
 //
 // Exact contract reference (when wiring real backend):
 //   GET /api/v1/resources               — locked

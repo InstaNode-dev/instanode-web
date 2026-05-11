@@ -85,7 +85,7 @@ export function DeployDetailPage() {
       </ROBanner>
 
       <ContractBanner kind="blocked" badge="🔒 blocked">
-        <strong>Redeploy / Rollback / Stop are missing from dashboard-api.</strong> <code>POST /api/v1/stacks/:slug/redeploy</code> currently routes to the agent API directly. Rollback and Stop don't exist anywhere yet.
+        <strong>Redeploy / Rollback / Stop are partially wired.</strong> <code>POST /api/v1/stacks/:slug/redeploy</code> routes to the agent API. Rollback and Stop don't exist on the agent API yet.
       </ContractBanner>
 
       <div className="tabs">
