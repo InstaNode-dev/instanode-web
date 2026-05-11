@@ -7,11 +7,15 @@ import { PublicShell } from '../layout/PublicShell'
 
 type TierKey = 'anonymous' | 'hobby' | 'pro' | 'team'
 
-const TIERS: { key: TierKey; name: string; price: string; priceSub: string; cta: string; ctaHref: string; highlighted?: boolean }[] = [
+const TIERS: { key: TierKey; name: string; price: string; priceSub: string; cta: string; ctaHref: string; highlighted?: boolean; comingSoon?: boolean }[] = [
   { key: 'anonymous', name: 'Anonymous', price: 'free',  priceSub: '24h ttl',  cta: 'Try the curl',   ctaHref: '#try-curl' },
   { key: 'hobby',     name: 'Hobby',     price: '$9',    priceSub: '/ mo',     cta: 'Start hobby →',  ctaHref: '/checkout?plan=hobby' },
   { key: 'pro',       name: 'Pro',       price: '$49',   priceSub: '/ mo',     cta: 'Start pro →',    ctaHref: '/checkout?plan=pro', highlighted: true },
-  { key: 'team',      name: 'Team',      price: '$199',  priceSub: '/ mo',     cta: 'Start team →',   ctaHref: '/checkout?plan=team' }
+  // Team tier is under active development — visible so customers can see the
+  // roadmap but disabled (no checkout, no signup). Backend k8s plumbing for
+  // team-scale dedicated infra is already in place; what's pending is the
+  // multi-seat + RBAC + SSO surface.
+  { key: 'team',      name: 'Team',      price: '$199',  priceSub: '/ mo',     cta: 'Coming soon',    ctaHref: '#',                  comingSoon: true }
 ]
 
 type Cell =
@@ -48,7 +52,7 @@ const FAQ: { q: string; a: string }[] = [
   },
   {
     q: 'Can I move resources between envs?',
-    a: 'On Pro and Team. Hobby is single-env.'
+    a: 'On Pro. Hobby is single-env. Team multi-env is coming soon.'
   },
   {
     q: 'What happens if I downgrade?',
@@ -91,7 +95,10 @@ export function PricingPage() {
                 className={`pricing-cell pricing-cell--tier${t.highlighted ? ' is-highlighted' : ''}`}
                 role="columnheader"
               >
-                <div className="pricing-tier-name">{t.name}</div>
+                <div className="pricing-tier-name">
+                  {t.name}
+                  {t.comingSoon && <span className="pricing-tier-soon">soon</span>}
+                </div>
                 <div className="pricing-tier-price">
                   <span className="pricing-tier-num">{t.price}</span>
                   <span className="pricing-tier-sub">{t.priceSub}</span>
@@ -129,9 +136,15 @@ export function PricingPage() {
                 className={`pricing-cell${t.highlighted ? ' is-highlighted' : ''}`}
                 role="cell"
               >
-                <a href={t.ctaHref} className={`pricing-cta${t.highlighted ? ' pricing-cta--primary' : ''}`}>
-                  {t.cta}
-                </a>
+                {t.comingSoon ? (
+                  <span className="pricing-cta pricing-cta--disabled" aria-disabled="true">
+                    {t.cta}
+                  </span>
+                ) : (
+                  <a href={t.ctaHref} className={`pricing-cta${t.highlighted ? ' pricing-cta--primary' : ''}`}>
+                    {t.cta}
+                  </a>
+                )}
               </div>
             ))}
           </div>
@@ -336,6 +349,26 @@ function PricingStyles() {
         box-shadow: 0 0 0 1px var(--accent-deep) inset;
       }
       .pricing-cta--primary:hover { background: #28edA0; }
+      .pricing-cta--disabled {
+        opacity: 0.55;
+        cursor: not-allowed;
+        background: transparent;
+        color: var(--text-faint);
+      }
+      .pricing-cta--disabled:hover { background: transparent; }
+      .pricing-tier-soon {
+        display: inline-block;
+        margin-left: 8px;
+        padding: 1px 6px;
+        font-size: 0.65em;
+        font-weight: 500;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--ink);
+        background: var(--amber, #f5b13c);
+        border-radius: 3px;
+        vertical-align: middle;
+      }
 
       @media (max-width: 880px) {
         .pricing-row { grid-template-columns: 1fr; }

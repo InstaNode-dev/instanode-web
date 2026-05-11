@@ -52,8 +52,9 @@ type Plan = {
   price: string
   freq: string
   featured?: boolean
+  comingSoon?: boolean
   features: string[]
-  cta: { label: string; href: string; variant: 'primary' | 'secondary' }
+  cta: { label: string; href: string; variant: 'primary' | 'secondary' | 'disabled' }
 }
 
 const PLANS: Plan[] = [
@@ -106,13 +107,14 @@ const PLANS: Plan[] = [
     tagline: 'For the engineering org with envs, vault, and an audit trail.',
     price: '$199',
     freq: '/ mo',
+    comingSoon: true,
     features: [
       'Unlimited Postgres / Redis / Mongo / queues / storage',
       'Unlimited deployments · unlimited vault entries / envs',
       'RBAC + audit log',
-      'SSO · custom domains · 99.9% SLA · dedicated infra (coming soon)',
+      'SSO · custom domains · 99.9% SLA · dedicated infra',
     ],
-    cta: { label: 'Start team →', href: ROUTES.signin, variant: 'secondary' },
+    cta: { label: 'Coming soon', href: '#', variant: 'disabled' },
   },
 ]
 
@@ -332,11 +334,11 @@ export function MarketingPage() {
           <div className="mkt-section-head">
             <div className="mkt-section-tag">Pricing · No talk-to-sales gate</div>
             <h2 className="mkt-section-title">
-              Self-serve at every tier. <span className="mkt-accent">Even Team.</span>
+              Self-serve at every tier. <span className="mkt-accent">No sales call.</span>
             </h2>
             <p className="mkt-section-sub">
               Anonymous is the funnel. Hobby pays for the side project. Pro unlocks the
-              multi-env workflow. Team is for the company that ships every day.
+              multi-env workflow. Team (coming soon) is for the company that ships every day.
             </p>
           </div>
 
@@ -347,6 +349,7 @@ export function MarketingPage() {
                 className={`mkt-price-card ${p.id === 'anonymous' ? 'anon' : ''} ${p.featured ? 'featured' : ''}`}
               >
                 {p.featured && <span className="mkt-featured-flag">Most popular</span>}
+                {p.comingSoon && <span className="mkt-featured-flag mkt-soon-flag">Coming soon</span>}
                 <div className="mkt-price-name">{p.name}</div>
                 <p className="mkt-price-tagline">{p.tagline}</p>
                 <div className="mkt-price-cost">
@@ -365,13 +368,26 @@ export function MarketingPage() {
                     <li key={f}>{f}</li>
                   ))}
                 </ul>
-                <a
-                  href={p.cta.href}
-                  className={`btn ${p.cta.variant === 'primary' ? 'btn-primary' : 'btn-secondary'}`}
-                  style={{ width: '100%', justifyContent: 'center', marginTop: 'auto' }}
-                >
-                  {p.cta.label}
-                </a>
+                {p.cta.variant === 'disabled' ? (
+                  <span
+                    className="btn btn-secondary"
+                    aria-disabled="true"
+                    style={{
+                      width: '100%', justifyContent: 'center', marginTop: 'auto',
+                      opacity: 0.55, cursor: 'not-allowed',
+                    }}
+                  >
+                    {p.cta.label}
+                  </span>
+                ) : (
+                  <a
+                    href={p.cta.href}
+                    className={`btn ${p.cta.variant === 'primary' ? 'btn-primary' : 'btn-secondary'}`}
+                    style={{ width: '100%', justifyContent: 'center', marginTop: 'auto' }}
+                  >
+                    {p.cta.label}
+                  </a>
+                )}
               </div>
             ))}
           </div>
@@ -1038,6 +1054,10 @@ const MKT_CSS = `
   background: var(--accent);
   color: var(--ink);
   border-radius: 100px;
+}
+.mkt-soon-flag {
+  background: var(--amber, #f5b13c);
+  color: var(--ink);
 }
 .mkt-price-name {
   font-size: 14px;
