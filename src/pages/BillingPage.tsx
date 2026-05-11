@@ -57,16 +57,16 @@ const PLANS: Record<string, {
   team: {
     label: 'Team',
     price: '$199 / mo',
+    // Team tier is under active development — every feature shown here is
+    // marked comingSoon until the multi-seat / RBAC / SSO surface ships and
+    // we publish real per-resource numbers. Don't promise "unlimited X" for
+    // capacity we haven't delivered.
     features: [
-      { text: 'unlimited Postgres / Redis / Mongo / queues / storage' },
-      { text: 'unlimited vault entries · unlimited envs' },
-      { text: 'unlimited deployments' },
-      { text: 'RBAC + audit log' },
-      { text: 'custom domains', comingSoon: true },
-      { text: 'SSO / SAML', comingSoon: true },
-      { text: '99.9% SLA + priority support', comingSoon: true },
-      { text: 'dedicated infrastructure', comingSoon: true },
-      { text: 'audit log export (CSV/JSONL)', comingSoon: true },
+      { text: 'Everything in Pro, with larger per-resource limits', comingSoon: true },
+      { text: 'Multi-seat workspace · RBAC + audit log', comingSoon: true },
+      { text: 'SSO / SAML · 99.9% SLA + priority support', comingSoon: true },
+      { text: 'Dedicated node pools', comingSoon: true },
+      { text: 'Audit log export (CSV/JSONL)', comingSoon: true },
     ],
   },
 }
