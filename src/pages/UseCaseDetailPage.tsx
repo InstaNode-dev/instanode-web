@@ -13,6 +13,7 @@
 import { useParams, Link } from 'react-router-dom'
 import { PublicShell } from '../layout/PublicShell'
 import { getUseCaseBySlug, type Service, type UseCase } from '../content/useCases'
+import { renderMarkdown } from '../lib/markdown'
 
 /* Per-service display data used by the auto-generated "How to set it
  * up" section. Each entry: human label + a one-line description of what
@@ -151,7 +152,9 @@ function Detail({ useCase }: { useCase: UseCase }) {
         {useCase.body && (
           <section className="ucd-section ucd-section-custom">
             <h2>Detail</h2>
-            <div className="ucd-body">{renderMarkdown(useCase.body, useCase.slug)}</div>
+            <div className="ucd-body">
+              {renderMarkdown(useCase.body, { baseHeading: 'h3', keyPrefix: useCase.slug })}
+            </div>
           </section>
         )}
 
@@ -172,55 +175,6 @@ function Detail({ useCase }: { useCase: UseCase }) {
 function primaryCurl(services: Service[]): string {
   if (services.length === 0) return 'curl -X POST https://api.instanode.dev/db/new'
   return SERVICE_INFO[services[0]].curl
-}
-
-function renderMarkdown(md: string, sectionID: string): React.ReactNode {
-  const blocks = md.trim().split(/\n\n+/)
-  return blocks.map((block, i) => {
-    const key = `${sectionID}-${i}`
-    if (block.startsWith('## ')) return <h3 key={key}>{inline(block.slice(3))}</h3>
-    if (block.startsWith('### ')) return <h4 key={key}>{inline(block.slice(4))}</h4>
-    if (block.startsWith('```')) {
-      const inner = block.replace(/^```\w*\n?/, '').replace(/\n?```$/, '')
-      return <pre key={key}><code>{inner}</code></pre>
-    }
-    if (block.startsWith('- ') || block.startsWith('* ')) {
-      const items = block.split('\n').filter((l) => l.startsWith('- ') || l.startsWith('* '))
-      return (
-        <ul key={key}>
-          {items.map((item, j) => (
-            <li key={`${key}-${j}`}>{inline(item.slice(2))}</li>
-          ))}
-        </ul>
-      )
-    }
-    return <p key={key}>{inline(block)}</p>
-  })
-}
-
-function inline(text: string): React.ReactNode {
-  const parts: React.ReactNode[] = []
-  let rest = text
-  let key = 0
-  while (rest.length > 0) {
-    const code = rest.match(/^(.*?)`([^`]+)`(.*)$/)
-    if (code) {
-      if (code[1]) parts.push(code[1])
-      parts.push(<code key={`c-${key++}`}>{code[2]}</code>)
-      rest = code[3]
-      continue
-    }
-    const bold = rest.match(/^(.*?)\*\*(.+?)\*\*(.*)$/)
-    if (bold) {
-      if (bold[1]) parts.push(bold[1])
-      parts.push(<strong key={`b-${key++}`}>{bold[2]}</strong>)
-      rest = bold[3]
-      continue
-    }
-    parts.push(rest)
-    break
-  }
-  return parts
 }
 
 function DetailStyles() {
