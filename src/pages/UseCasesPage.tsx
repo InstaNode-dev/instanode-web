@@ -122,43 +122,44 @@ function UseCasesStyles() {
     <style>{`
       .uc-wrap { max-width: 1080px; margin: 0 auto; padding: 56px 24px 80px; }
       .uc-hero h1 { font-size: 40px; margin: 0 0 12px; letter-spacing: -0.02em; }
-      .uc-sub { color: var(--text-muted, #6b7280); font-size: 18px; line-height: 1.5; margin: 0 0 32px; max-width: 720px; }
+      .uc-sub { color: var(--text-dim); font-size: 18px; line-height: 1.5; margin: 0 0 32px; max-width: 720px; }
 
       .uc-filters { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 40px; }
       .uc-chip {
-        appearance: none; border: 1px solid var(--border, #e5e7eb);
+        appearance: none; border: 1px solid var(--border-hi);
         background: transparent; padding: 6px 12px; border-radius: 999px;
-        font-size: 13px; cursor: pointer; color: var(--text, #1f2937);
+        font-size: 13px; cursor: pointer; color: var(--text);
         transition: background 120ms, border-color 120ms;
       }
-      .uc-chip:hover { border-color: var(--accent, #3b82f6); }
-      .uc-chip-on { background: var(--accent, #3b82f6); border-color: var(--accent, #3b82f6); color: #fff; }
+      .uc-chip:hover { border-color: var(--accent); color: var(--text); }
+      .uc-chip-on { background: var(--accent); border-color: var(--accent); color: var(--ink); }
       .uc-chip-count { opacity: 0.7; margin-left: 4px; font-variant-numeric: tabular-nums; }
 
       .uc-groups { display: grid; gap: 48px; }
       .uc-group-title {
         font-size: 14px; text-transform: uppercase; letter-spacing: 0.08em;
-        color: var(--text-muted, #6b7280); margin: 0 0 16px; font-weight: 600;
+        color: var(--text-dim); margin: 0 0 16px; font-weight: 600;
       }
       .uc-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 12px;
         grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); }
       .uc-card {
-        border: 1px solid var(--border, #e5e7eb); border-radius: 10px; padding: 20px;
+        border: 1px solid var(--border-hi); border-radius: 10px; padding: 20px;
         display: flex; flex-direction: column; gap: 8px;
         transition: border-color 120ms, transform 120ms;
       }
-      .uc-card:hover { border-color: var(--accent, #3b82f6); transform: translateY(-1px); }
-      .uc-card-title { font-size: 16px; margin: 0; letter-spacing: -0.005em; }
-      .uc-card-scenario { color: var(--text-muted, #4b5563); font-size: 14px; line-height: 1.5; margin: 0; flex: 1; }
+      .uc-card:hover { border-color: var(--accent); transform: translateY(-1px); }
+      .uc-card-title { font-size: 16px; margin: 0; letter-spacing: -0.005em; color: var(--text); }
+      .uc-card-scenario { color: var(--text-dim); font-size: 14px; line-height: 1.5; margin: 0; flex: 1; }
       .uc-card-services { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
       .uc-service-tag {
         font-size: 11px; padding: 2px 8px; border-radius: 4px;
-        background: #f4f4f5; color: #4b5563; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        background: var(--ink); color: var(--text-dim); border: 1px solid var(--border);
+        font-family: var(--font-mono);
       }
 
-      .uc-foot { margin-top: 64px; padding-top: 32px; border-top: 1px solid var(--border, #e5e7eb); text-align: center; }
-      .uc-foot p { color: var(--text-muted, #6b7280); margin: 0 0 12px; }
-      .uc-foot-cta { color: var(--accent, #3b82f6); text-decoration: none; font-weight: 500; font-size: 16px; }
+      .uc-foot { margin-top: 64px; padding-top: 32px; border-top: 1px solid var(--border-hi); text-align: center; }
+      .uc-foot p { color: var(--text-dim); margin: 0 0 12px; }
+      .uc-foot-cta { color: var(--accent); text-decoration: none; font-weight: 500; font-size: 16px; }
     `}</style>
   )
 }
