@@ -58,6 +58,7 @@ async function loadRoutes() {
     '/status',
     '/docs',
     '/blog',
+    '/use-cases',
     ...slugs.map((s) => `/blog/${s}`),
   ]
 }

@@ -8,6 +8,7 @@ import { Brand } from '../components/Common'
 
 const NAV_LINKS = [
   { href: '/pricing', label: 'Pricing' },
+  { href: '/use-cases', label: 'Use cases' },
   { href: '/for-agents', label: 'For agents' },
   { href: '/docs', label: 'Docs' },
   { href: '/blog', label: 'Blog' },

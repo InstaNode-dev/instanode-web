@@ -9,6 +9,7 @@ import { StatusPage } from './pages/StatusPage'
 import { BlogPage } from './pages/BlogPage'
 import { BlogPostPage } from './pages/BlogPostPage'
 import { DocsPage } from './pages/DocsPage'
+import { UseCasesPage } from './pages/UseCasesPage'
 
 // Auth surfaces
 import { LoginPage } from './pages/LoginPage'
@@ -59,6 +60,7 @@ export function AppRoutes() {
         <Route path="/blog" element={<BlogPage />} />
         <Route path="/blog/:slug" element={<BlogPostPage />} />
         <Route path="/docs" element={<DocsPage />} />
+        <Route path="/use-cases" element={<UseCasesPage />} />
 
         {/* ─── auth surfaces (no chrome, dedicated layout) ───────── */}
         <Route path="/login" element={<LoginPage />} />
