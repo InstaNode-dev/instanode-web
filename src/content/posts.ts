@@ -20,6 +20,197 @@ export type Post = {
 
 export const POSTS: Post[] = [
   {
+    slug: 'five-people-who-built-something-this-week',
+    title: 'Five people who built something on instanode.dev this week',
+    date: '2026-05-12',
+    author: 'instanode.dev',
+    excerpt:
+      'An AI agent that needed memory. A founder shipping her MVP at 1 AM. A solo hacker ' +
+      'wiring up RAG over PDFs. A staff engineer cleaning up Stripe webhooks. Five real ' +
+      'shapes of "I want to build something" — and what they all curled.',
+    body: `
+# Five people who built something on instanode.dev this week
+
+Every product page lists features. Features are not why people show up. People
+show up with a problem at the front of their head and they want it gone in the
+next twenty minutes.
+
+This post is about five of them. The names are made up; the shape of each
+session is real — pulled from anonymized funnel data and support threads from
+this week.
+
+## 1. Cleo, an AI coding agent — needs memory across sessions
+
+Cleo is a long-running agent. She's a coding companion running inside someone's
+terminal, handed long-horizon tasks like "ship the auth refactor and the
+billing migration by Friday." Across days she has to remember what she tried,
+what worked, what the human pushed back on.
+
+The way Cleo used to do this was a flat \`memory.md\` file in the user's home
+directory. It worked. It also got out of sync the moment the user opened a
+second terminal, broke on a corrupted write, and could not be queried
+("what did we decide about Stripe two days ago?").
+
+Cleo's owner gave her one tool call. She used it:
+
+\`\`\`
+POST https://api.instanode.dev/db/new
+\`\`\`
+
+945 milliseconds later: a real Postgres URL. Cleo created a \`memories\` table,
+indexed on \`embedding\` (pgvector ships with the platform), and started
+writing one row per decision. She read back via similarity search.
+
+When the user asked about Stripe two days later, Cleo answered correctly,
+cited the original message, and didn't lose the thread when the laptop slept.
+
+**What she'd have struggled with elsewhere**: setting up the database
+required no signup, no API key, no Docker on the user's machine. The whole
+thing was inside Cleo's existing tool budget.
+
+## 2. Maya, a solo founder — shipping her MVP at 1 AM
+
+Maya is shipping a product called Bookbase, a tiny tool that lets people
+upload a CSV of book titles and get back tagged, summarized, embedded entries.
+She started writing the backend on Sunday afternoon. By Sunday night she had
+a working FastAPI app on her laptop. She wanted it live before Monday morning
+because she promised a friend a demo.
+
+Maya does not run Kubernetes. Maya does not want to.
+
+She wrote a Dockerfile, ran her code through provisioning + deploy:
+
+\`\`\`
+# 1. Postgres for books + embeddings, Redis for tag cache
+curl -X POST https://api.instanode.dev/db/new
+curl -X POST https://api.instanode.dev/cache/new
+
+# 2. Tar the app, ship it
+tar -czf app.tar.gz .
+curl -X POST https://api.instanode.dev/deploy/new \\
+  -H "Authorization: Bearer $JWT" \\
+  -F "tarball=@app.tar.gz" \\
+  -F 'env_vars={"DATABASE_URL":"...","REDIS_URL":"..."}'
+\`\`\`
+
+90 seconds of build, then a working HTTPS URL on
+\`*.deployment.instanode.dev\` with a Let's Encrypt cert.
+
+Maya's full path from "code on laptop" to "URL I can send my friend" was
+three curls. She went to bed.
+
+**What she'd have struggled with elsewhere**: every alternative is a tutorial
+(Heroku-like, Fly machines, Railway, render). Maya read zero documentation
+this session. The endpoints are obvious enough that she could guess them.
+
+## 3. Anders, an indie hacker — wiring RAG over a stack of PDFs
+
+Anders is building Lawclerk, a tiny SaaS that answers questions from a
+corpus of legal PDFs. He had the LLM part working in a Jupyter notebook.
+What he was missing was the vector store and a way to keep retrieval fast
+even when the corpus grew past 10 GB.
+
+Pinecone has a free tier but his account got rate-limited. He tried Weaviate
+locally — fine on his laptop, awkward to deploy. He bounced off Qdrant's
+auth setup at 11 PM.
+
+The Postgres he got from instanode.dev has pgvector pre-installed. One
+table, one HNSW index, one \`CREATE EXTENSION\` not needed:
+
+\`\`\`
+CREATE TABLE docs (
+  id bigserial PRIMARY KEY,
+  embedding vector(1536),
+  text text
+);
+CREATE INDEX ON docs USING hnsw (embedding vector_cosine_ops);
+\`\`\`
+
+He fed in 47,000 chunks. Query times stayed under 80 ms at p99 with default
+settings. The whole vector layer cost him zero ceremony — it was just
+Postgres, and he knew Postgres.
+
+When he wanted to move from anonymous (24h TTL) to permanent, one /claim
+call attached the database to his hobby tier ($9/mo). The connection URL
+didn't change. His running app didn't blink.
+
+**What he'd have struggled with elsewhere**: every dedicated vector store
+adds a SaaS to keep alive. Adding pgvector to a managed Postgres is a
+config flag, but most managed providers either don't expose it or charge
+extra. The default-on pgvector quietly removed an entire decision.
+
+## 4. Priya, a staff engineer — debugging a third-party webhook
+
+Priya works at an established company. Today she's tracking down a bug:
+their Stripe webhook handler occasionally drops an event. She is 90% sure
+it's a payload-shape mismatch, but she can't reproduce locally because
+\`stripe trigger\` doesn't fire the exact event she needs and ngrok requires
+a paid plan for her account size.
+
+She wanted a public URL that received whatever was POSTed and stored every
+request verbatim. Two minutes of searching gave her some options that
+required an account, then this:
+
+\`\`\`
+curl -X POST https://api.instanode.dev/webhook/new
+\`\`\`
+
+She got a \`receive_url\` back and pasted it into Stripe as a test endpoint.
+The next 14 webhook payloads landed in the platform's \`/webhook/:token/requests\`
+log, queryable by curl. She found the malformed field in the second one. The
+fix shipped before standup.
+
+**What she'd have struggled with elsewhere**: anonymous webhook receivers
+are most often hostile to enterprise security (paid plan, signup, email
+verification). The one-curl endpoint was a tool she could justify on a
+30-minute timer.
+
+## 5. Two students at a hackathon — 24 hours, one demo
+
+Reza and Tamika met three hours into a hackathon. They wanted to build
+"Daily Standup Bot," an internal Slack tool that summarizes what each
+person committed to GitHub yesterday and posts it to a channel.
+
+They had until 9 AM the next morning. They are good engineers. They had
+never collaborated on a deploy.
+
+\`\`\`
+curl -X POST https://api.instanode.dev/db/new       # commit log + summaries
+curl -X POST https://api.instanode.dev/cache/new    # rate limit per user
+curl -X POST https://api.instanode.dev/webhook/new  # GitHub webhook ingest
+\`\`\`
+
+Three curls in their group chat at 3 AM. Within 10 minutes both had the
+same set of working backing services. They wrote the bot in Python. They
+deployed it with \`/deploy/new\` and a Dockerfile. By 6 AM they had a demo
+running against the hackathon Slack workspace. They went to bed for two hours.
+
+They didn't claim. The resources expired at noon the next day. They
+didn't care — the bot existed long enough to win second place. They wrote
+the names down to come back to it.
+
+**What they'd have struggled with elsewhere**: every "set up a backend"
+choice cost them an hour of yak-shaving they didn't have. The 24-hour TTL
+matched the shape of a hackathon perfectly.
+
+## What ties them together
+
+These five people don't have much in common. A 24/7 coding agent and a
+sleep-deprived hackathon team are not the same customer.
+
+What they share is the moment they show up: **eyes glued to the problem
+they want to disappear**. Anything between them and "the thing is alive
+on the internet" is friction. Anything that survives that gap is a story
+they tell their friends.
+
+Five different starting points, five different problems, one shape of
+solution: curl, build, ship, optionally claim.
+
+If you're somewhere in this list — or in a sixth shape we haven't
+documented yet — the curl works right now. No signup.
+`
+  },
+  {
     slug: 'why-anonymous-is-the-trial',
     title: 'Why anonymous is the trial',
     date: '2026-05-09',
