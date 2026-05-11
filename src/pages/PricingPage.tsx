@@ -24,21 +24,27 @@ type Cell =
   | { text: string; comingSoon?: boolean }
 type Row = { label: string; sub?: string; values: [Cell, Cell, Cell, Cell] }
 
+// Team-tier values use { text: '', comingSoon: true } across the board because
+// the tier isn't shipped — claiming "unlimited" for capacity we haven't
+// delivered would be misleading. Once team launches, replace these with the
+// real numbers from plans.yaml.
+const SOON: Cell = { text: '', comingSoon: true }
+
 const ROWS: Row[] = [
-  { label: 'Postgres', values: ['10 MB / 2 conn / 24h TTL', '1 GB / 8 conn', '5 GB / 20 conn', 'unlimited'] },
-  { label: 'Redis',    values: ['5 MB / 24h TTL', '50 MB',           '256 MB',         'unlimited'] },
-  { label: 'MongoDB',  values: ['5 MB / 2 conn / 24h TTL',  '100 MB / 5 conn', '2 GB / 20 conn', 'unlimited'] },
-  { label: 'Queue',    sub: 'NATS', values: ['24 h TTL', '1 000 msg/d', '100k msg/d', 'unlimited'] },
-  { label: 'Storage',  values: [{ mark: 'dash' }, '1 bucket',  '5 buckets',  'unlimited'] },
-  { label: 'Webhook stored', values: ['100', '1 000', '10k', 'unlimited'] },
-  { label: 'Deploy apps', values: [{ mark: 'dash' }, '1 small', '10 medium', 'unlimited large'] },
-  { label: 'Domains',  values: [{ mark: 'dash' }, '*.deployment.instanode.dev', 'custom domain', { text: 'custom domains', comingSoon: true }] },
-  { label: 'Multi-env',values: [{ mark: 'dash' }, { mark: 'dash' }, '✓ (dev/staging/prod + custom)', { mark: 'check' }] },
-  { label: 'RBAC + audit', values: [{ mark: 'dash' }, { mark: 'dash' }, { mark: 'dash' }, { mark: 'check' }] },
-  { label: 'Vault entries', values: [{ mark: 'dash' }, '20', '200', 'unlimited'] },
-  { label: 'Vault envs',    values: [{ mark: 'dash' }, 'production only', 'multi-env', 'unlimited envs'] },
-  { label: 'SSO / SAML', values: [{ mark: 'dash' }, { mark: 'dash' }, { mark: 'dash' }, { text: '', comingSoon: true }] },
-  { label: '99.9% SLA',  values: [{ mark: 'dash' }, { mark: 'dash' }, { mark: 'dash' }, { text: '', comingSoon: true }] }
+  { label: 'Postgres', values: ['10 MB / 2 conn / 24h TTL', '1 GB / 8 conn', '5 GB / 20 conn', SOON] },
+  { label: 'Redis',    values: ['5 MB / 24h TTL', '50 MB',           '256 MB',         SOON] },
+  { label: 'MongoDB',  values: ['5 MB / 2 conn / 24h TTL',  '100 MB / 5 conn', '2 GB / 20 conn', SOON] },
+  { label: 'Queue',    sub: 'NATS', values: ['24 h TTL', '1 000 msg/d', '100k msg/d', SOON] },
+  { label: 'Storage',  values: [{ mark: 'dash' }, '1 bucket',  '5 buckets',  SOON] },
+  { label: 'Webhook stored', values: ['100', '1 000', '10k', SOON] },
+  { label: 'Deploy apps', values: [{ mark: 'dash' }, '1 small', '10 medium', SOON] },
+  { label: 'Domains',  values: [{ mark: 'dash' }, '*.deployment.instanode.dev', 'custom domain', SOON] },
+  { label: 'Multi-env',values: [{ mark: 'dash' }, { mark: 'dash' }, '✓ (dev/staging/prod + custom)', SOON] },
+  { label: 'RBAC + audit', values: [{ mark: 'dash' }, { mark: 'dash' }, { mark: 'dash' }, SOON] },
+  { label: 'Vault entries', values: [{ mark: 'dash' }, '20', '200', SOON] },
+  { label: 'Vault envs',    values: [{ mark: 'dash' }, 'production only', 'multi-env', SOON] },
+  { label: 'SSO / SAML', values: [{ mark: 'dash' }, { mark: 'dash' }, { mark: 'dash' }, SOON] },
+  { label: '99.9% SLA',  values: [{ mark: 'dash' }, { mark: 'dash' }, { mark: 'dash' }, SOON] }
 ]
 
 const FAQ: { q: string; a: string }[] = [
