@@ -8,16 +8,18 @@ test.describe('Navigation', () => {
   })
 
   test('every nav link reaches its page', async ({ page }) => {
-    await page.goto('/')
+    // The authenticated app is mounted under /app/*; the sidebar nav links
+    // point to /app/<section>. The Overview is just /app (or /app/).
+    await page.goto('/app')
     const targets: { name: RegExp; pathFragment?: string }[] = [
-      { name: /Resources/i, pathFragment: '/resources' },
-      { name: /Deployments/i, pathFragment: '/deployments' },
-      { name: /Stacks/i, pathFragment: '/stacks' },
-      { name: /Vault/i, pathFragment: '/vault' },
-      { name: /Team/i, pathFragment: '/team' },
-      { name: /Billing/i, pathFragment: '/billing' },
-      { name: /Settings/i, pathFragment: '/settings' },
-      { name: /Overview/i, pathFragment: '/' },
+      { name: /Resources/i, pathFragment: '/app/resources' },
+      { name: /Deployments/i, pathFragment: '/app/deployments' },
+      { name: /Stacks/i, pathFragment: '/app/stacks' },
+      { name: /Vault/i, pathFragment: '/app/vault' },
+      { name: /Team/i, pathFragment: '/app/team' },
+      { name: /Billing/i, pathFragment: '/app/billing' },
+      { name: /Settings/i, pathFragment: '/app/settings' },
+      { name: /Overview/i, pathFragment: '/app' },
     ]
     for (const t of targets) {
       // Use the sidebar link by accessible name. The new design renders nav

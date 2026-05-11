@@ -284,12 +284,20 @@ export function AppShell() {
   )
 }
 
-// react-router gives us route-id strings — coerce to our PAGE_META key
+// react-router gives us route-id strings — coerce to our PAGE_META key.
+//
+// The authenticated app is mounted under `/app/*` (see App.tsx), but PAGE_META
+// keys are short (`/resources`, `/deployments/:id`, …) because they predate
+// the /app prefix. Strip the prefix here so the lookup hits — otherwise
+// every page renders an empty <h1> because getMeta() falls through to its
+// default. The /app -> root mapping ('/app' becomes '/') matches the
+// Overview page entry. (PR-fixed long-standing CI failure 2026-05-11.)
 function routeIdToKey(_id: string, pathname: string): string {
+  const stripped = pathname.replace(/^\/app/, '') || '/'
   // detail routes
-  if (/^\/resources\/[^/]+$/.test(pathname)) return '/resources/:id'
-  if (/^\/deployments\/[^/]+$/.test(pathname)) return '/deployments/:id'
-  return pathname
+  if (/^\/resources\/[^/]+$/.test(stripped)) return '/resources/:id'
+  if (/^\/deployments\/[^/]+$/.test(stripped)) return '/deployments/:id'
+  return stripped
 }
 
 // ──────────────────────────────────────────────────────────────────────────
