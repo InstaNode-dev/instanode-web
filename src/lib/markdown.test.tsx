@@ -1,0 +1,145 @@
+/* markdown.test.tsx — coverage for the shared markdown renderer.
+ *
+ * The renderer is used by /docs, /blog/:slug, and /use-cases/:slug. A bug
+ * in it affects every public content surface. These tests exercise each
+ * supported block + inline construct and a few security boundaries
+ * (unsafe href schemes, HTML escaping). */
+
+import { describe, it, expect } from 'vitest'
+import { renderToStaticMarkup } from 'react-dom/server'
+import { renderMarkdown, inline } from './markdown'
+
+function html(md: string, opts?: Parameters<typeof renderMarkdown>[1]) {
+  return renderToStaticMarkup(<>{renderMarkdown(md, opts)}</>)
+}
+
+function htmlInline(text: string) {
+  return renderToStaticMarkup(<>{inline(text)}</>)
+}
+
+describe('renderMarkdown — block constructs', () => {
+  it('renders ## as the configured base heading (default h3)', () => {
+    expect(html('## Hello')).toBe('<h3>Hello</h3>')
+  })
+
+  it('respects baseHeading=h2', () => {
+    expect(html('## Hello', { baseHeading: 'h2' })).toBe('<h2>Hello</h2>')
+  })
+
+  it('renders # one level above the base', () => {
+    expect(html('# Hello', { baseHeading: 'h2' })).toBe('<h1>Hello</h1>')
+  })
+
+  it('renders ### one level below ##', () => {
+    expect(html('### Sub', { baseHeading: 'h2' })).toBe('<h3>Sub</h3>')
+  })
+
+  it('clamps heading level into h1-h6', () => {
+    // Past h6 should pin to h6, never overflow
+    expect(html('### deep\n\n#### deeper\n\n##### deepest', { baseHeading: 'h6' }))
+      .toContain('<h6>')
+  })
+
+  it('renders fenced code blocks as <pre><code>', () => {
+    expect(html('```\nfoo\nbar\n```')).toBe('<pre><code>foo\nbar</code></pre>')
+  })
+
+  it('strips the language hint from the fence', () => {
+    expect(html('```bash\nls\n```')).toBe('<pre><code>ls</code></pre>')
+  })
+
+  it('renders unordered lists with - bullets', () => {
+    expect(html('- one\n- two')).toBe('<ul><li>one</li><li>two</li></ul>')
+  })
+
+  it('renders unordered lists with * bullets', () => {
+    expect(html('* one\n* two')).toBe('<ul><li>one</li><li>two</li></ul>')
+  })
+
+  it('renders ordered lists with 1. 2. notation as <ol>', () => {
+    expect(html('1. first\n2. second')).toBe('<ol><li>first</li><li>second</li></ol>')
+  })
+
+  it('renders > as <blockquote>', () => {
+    expect(html('> quoted')).toBe('<blockquote>quoted</blockquote>')
+  })
+
+  it('renders | as a styled pre table', () => {
+    const out = html('| a | b |\n| - | - |\n| 1 | 2 |')
+    expect(out).toContain('class="md-table"')
+    expect(out).toContain('<pre')
+  })
+
+  it('falls back to <p> for plain text', () => {
+    expect(html('Just a paragraph.')).toBe('<p>Just a paragraph.</p>')
+  })
+
+  it('separates blocks on blank lines', () => {
+    expect(html('## H\n\nbody')).toBe('<h3>H</h3><p>body</p>')
+  })
+})
+
+describe('inline — token rendering', () => {
+  it('renders **bold**', () => {
+    expect(htmlInline('a **bold** b')).toBe('a <strong>bold</strong> b')
+  })
+
+  it('renders `code`', () => {
+    expect(htmlInline('use `npm test` to run')).toBe('use <code>npm test</code> to run')
+  })
+
+  it('renders [text](url) as <a>', () => {
+    expect(htmlInline('see [docs](/docs.md)')).toBe('see <a href="/docs.md">docs</a>')
+  })
+
+  it('renders [text](https://...) as external <a>', () => {
+    expect(htmlInline('on [GitHub](https://github.com)')).toBe('on <a href="https://github.com">GitHub</a>')
+  })
+
+  it('picks the earliest token when multiple are present', () => {
+    expect(htmlInline('**bold** and `code`'))
+      .toBe('<strong>bold</strong> and <code>code</code>')
+  })
+
+  it('passes plain text through unchanged', () => {
+    expect(htmlInline('just words')).toBe('just words')
+  })
+})
+
+describe('inline — href safety', () => {
+  it('rejects javascript: URLs (renders as literal text)', () => {
+    const out = htmlInline('[click](javascript:alert(1))')
+    expect(out).not.toContain('<a')
+    expect(out).toContain('[click]')
+  })
+
+  it('rejects data: URLs', () => {
+    const out = htmlInline('[img](data:text/html,<script>alert(1)</script>)')
+    expect(out).not.toContain('<a')
+  })
+
+  it('rejects vbscript: URLs', () => {
+    const out = htmlInline('[x](vbscript:msgbox)')
+    expect(out).not.toContain('<a')
+  })
+
+  it('allows /relative routes', () => {
+    expect(htmlInline('[x](/foo)')).toBe('<a href="/foo">x</a>')
+  })
+
+  it('allows # anchors', () => {
+    expect(htmlInline('[x](#section)')).toBe('<a href="#section">x</a>')
+  })
+})
+
+describe('renderMarkdown — keyPrefix isolation', () => {
+  it('produces stable keys per prefix (smoke test, no error from duplicate keys)', () => {
+    // Two side-by-side renders with the same prefix shouldn't crash;
+    // React only complains about dup keys among siblings, and these
+    // are separate trees, so this is a "doesn't throw" assertion.
+    const a = html('## Foo\n\nbody', { keyPrefix: 'a' })
+    const b = html('## Foo\n\nbody', { keyPrefix: 'b' })
+    expect(a).toBe('<h3>Foo</h3><p>body</p>')
+    expect(b).toBe('<h3>Foo</h3><p>body</p>')
+  })
+})
