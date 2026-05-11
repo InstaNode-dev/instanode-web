@@ -133,7 +133,21 @@ async function main() {
     written++
   }
 
-  // Step 5: clean up the SSR bundle — it's only needed during this script.
+  // Step 5: copy /llms.txt from the content repo to dist root. The
+  // llms.txt convention (https://llmstxt.org) expects the file at the
+  // domain root. Source of truth is .content/llms.txt — that lets the
+  // content repo author it like any other content file, and the
+  // dashboard build inlines it into dist/ for static hosting to serve.
+  const llmsSource = resolve(ROOT, '.content/llms.txt')
+  if (existsSync(llmsSource)) {
+    const llmsContent = await readFile(llmsSource, 'utf-8')
+    await writeFile(resolve(DIST, 'llms.txt'), llmsContent, 'utf-8')
+    console.log('prerender: copied llms.txt to dist root')
+  } else {
+    console.warn('prerender: no .content/llms.txt found, skipping')
+  }
+
+  // Step 6: clean up the SSR bundle — it's only needed during this script.
   // Leaving it in dist-ssr would inflate the GH Pages upload by ~400 KB.
   await rm(SSR_DIST, { recursive: true, force: true })
 
