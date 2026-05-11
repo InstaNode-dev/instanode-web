@@ -11,16 +11,13 @@
 
 export type Service = 'pg' | 'redis' | 'mongo' | 'nats' | 'minio' | 'webhook' | 'deploy'
 
-export type Category =
-  | 'A. AI coding agents'
-  | 'B. Multi-agent systems'
-  | 'C. Vertical AI apps'
-  | 'D. Personal AI'
-  | 'E. Browser & automation agents'
-  | 'F. Developer tooling'
-  | 'G. Internet-of-AI'
-  | 'H. Indie & SaaS founders'
-  | 'I. Hackathon & education'
+/* Category is intentionally a plain string. The content repo is the source
+ * of truth for what categories exist, so the dashboard should accept
+ * anything that lands there. The UseCasesPage renders categories in
+ * alphabetical order and uses them as filter-chip labels — no code path
+ * needs a closed union. Adding a new category = one entry in
+ * use-cases.json; no dashboard PR. */
+export type Category = string
 
 export type UseCase = {
   title: string
