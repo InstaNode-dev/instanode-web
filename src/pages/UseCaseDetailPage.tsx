@@ -90,72 +90,15 @@ function Detail({ useCase }: { useCase: UseCase }) {
           <p className="ucd-scenario">{useCase.scenario}</p>
         </header>
 
-        {useCase.services.length > 0 && (
-          <section className="ucd-section">
-            <h2>How to set it up</h2>
-            <p className="ucd-section-lede">
-              This scenario uses {useCase.services.length}{' '}
-              {useCase.services.length === 1 ? 'service' : 'services'} from instanode.dev.
-              Each is one HTTP call to provision — no signup, no Docker.
-            </p>
-            <ol className="ucd-steps">
-              {useCase.services.map((s, i) => {
-                const info = SERVICE_INFO[s]
-                return (
-                  <li key={s} className="ucd-step">
-                    <p className="ucd-step-title">
-                      <span className="ucd-step-num">{i + 1}.</span> Provision {info.label}
-                    </p>
-                    <p className="ucd-step-gets">{info.gets}</p>
-                    <pre className="ucd-step-curl"><code>{info.curl}</code></pre>
-                  </li>
-                )
-              })}
-              <li className="ucd-step">
-                <p className="ucd-step-title">
-                  <span className="ucd-step-num">{useCase.services.length + 1}.</span> Wire your agent or app to the returned connection URLs
-                </p>
-                <p className="ucd-step-gets">
-                  Every response includes a <code>connection_url</code> (or <code>receive_url</code> for
-                  webhooks, <code>endpoint</code> for storage) plus an <code>upgrade_jwt</code> you can
-                  hand to <code>/claim</code> when you want to keep the resource past the 24-hour
-                  anonymous window.
-                </p>
-              </li>
-            </ol>
-          </section>
-        )}
-
-        <section className="ucd-section">
-          <h2>Why this is useful</h2>
-          <ul className="ucd-bullets">
-            <li>
-              <strong>Zero ceremony.</strong> No signup, no API key, no Docker, no cloud account.
-              The first call returns a real resource in under a second.
-            </li>
-            <li>
-              <strong>Anonymous-first.</strong> The 24-hour anonymous tier is the trial — every
-              resource expires unless you claim it. No credit card needed to try.
-            </li>
-            <li>
-              <strong>Real infrastructure, not a sandbox.</strong> Every Postgres is a real
-              Postgres, every Redis a real Redis. Your code that works on instanode.dev works
-              against any standard hosted version when you migrate.
-            </li>
-            <li>
-              <strong>Designed for agents.</strong> Single HTTP calls fit in muscle memory for
-              LLM tool use. Predictable JSON responses, OpenAPI 3.1 spec at <code>/openapi.json</code>.
-            </li>
-          </ul>
-        </section>
-
-        {useCase.body && (
-          <section className="ucd-section ucd-section-custom">
-            <h2>Detail</h2>
-            <div className="ucd-body">
-              {renderMarkdown(useCase.body, { baseHeading: 'h3', keyPrefix: useCase.slug })}
-            </div>
-          </section>
+        {useCase.body ? (
+          <div className="ucd-body">
+            {renderMarkdown(useCase.body, { baseHeading: 'h2', keyPrefix: useCase.slug })}
+          </div>
+        ) : (
+          /* Fallback for cases without a hand-authored body. Today every
+           * case has one; this branch exists for resilience if a new
+           * case ships in the content repo before its body is written. */
+          <AutoDetail services={useCase.services} />
         )}
 
         <footer className="ucd-foot">
@@ -169,6 +112,76 @@ function Detail({ useCase }: { useCase: UseCase }) {
         </footer>
       </article>
     </PublicShell>
+  )
+}
+
+/* AutoDetail — fallback section block rendered only when a use case
+ * ships without a hand-authored body. Lists the curls per service and
+ * a generic value-prop bullet list — enough that the page is useful
+ * even for an un-authored case. Once a body lands in the content repo
+ * for the slug, this fallback is hidden and the body takes over. */
+function AutoDetail({ services }: { services: Service[] }) {
+  return (
+    <>
+      {services.length > 0 && (
+        <section className="ucd-section">
+          <h2>How to set it up</h2>
+          <p className="ucd-section-lede">
+            This scenario uses {services.length}{' '}
+            {services.length === 1 ? 'service' : 'services'} from instanode.dev.
+            Each is one HTTP call to provision — no signup, no Docker.
+          </p>
+          <ol className="ucd-steps">
+            {services.map((s, i) => {
+              const info = SERVICE_INFO[s]
+              return (
+                <li key={s} className="ucd-step">
+                  <p className="ucd-step-title">
+                    <span className="ucd-step-num">{i + 1}.</span> Provision {info.label}
+                  </p>
+                  <p className="ucd-step-gets">{info.gets}</p>
+                  <pre className="ucd-step-curl"><code>{info.curl}</code></pre>
+                </li>
+              )
+            })}
+            <li className="ucd-step">
+              <p className="ucd-step-title">
+                <span className="ucd-step-num">{services.length + 1}.</span> Wire your agent or app to the returned connection URLs
+              </p>
+              <p className="ucd-step-gets">
+                Every response includes a <code>connection_url</code> (or <code>receive_url</code> for
+                webhooks, <code>endpoint</code> for storage) plus an <code>upgrade_jwt</code> you can
+                hand to <code>/claim</code> when you want to keep the resource past the 24-hour
+                anonymous window.
+              </p>
+            </li>
+          </ol>
+        </section>
+      )}
+
+      <section className="ucd-section">
+        <h2>Why this is useful</h2>
+        <ul className="ucd-bullets">
+          <li>
+            <strong>Zero ceremony.</strong> No signup, no API key, no Docker, no cloud account.
+            The first call returns a real resource in under a second.
+          </li>
+          <li>
+            <strong>Anonymous-first.</strong> The 24-hour anonymous tier is the trial — every
+            resource expires unless you claim it. No credit card needed to try.
+          </li>
+          <li>
+            <strong>Real infrastructure, not a sandbox.</strong> Every Postgres is a real
+            Postgres, every Redis a real Redis. Your code that works on instanode.dev works
+            against any standard hosted version when you migrate.
+          </li>
+          <li>
+            <strong>Designed for agents.</strong> Single HTTP calls fit in muscle memory for
+            LLM tool use. Predictable JSON responses, OpenAPI 3.1 spec at <code>/openapi.json</code>.
+          </li>
+        </ul>
+      </section>
+    </>
   )
 }
 
@@ -221,9 +234,10 @@ function DetailStyles() {
       .ucd-bullets li { margin: 0 0 10px; }
       .ucd-bullets strong { color: var(--text); font-weight: 600; }
 
-      .ucd-section-custom h3 { font-size: 18px; margin: 24px 0 8px; color: var(--text); }
-      .ucd-section-custom h4 { font-size: 15px; margin: 18px 0 6px; color: var(--text); }
-      .ucd-body { color: var(--text); font-size: 15px; line-height: 1.65; }
+      .ucd-body { color: var(--text); font-size: 15px; line-height: 1.65; margin: 40px 0; }
+      .ucd-body h2 { font-size: 22px; margin: 40px 0 14px; letter-spacing: -0.01em; color: var(--text); }
+      .ucd-body h3 { font-size: 18px; margin: 24px 0 8px; color: var(--text); }
+      .ucd-body h4 { font-size: 15px; margin: 18px 0 6px; color: var(--text); }
       .ucd-body p { margin: 0 0 14px; }
       .ucd-body code {
         background: var(--ink); border: 1px solid var(--border); color: var(--text);
