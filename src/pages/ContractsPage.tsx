@@ -19,7 +19,7 @@ export function ContractsPage() {
         <SummaryStat color="blue"   label="delegated" v="3" sub="via agent api" subCls="dim" />
       </div>
 
-      <SectionH label="LOCKED" badgeBg="var(--accent)" title="26 endpoints · ready for parallel build" sub="source · /dashboard-api/internal/handlers/" />
+      <SectionH label="LOCKED" badgeBg="var(--accent)" title="26 endpoints · ready for parallel build" sub="source · /api/internal/handlers/" />
       <Card style={{ padding: 0 }}>
         <Group title="Resources · 4">
           <ContractLine method="GET"    path="/api/v1/resources" status="→ {ok, items: Resource[], total}" />
@@ -132,7 +132,7 @@ export function ContractsPage() {
         <BlockedCard
           icon="⟳"
           title="Deploy actions & logs · 4 endpoints"
-          intro="Redeploy/rollback/stop and logs SSE all go directly to agent api today. Should proxy via dashboard-api for auth + audit."
+          intro="Redeploy/rollback/stop and logs SSE all go directly to agent api today. Audit hooks need wiring on the agent side."
           contracts={[
             ['POST', '/api/v1/stacks/:slug/redeploy', 'proxy → agent'],
             ['POST', '/api/v1/stacks/:slug/rollback', 'propose'],
@@ -161,7 +161,7 @@ data: {}`}</>}
           <strong>Trial vs. immediate Hobby.</strong> <code>plans.yaml</code> declares <code>trial_days: 14</code>; <code>auth.go:151</code> assigns <code>hobby</code> with no trial fields. Brief journey 1 assumes a trial. <strong>Lock:</strong> add <code>teams.trial_ends_at</code> + worker, OR drop trial language from copy.
         </ContractBanner>
         <ContractBanner kind="warning" badge="#2">
-          <strong>"Deployments" vs "Stacks".</strong> Brief uses "Deployments"; proto + dashboard-api use "Stacks". <strong>Lock:</strong> dashboard URL is <code>/deployments</code> (user language), API stays <code>/stacks</code> (existing).
+          <strong>"Deployments" vs "Stacks".</strong> Brief uses "Deployments"; the API uses "Stacks". <strong>Lock:</strong> dashboard URL is <code>/deployments</code> (user language), API stays <code>/stacks</code> (existing).
         </ContractBanner>
         <ContractBanner kind="warning" badge="#3">
           <strong>Multi-env scoping.</strong> Resource shape includes <code>env</code> but list endpoint has no <code>?env=</code> filter. <strong>Lock:</strong> add server-side filter param + <code>teams.default_env</code> in PATCH body.
@@ -174,7 +174,7 @@ data: {}`}</>}
         </ContractBanner>
       </div>
 
-      <SectionH label="DELEGATED" badgeBg="var(--blue)" title="3 surfaces · routes to agent api" sub="not in dashboard-api · already documented in /flows" />
+      <SectionH label="DELEGATED" badgeBg="var(--blue)" title="3 surfaces · routes to agent api" sub="anonymous / cross-origin paths · already documented in /flows" />
       <Card style={{ padding: '18px 20px' }}>
         <ContractLine method="POST" path="api.instanode.dev/db/new · /cache/new · /mongo/new · /queue/new · /storage/new · /webhook/new · /deploy/new" status="→ agent api" />
         <ContractLine method="POST" path="api.instanode.dev/claim · /start?t=jwt · /claim/preview" status="→ agent api" />

@@ -3,8 +3,7 @@ import react from '@vitejs/plugin-react';
 
 // AGENT_API_URL — the agent-facing instanode.dev API (defaults to the live
 // cluster; override locally with AGENT_API_URL=http://localhost:30080).
-// All dashboard fetches go through this single upstream — no separate
-// dashboard-api in this build of the project.
+// All dashboard fetches go through this single upstream.
 const agentApiURL = process.env.AGENT_API_URL || 'http://api.instanode.dev';
 
 // In tests we set VITE_NO_PROXY=1 so Playwright's page.route() globs match
