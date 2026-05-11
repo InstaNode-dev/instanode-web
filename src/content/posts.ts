@@ -21,64 +21,42 @@ export type Post = {
 export const POSTS: Post[] = [
   {
     slug: 'five-people-who-built-something-this-week',
-    title: 'Five people who built something on instanode.dev this week',
+    title: 'Maya shipped on Sunday night',
     date: '2026-05-12',
     author: 'instanode.dev',
     excerpt:
-      'An AI agent that needed memory. A founder shipping her MVP at 1 AM. A solo hacker ' +
-      'wiring up RAG over PDFs. A staff engineer cleaning up Stripe webhooks. Five real ' +
-      'shapes of "I want to build something" — and what they all curled.',
+      'A solo founder, six hours of laptop battery, a friend who asked for "the thing" by ' +
+      'standup. Three curls and she went to bed. Plus four others who showed up the same week ' +
+      'with different problems and the same shape of session.',
     body: `
-# Five people who built something on instanode.dev this week
+# Maya shipped on Sunday night
 
-Every product page lists features. Features are not why people show up. People
-show up with a problem at the front of their head and they want it gone in the
-next twenty minutes.
+It's 11:47 PM on a Sunday. Maya has six hours of laptop battery, a FastAPI app
+she finished an hour ago, and a friend who asked to see "the thing" before
+standup. Tabs open: Heroku pricing, Fly.io machine docs, a half-read Render
+tutorial. None of them are loaded.
 
-This post is about five of them. The names are made up; the shape of each
-session is real — pulled from anonymized funnel data and support threads from
-this week.
+She types \`curl -X POST https://api.instanode.dev/db/new\` and her laptop,
+somehow, replies with a working Postgres URL in 945 milliseconds.
 
-## 1. Cleo, an AI coding agent — needs memory across sessions
+This is the third tab Maya didn't have to read. The other four people in this
+post had different problems but the same Sunday-night shape: a problem at the
+front of their head, low tolerance for ceremony, and the next twenty minutes
+to make the problem disappear.
 
-Cleo is a long-running agent. She's a coding companion running inside someone's
-terminal, handed long-horizon tasks like "ship the auth refactor and the
-billing migration by Friday." Across days she has to remember what she tried,
-what worked, what the human pushed back on.
+## Maya's full night
 
-The way Cleo used to do this was a flat \`memory.md\` file in the user's home
-directory. It worked. It also got out of sync the moment the user opened a
-second terminal, broke on a corrupted write, and could not be queried
-("what did we decide about Stripe two days ago?").
-
-Cleo's owner gave her one tool call. She used it:
-
-\`\`\`
-POST https://api.instanode.dev/db/new
-\`\`\`
-
-945 milliseconds later: a real Postgres URL. Cleo created a \`memories\` table,
-indexed on \`embedding\` (pgvector ships with the platform), and started
-writing one row per decision. She read back via similarity search.
-
-When the user asked about Stripe two days later, Cleo answered correctly,
-cited the original message, and didn't lose the thread when the laptop slept.
-
-**What she'd have struggled with elsewhere**: setting up the database
-required no signup, no API key, no Docker on the user's machine. The whole
-thing was inside Cleo's existing tool budget.
-
-## 2. Maya, a solo founder — shipping her MVP at 1 AM
-
-Maya is shipping a product called Bookbase, a tiny tool that lets people
-upload a CSV of book titles and get back tagged, summarized, embedded entries.
-She started writing the backend on Sunday afternoon. By Sunday night she had
-a working FastAPI app on her laptop. She wanted it live before Monday morning
-because she promised a friend a demo.
+Maya is shipping a tool called Bookbase. People upload a CSV of book titles
+and get back tagged, summarized entries with embedding vectors attached so
+the next "find me books like this one" query is fast. The work was the
+modeling, the prompt design, the rate-limiting. The work was not supposed to
+be the deploy.
 
 Maya does not run Kubernetes. Maya does not want to.
 
-She wrote a Dockerfile, ran her code through provisioning + deploy:
+At 11:50 she has the Postgres URL. She runs \`curl -X POST .../cache/new\`
+for Redis — that's where she'll cache the tag dictionary so the LLM doesn't
+have to re-derive labels on every request. Two URLs in her clipboard.
 
 \`\`\`
 # 1. Postgres for books + embeddings, Redis for tag cache
@@ -93,105 +71,89 @@ curl -X POST https://api.instanode.dev/deploy/new \\
   -F 'env_vars={"DATABASE_URL":"...","REDIS_URL":"..."}'
 \`\`\`
 
-90 seconds of build, then a working HTTPS URL on
-\`*.deployment.instanode.dev\` with a Let's Encrypt cert.
+\`env_vars\` is a JSON map; whatever's in there lands in the deployed pod's
+environment on the first build. Maya pastes the two connection URLs in. The
+multipart upload completes in three seconds.
 
-Maya's full path from "code on laptop" to "URL I can send my friend" was
-three curls. She went to bed.
+90 seconds of build later — there's a kaniko Job grinding away in the platform
+cluster, but Maya doesn't have to know that — and the response includes:
 
-**What she'd have struggled with elsewhere**: every alternative is a tutorial
-(Heroku-like, Fly machines, Railway, render). Maya read zero documentation
-this session. The endpoints are obvious enough that she could guess them.
+\`\`\`
+https://bookbase-7a3f.deployment.instanode.dev
+\`\`\`
 
-## 3. Anders, an indie hacker — wiring RAG over a stack of PDFs
+A working HTTPS URL on the deployment subdomain, with a valid Let's Encrypt
+cert that cert-manager handled in the background.
+
+Maya curls her own URL: \`{"ok":true,"books_indexed":0}\`. She uploads a sample
+CSV. She refreshes. Twelve rows of tagged, summarized books come back.
+
+She sends the URL to her friend at 12:14 AM and goes to bed.
+
+## What that 90 seconds usually costs
+
+Every alternative Maya didn't read is a tutorial. Heroku wants the Procfile.
+Fly Machines wants \`flyctl launch\` and a config file. Railway and Render
+want her to push to a Git remote. Each of them is a fine product. None of
+them are obvious in the dark on a Sunday at midnight.
+
+The instanode endpoints fit in muscle memory: \`/db/new\`, \`/cache/new\`,
+\`/deploy/new\`. Maya read zero documentation this session. The platform
+shapes itself around what she was going to type anyway.
+
+When she wakes up tomorrow her resources will be marked anonymous and
+expire at midnight Monday. If Bookbase has a user by then she'll click the
+claim link in the response and pay $9/mo. If it doesn't, the URL goes away
+and nothing was wasted.
+
+## Four others, same Sunday-night shape
+
+Maya is not unusual. Four other people showed up this week with different
+problems and the same low-ceremony arrival.
+
+### Cleo — a long-running coding agent that needed persistent memory
+
+Cleo runs inside someone's terminal across days, handed tasks like "ship the
+auth refactor by Friday." Her old memory was a flat \`memory.md\` file: broke
+on corrupted writes, out of sync across terminal tabs, couldn't be queried.
+She made one tool call to \`/db/new\` and a Postgres URL came back. Cleo's
+schema is a \`memories\` table with a \`vector(1536)\` embedding column —
+pgvector (Postgres's vector-similarity extension) ships pre-installed, so
+similarity search is a single \`SELECT ... ORDER BY embedding <-> $query\`.
+When the user asked about a decision two days later, Cleo answered correctly
+and cited the original turn.
+
+### Anders — RAG over a stack of legal PDFs
 
 Anders is building Lawclerk, a tiny SaaS that answers questions from a
-corpus of legal PDFs. He had the LLM part working in a Jupyter notebook.
-What he was missing was the vector store and a way to keep retrieval fast
-even when the corpus grew past 10 GB.
+corpus of legal PDFs (RAG = retrieval-augmented generation: feed the LLM
+relevant snippets from your own corpus instead of relying on its training
+data). Pinecone rate-limited him at 11 PM, Weaviate was awkward to deploy,
+Qdrant's auth setup beat him. Same \`/db/new\`, same default pgvector. He
+created an HNSW index (the standard graph-based nearest-neighbor index;
+\`CREATE INDEX ON docs USING hnsw\`), fed in 47,000 chunks, and watched the
+99th-percentile latency stay under 80 ms. The whole vector layer was
+Postgres, and he already knew Postgres.
 
-Pinecone has a free tier but his account got rate-limited. He tried Weaviate
-locally — fine on his laptop, awkward to deploy. He bounced off Qdrant's
-auth setup at 11 PM.
+### Priya — debugging a Stripe webhook
 
-The Postgres he got from instanode.dev has pgvector pre-installed. One
-table, one HNSW index, one \`CREATE EXTENSION\` not needed:
-
-\`\`\`
-CREATE TABLE docs (
-  id bigserial PRIMARY KEY,
-  embedding vector(1536),
-  text text
-);
-CREATE INDEX ON docs USING hnsw (embedding vector_cosine_ops);
-\`\`\`
-
-He fed in 47,000 chunks. Query times stayed under 80 ms at p99 with default
-settings. The whole vector layer cost him zero ceremony — it was just
-Postgres, and he knew Postgres.
-
-When he wanted to move from anonymous (24h TTL) to permanent, one /claim
-call attached the database to his hobby tier ($9/mo). The connection URL
-didn't change. His running app didn't blink.
-
-**What he'd have struggled with elsewhere**: every dedicated vector store
-adds a SaaS to keep alive. Adding pgvector to a managed Postgres is a
-config flag, but most managed providers either don't expose it or charge
-extra. The default-on pgvector quietly removed an entire decision.
-
-## 4. Priya, a staff engineer — debugging a third-party webhook
-
-Priya works at an established company. Today she's tracking down a bug:
-their Stripe webhook handler occasionally drops an event. She is 90% sure
-it's a payload-shape mismatch, but she can't reproduce locally because
-\`stripe trigger\` doesn't fire the exact event she needs and ngrok requires
-a paid plan for her account size.
-
-She wanted a public URL that received whatever was POSTed and stored every
-request verbatim. Two minutes of searching gave her some options that
-required an account, then this:
-
-\`\`\`
-curl -X POST https://api.instanode.dev/webhook/new
-\`\`\`
-
-She got a \`receive_url\` back and pasted it into Stripe as a test endpoint.
-The next 14 webhook payloads landed in the platform's \`/webhook/:token/requests\`
-log, queryable by curl. She found the malformed field in the second one. The
+Priya at an established company. Their Stripe handler drops events
+intermittently. \`stripe trigger\` won't fire the specific event she needs;
+ngrok wants a paid plan for her account size. Two minutes of searching, then
+\`curl -X POST .../webhook/new\` got her a public \`receive_url\`. She pasted
+it into Stripe's test endpoint config. The next 14 payloads landed in the
+platform's request log; she found the malformed field in the second one. The
 fix shipped before standup.
 
-**What she'd have struggled with elsewhere**: anonymous webhook receivers
-are most often hostile to enterprise security (paid plan, signup, email
-verification). The one-curl endpoint was a tool she could justify on a
-30-minute timer.
+### Reza and Tamika — hackathon, 24 hours, one demo
 
-## 5. Two students at a hackathon — 24 hours, one demo
-
-Reza and Tamika met three hours into a hackathon. They wanted to build
-"Daily Standup Bot," an internal Slack tool that summarizes what each
-person committed to GitHub yesterday and posts it to a channel.
-
-They had until 9 AM the next morning. They are good engineers. They had
-never collaborated on a deploy.
-
-\`\`\`
-curl -X POST https://api.instanode.dev/db/new       # commit log + summaries
-curl -X POST https://api.instanode.dev/cache/new    # rate limit per user
-curl -X POST https://api.instanode.dev/webhook/new  # GitHub webhook ingest
-\`\`\`
-
-Three curls in their group chat at 3 AM. Within 10 minutes both had the
-same set of working backing services. They wrote the bot in Python. They
-deployed it with \`/deploy/new\` and a Dockerfile. By 6 AM they had a demo
-running against the hackathon Slack workspace. They went to bed for two hours.
-
-They didn't claim. The resources expired at noon the next day. They
-didn't care — the bot existed long enough to win second place. They wrote
+They met three hours into a hackathon and decided to build "Daily Standup
+Bot." They had never collaborated on a deploy. Three curls in their group
+chat at 3 AM — \`/db/new\`, \`/cache/new\`, \`/webhook/new\` — and within 10
+minutes both had identical working backing services. They wrote the bot in
+Python, shipped it with \`/deploy/new\`, demoed at 9 AM, won second place.
+They didn't claim; the resources expired at noon the next day. They wrote
 the names down to come back to it.
-
-**What they'd have struggled with elsewhere**: every "set up a backend"
-choice cost them an hour of yak-shaving they didn't have. The 24-hour TTL
-matched the shape of a hackathon perfectly.
 
 ## What ties them together
 
