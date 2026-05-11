@@ -11,6 +11,7 @@
  * Wrapped in PublicShell. */
 
 import { useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { PublicShell } from '../layout/PublicShell'
 import { USE_CASES, type Category, type Service } from '../content/useCases'
 
@@ -92,15 +93,18 @@ export function UseCasesPage() {
             <section key={cat} className="uc-group">
               <h2 className="uc-group-title">{cat}</h2>
               <ul className="uc-list">
-                {list.map((u, i) => (
-                  <li key={`${cat}-${i}`} className="uc-card">
-                    <h3 className="uc-card-title">{u.title}</h3>
-                    <p className="uc-card-scenario">{u.scenario}</p>
-                    <div className="uc-card-services" aria-label="Services used">
-                      {u.services.map((s) => (
-                        <span key={s} className="uc-service-tag">{SERVICE_LABEL[s]}</span>
-                      ))}
-                    </div>
+                {list.map((u) => (
+                  <li key={u.slug} className="uc-card">
+                    <Link to={`/use-cases/${u.slug}`} className="uc-card-link">
+                      <h3 className="uc-card-title">{u.title}</h3>
+                      <p className="uc-card-scenario">{u.scenario}</p>
+                      <div className="uc-card-services" aria-label="Services used">
+                        {u.services.map((s) => (
+                          <span key={s} className="uc-service-tag">{SERVICE_LABEL[s]}</span>
+                        ))}
+                      </div>
+                      <span className="uc-card-cta">See how →</span>
+                    </Link>
                   </li>
                 ))}
               </ul>
@@ -143,13 +147,18 @@ function UseCasesStyles() {
       .uc-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 12px;
         grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); }
       .uc-card {
-        border: 1px solid var(--border-hi); border-radius: 10px; padding: 20px;
-        display: flex; flex-direction: column; gap: 8px;
+        border: 1px solid var(--border-hi); border-radius: 10px;
         transition: border-color 120ms, transform 120ms;
       }
       .uc-card:hover { border-color: var(--accent); transform: translateY(-1px); }
+      .uc-card-link {
+        display: flex; flex-direction: column; gap: 8px;
+        padding: 20px; text-decoration: none; color: inherit;
+        height: 100%;
+      }
       .uc-card-title { font-size: 16px; margin: 0; letter-spacing: -0.005em; color: var(--text); }
       .uc-card-scenario { color: var(--text-dim); font-size: 14px; line-height: 1.5; margin: 0; flex: 1; }
+      .uc-card-cta { color: var(--accent); font-size: 13px; font-weight: 500; margin-top: 4px; }
       .uc-card-services { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
       .uc-service-tag {
         font-size: 11px; padding: 2px 8px; border-radius: 4px;

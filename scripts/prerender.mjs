@@ -51,9 +51,15 @@ async function loadRoutes() {
   // content repo automatically expands the prerender route list — no
   // change needed here.
   const blogDir = resolve(ROOT, '.content/blog')
-  const slugs = existsSync(blogDir)
+  const blogSlugs = existsSync(blogDir)
     ? readdirSync(blogDir).filter((f) => f.endsWith('.md')).map((f) => f.replace(/\.md$/, ''))
     : []
+
+  const useCaseDir = resolve(ROOT, '.content/use-cases')
+  const useCaseSlugs = existsSync(useCaseDir)
+    ? readdirSync(useCaseDir).filter((f) => f.endsWith('.md')).map((f) => f.replace(/\.md$/, ''))
+    : []
+
   return [
     '/',
     '/pricing',
@@ -62,7 +68,8 @@ async function loadRoutes() {
     '/docs',
     '/blog',
     '/use-cases',
-    ...slugs.map((s) => `/blog/${s}`),
+    ...blogSlugs.map((s) => `/blog/${s}`),
+    ...useCaseSlugs.map((s) => `/use-cases/${s}`),
   ]
 }
 
