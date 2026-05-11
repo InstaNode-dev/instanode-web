@@ -396,21 +396,18 @@ export async function deleteCustomDomain(stackSlug: string, id: string): Promise
   )
 }
 
-// ─── Billing (LIVE for checkout + invoices; partial-fixture for state) ───
+// ─── Billing (LIVE: every endpoint hits the agent API) ──────────────────
 //
-// fetchBilling   — plan tier is REAL (from /api/v1/whoami). Renewal date,
-//                  payment method, billing email all come from fixtures
-//                  because the agent API doesn't yet expose a GET
-//                  /api/v1/billing endpoint that aggregates this. Open
-//                  follow-up: add the endpoint, then drop FIXTURE_BILLING
-//                  here. See `dashboard/AGENT_API_NOTES.md` for the
-//                  expected shape.
+// fetchBilling   — LIVE. Calls GET /api/v1/billing on the agent API,
+//                  which returns the aggregated billing state (tier,
+//                  subscription_status, next_renewal_at, amount_inr,
+//                  payment_method, razorpay_*_id). Falls back to a
+//                  whoami-derived shape when the endpoint isn't
+//                  available (503 = Razorpay unconfigured, e.g. local
+//                  dev) so the UI stays usable.
 //
 // listInvoices   — LIVE. Calls GET /api/v1/billing/invoices on the agent
-//                  API; falls back to FIXTURE_INVOICES on 503 (billing
-//                  not configured, e.g. local dev without Razorpay keys)
-//                  so the UI stays usable. Returns an empty list when
-//                  the team has no subscription yet.
+//                  API; falls back to FIXTURE_INVOICES on 503.
 //
 // createCheckout — LIVE. Calls POST /api/v1/billing/checkout, creates a
 //                  real Razorpay subscription, and returns the hosted
@@ -418,13 +415,60 @@ export async function deleteCustomDomain(stackSlug: string, id: string): Promise
 //                  the user to short_url to complete payment. Errors
 //                  propagate as APIError so the page's checkoutErr state
 //                  can surface them inline.
+//
+// cancelSubscription — LIVE. POST /api/v1/billing/cancel.
+
+type BillingStateResp = {
+  ok: boolean
+  tier: string
+  subscription_status?: 'none' | 'active' | 'cancelled' | 'trial'
+  next_renewal_at?: string | null
+  amount_inr?: number | null
+  payment_method?: {
+    type: 'card' | 'upi' | 'netbanking' | 'wallet'
+    brand?: string
+    last4?: string
+    vpa?: string
+  } | null
+  billing_email?: string
+  razorpay_subscription_id?: string | null
+  razorpay_customer_id?: string | null
+}
+
+/* Map the agent API's BillingStateResp into the dashboard's BillingDetails
+ * type. The dashboard's shape was designed against a richer Stripe-style
+ * payload; the agent API returns the bare minimum for now. Anything the
+ * agent API doesn't expose stays undefined so the UI renders "—". */
+function mapBillingState(r: BillingStateResp): BillingDetails {
+  return {
+    status: r.subscription_status ?? 'none',
+    current_period_end: r.next_renewal_at ?? null,
+    razorpay_configured: r.subscription_status !== 'none',
+    subscription_status: r.subscription_status,
+    payment_last4: r.payment_method?.last4,
+    payment_network: r.payment_method?.brand,
+    cancel_at_period_end: false,
+  }
+}
 
 export async function fetchBilling(): Promise<{ ok: true; plan: string; billing: BillingDetails }> {
   try {
-    const me = await fetchMe()
-    return { ok: true as const, plan: me.user.tier, billing: FIXTURE_BILLING }
-  } catch {
-    return { ok: true as const, plan: 'hobby', billing: FIXTURE_BILLING }
+    const r = await call<BillingStateResp>('/api/v1/billing')
+    return { ok: true as const, plan: r.tier, billing: mapBillingState(r) }
+  } catch (e: any) {
+    // 503 = Razorpay unconfigured in this env (e.g. local dev without
+    // RAZORPAY_KEY_ID). Fall back to the whoami-derived shape +
+    // FIXTURE_BILLING so the page still renders. Any other error
+    // propagates so the caller sees a real failure.
+    if (e?.status === 503) {
+      try {
+        const me = await fetchMe()
+        return { ok: true as const, plan: me.user.tier, billing: FIXTURE_BILLING }
+      } catch {
+        return { ok: true as const, plan: 'hobby', billing: FIXTURE_BILLING }
+      }
+    }
+    throw e
   }
 }
 
