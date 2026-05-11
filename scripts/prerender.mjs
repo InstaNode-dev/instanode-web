@@ -119,6 +119,13 @@ async function main() {
   // JS bundle reference, asset hashing, and any meta tags are preserved.
   const template = await readFile(resolve(DIST, 'index.html'), 'utf-8')
 
+  // Step 3b: build the route → metadata table once. Pulls frontmatter
+  // from .content/blog/<slug>.md and .content/use-cases/<slug>.md so each
+  // pre-rendered page gets its own <title>, og:title, og:description,
+  // og:url, canonical, and twitter:* tags. The og:image stays on the
+  // shared /og-default.png — per-post images can come later.
+  const metaByRoute = await loadRouteMeta()
+
   // Step 4: pre-render each known route.
   const routes = await loadRoutes()
   console.log(`prerender: writing ${routes.length} static HTML files…`)
@@ -126,7 +133,9 @@ async function main() {
   let written = 0
   for (const route of routes) {
     const html = render(route)
-    const rendered = template.replace('<div id="root"></div>', `<div id="root">${html}</div>`)
+    const meta = metaByRoute[route] || null
+    const withMeta = meta ? applyRouteMeta(template, route, meta) : template
+    const rendered = withMeta.replace('<div id="root"></div>', `<div id="root">${html}</div>`)
     const outPath = routeToFile(route)
     await mkdir(dirname(outPath), { recursive: true })
     await writeFile(outPath, rendered, 'utf-8')
@@ -383,6 +392,226 @@ function parseFrontmatter(src) {
     if (key) meta[key] = value
   }
   return meta
+}
+
+/* SEO defaults — the homepage / fallback OG card. The base
+ * dist/index.html already points here; constants live in code so
+ * applyRouteMeta can produce a fully replaced <head> for per-route
+ * pages without re-stating these strings inline. */
+const SITE_ORIGIN = 'https://instanode.dev'
+const DEFAULT_DESCRIPTION =
+  'Zero-setup infrastructure for AI agents. Provision real Postgres, Redis, MongoDB, queues, storage, and deployed apps with a single HTTP call.'
+
+/* loadRouteMeta — build the route → {title, description, ogType} table
+ * the prerender step uses to splice per-route meta tags into each
+ * dist/<route>/index.html. Pulls frontmatter from .content/blog and
+ * .content/use-cases; hard-codes the marketing pages.
+ *
+ * The og:image stays on /og-default.png across the site for now; per-post
+ * images would need a generator that takes title + theme and stamps a
+ * 1200x630 PNG. That's a future iteration — the default card is the
+ * single biggest CTR win and the per-route title + description give
+ * Slack/Discord/Twitter enough variation to feel curated. */
+async function loadRouteMeta() {
+  const meta = {}
+
+  /* Marketing pages — keep titles tight and value-prop forward. Each
+   * description is ~120-160 chars (Google truncates around 160). */
+  meta['/'] = {
+    title: 'instanode · Real infrastructure for AI agents',
+    description: DEFAULT_DESCRIPTION,
+    ogType: 'website',
+  }
+  meta['/pricing'] = {
+    title: 'Pricing — instanode.dev',
+    description:
+      'Anonymous is free for 24 hours. Hobby is $9/mo, Pro is $49/mo, Team is $199/mo. Self-serve at every tier, no talk-to-sales.',
+    ogType: 'website',
+  }
+  meta['/for-agents'] = {
+    title: 'For AI agents — instanode.dev',
+    description:
+      'Why instanode.dev is designed for AI agents first: anonymous-first endpoints, single-HTTP-call provisioning, llms.txt, predictable JSON.',
+    ogType: 'website',
+  }
+  meta['/status'] = {
+    title: 'Status — instanode.dev',
+    description:
+      'Live operational status for instanode.dev. The same status is served as JSON at api.instanode.dev/api/v1/health for machine consumption.',
+    ogType: 'website',
+  }
+  meta['/docs'] = {
+    title: 'Documentation — instanode.dev',
+    description:
+      'Every curl works against api.instanode.dev as-is. Provision, claim, deploy, query — all from the command line, no account required.',
+    ogType: 'website',
+  }
+  meta['/blog'] = {
+    title: 'Blog — instanode.dev',
+    description:
+      'Build notes, retrospectives, and the occasional rant on what "frictionless for AI agents" actually means.',
+    ogType: 'website',
+  }
+  meta['/use-cases'] = {
+    title: 'Use cases — instanode.dev',
+    description:
+      'Real scenarios across hackathon, agentic, data, and platform workloads — each with a paste-ready prompt any vanilla LLM can execute.',
+    ogType: 'website',
+  }
+
+  /* Blog posts — title + excerpt from frontmatter. og:type is
+   * 'article' so Facebook/LinkedIn render publish dates and bylines. */
+  const blogDir = resolve(ROOT, '.content/blog')
+  const blogFiles = existsSync(blogDir)
+    ? readdirSync(blogDir).filter((f) => f.endsWith('.md'))
+    : []
+  for (const f of blogFiles) {
+    const src = await readFile(resolve(blogDir, f), 'utf-8')
+    const fm = parseFrontmatter(src)
+    const slug = f.replace(/\.md$/, '')
+    const desc = fm.excerpt || firstParagraph(src) || DEFAULT_DESCRIPTION
+    meta[`/blog/${slug}`] = {
+      title: `${fm.title || slug} — instanode.dev`,
+      description: clamp(desc, 200),
+      ogType: 'article',
+      publishedTime: fm.date || undefined,
+      author: fm.author || undefined,
+    }
+  }
+
+  /* Use cases — title + scenario from frontmatter. Falls back to the
+   * first body paragraph if scenario is missing. */
+  const useCaseDir = resolve(ROOT, '.content/use-cases')
+  const useCaseFiles = existsSync(useCaseDir)
+    ? readdirSync(useCaseDir).filter((f) => f.endsWith('.md'))
+    : []
+  for (const f of useCaseFiles) {
+    const src = await readFile(resolve(useCaseDir, f), 'utf-8')
+    const fm = parseFrontmatter(src)
+    const slug = f.replace(/\.md$/, '')
+    const desc = fm.scenario || firstParagraph(src) || DEFAULT_DESCRIPTION
+    meta[`/use-cases/${slug}`] = {
+      title: `${fm.title || slug} — instanode.dev`,
+      description: clamp(desc, 200),
+      ogType: 'article',
+    }
+  }
+
+  return meta
+}
+
+/* applyRouteMeta — overwrite the homepage-default <title>, description,
+ * og:*, twitter:*, and canonical tags with route-specific values.
+ *
+ * Strategy: targeted regex replacements against the canonical strings
+ * emitted by index.html so the replacement is unambiguous and stable.
+ * Adds article:published_time / article:author for blog posts so
+ * Facebook/LinkedIn render a byline on the share card.
+ *
+ * Defensively HTML-escapes substituted text — a description with & or "
+ * would otherwise produce malformed HTML.
+ */
+function applyRouteMeta(template, route, meta) {
+  const url = route === '/' ? `${SITE_ORIGIN}/` : `${SITE_ORIGIN}${route}`
+  const title = htmlEscape(meta.title)
+  const description = htmlEscape(meta.description)
+  const ogType = meta.ogType || 'website'
+
+  let html = template
+    .replace(/<title>[^<]*<\/title>/, `<title>${title}</title>`)
+    .replace(
+      /<meta name="description" content="[^"]*"\s*\/?>/,
+      `<meta name="description" content="${description}" />`,
+    )
+    .replace(
+      /<link rel="canonical" href="[^"]*"\s*\/?>/,
+      `<link rel="canonical" href="${url}" />`,
+    )
+    .replace(
+      /<meta property="og:type" content="[^"]*"\s*\/?>/,
+      `<meta property="og:type" content="${ogType}" />`,
+    )
+    .replace(
+      /<meta property="og:url" content="[^"]*"\s*\/?>/,
+      `<meta property="og:url" content="${url}" />`,
+    )
+    .replace(
+      /<meta property="og:title" content="[^"]*"\s*\/?>/,
+      `<meta property="og:title" content="${title}" />`,
+    )
+    .replace(
+      /<meta property="og:description" content="[^"]*"\s*\/?>/,
+      `<meta property="og:description" content="${description}" />`,
+    )
+    .replace(
+      /<meta name="twitter:title" content="[^"]*"\s*\/?>/,
+      `<meta name="twitter:title" content="${title}" />`,
+    )
+    .replace(
+      /<meta name="twitter:description" content="[^"]*"\s*\/?>/,
+      `<meta name="twitter:description" content="${description}" />`,
+    )
+
+  // Splice in article:published_time + article:author for blog posts.
+  // Anchor: right after og:image:alt — a stable line in the base template.
+  if (ogType === 'article' && (meta.publishedTime || meta.author)) {
+    const extra = []
+    if (meta.publishedTime) {
+      extra.push(`<meta property="article:published_time" content="${htmlEscape(meta.publishedTime)}" />`)
+    }
+    if (meta.author) {
+      extra.push(`<meta property="article:author" content="${htmlEscape(meta.author)}" />`)
+    }
+    html = html.replace(
+      /(<meta property="og:image:alt" content="[^"]*"\s*\/?>)/,
+      `$1\n    ${extra.join('\n    ')}`,
+    )
+  }
+
+  return html
+}
+
+/* firstParagraph — strip frontmatter and pull the first non-heading
+ * paragraph from a markdown source, useful as a description fallback
+ * when a post has no excerpt. */
+function firstParagraph(src) {
+  const body = src.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '')
+  for (const block of body.split(/\r?\n\r?\n/)) {
+    const trimmed = block.trim()
+    if (!trimmed) continue
+    if (trimmed.startsWith('#')) continue
+    if (trimmed.startsWith('>')) continue
+    if (trimmed.startsWith('```')) continue
+    return trimmed
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+      .replace(/[*_`]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+  }
+  return ''
+}
+
+/* clamp — truncate at ~max chars on a word boundary, append an ellipsis.
+ * Used to keep og:description under the ~200-char limit most platforms
+ * impose without chopping mid-word. */
+function clamp(s, max) {
+  if (!s) return ''
+  if (s.length <= max) return s
+  const cut = s.slice(0, max)
+  const lastSpace = cut.lastIndexOf(' ')
+  return (lastSpace > max * 0.6 ? cut.slice(0, lastSpace) : cut).trimEnd() + '…'
+}
+
+/* htmlEscape — minimal escaping for substitution into HTML attributes.
+ * The five XML-significant characters are enough; we never inject into
+ * a script/style context where stricter rules apply. */
+function htmlEscape(s) {
+  return String(s || '')
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
 }
 
 main().catch((err) => {
