@@ -118,10 +118,22 @@ export function BillingPage() {
     }
   }
 
-  function handleCancel() {
+  async function handleCancel() {
     if (!window.confirm('Cancel your subscription? You will keep access until the end of the current period.')) return
-    // TODO: wire to POST /api/v1/billing/cancel on the server.
-    console.log('cancel: not yet wired to backend')
+    setCheckoutErr(null)
+    try {
+      await api.cancelSubscription()
+      // Razorpay processes the cancellation asynchronously and emits a
+      // subscription.cancelled webhook that downgrades the team. The new
+      // tier won't appear until the next page reload picks up the
+      // updated whoami, so re-read the billing card and tell the user
+      // that the downgrade is in flight.
+      const b = await api.fetchBilling()
+      setBilling(b.billing)
+      window.alert('Cancellation requested. Your tier downgrades when Razorpay finalises (usually within seconds). Refresh the page in a moment.')
+    } catch (e: any) {
+      setCheckoutErr(e?.message ?? 'cancel failed')
+    }
   }
 
   return (
