@@ -6,6 +6,9 @@ import { MarketingPage } from './pages/MarketingPage'
 import { PricingPage } from './pages/PricingPage'
 import { ForAgentsPage } from './pages/ForAgentsPage'
 import { StatusPage } from './pages/StatusPage'
+import { BlogPage } from './pages/BlogPage'
+import { BlogPostPage } from './pages/BlogPostPage'
+import { DocsPage } from './pages/DocsPage'
 
 // Auth surfaces
 import { LoginPage } from './pages/LoginPage'
@@ -50,6 +53,9 @@ export function App() {
         <Route path="/pricing" element={<PricingPage />} />
         <Route path="/for-agents" element={<ForAgentsPage />} />
         <Route path="/status" element={<StatusPage />} />
+        <Route path="/blog" element={<BlogPage />} />
+        <Route path="/blog/:slug" element={<BlogPostPage />} />
+        <Route path="/docs" element={<DocsPage />} />
 
         {/* ─── auth surfaces (no chrome, dedicated layout) ───────── */}
         <Route path="/login" element={<LoginPage />} />
