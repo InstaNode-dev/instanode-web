@@ -7,3 +7,8 @@ dist/
 playwright-report/
 test-results/
 
+# Cloned from InstaNode-dev/content by scripts/fetch-content.mjs before
+# every build. Contents are inlined into the bundle by Vite — never
+# committed to this repo.
+.content/
+
