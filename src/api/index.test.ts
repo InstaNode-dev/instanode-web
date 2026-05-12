@@ -30,6 +30,7 @@ import {
   fetchStackFamily,
   listDeployments,
   getDeployment,
+  reportExperimentConverted,
   validatePromotion,
 } from './index'
 // §10.21: FIXTURE_BILLING / FIXTURE_INVOICES imports retired. The 503
@@ -607,6 +608,41 @@ describe('fetchMe()', () => {
     m.mockResolvedValueOnce(jsonResponse({ error: 'boom' }, { status: 500 }))
     await expect(fetchMe()).rejects.toBeDefined()
   })
+
+  it('passes through the experiments map from the agent API', async () => {
+    // P1 pricing experiment — /auth/me now embeds a server-bucketed
+    // experiments map. The dashboard's UpgradeButton component reads
+    // `me.experiments.upgrade_button` to decide which variant to render.
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse({
+      ok: true,
+      user_id: 'u_xyz',
+      team_id: 't_xyz',
+      email: 'agent@instanode.dev',
+      tier: 'pro',
+      trial_ends_at: null,
+      experiments: { upgrade_button: 'urgent' },
+    }))
+    const r = await fetchMe()
+    expect(r.experiments).toEqual({ upgrade_button: 'urgent' })
+  })
+
+  it('omits experiments cleanly when the agent API does not return the field', async () => {
+    // Older API builds (pre-P1) don't return an experiments field.
+    // The dashboard must handle that without throwing — UpgradeButton
+    // falls back to "control" via normalizeVariant().
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse({
+      ok: true,
+      user_id: 'u_xyz',
+      team_id: 't_xyz',
+      email: 'agent@instanode.dev',
+      tier: 'pro',
+      trial_ends_at: null,
+    }))
+    const r = await fetchMe()
+    expect(r.experiments).toBeUndefined()
+  })
 })
 
 // ─── listResources() / deleteResource() (smoke for shape adaptation) ─────
@@ -997,5 +1033,50 @@ describe('fetchStackFamily()', () => {
     await fetchStackFamily('stk weird/slug')
     const [url] = m.mock.calls[0]
     expect(String(url)).toContain('/api/v1/stacks/stk%20weird%2Fslug/family')
+  })
+})
+
+// ─── reportExperimentConverted() ─────────────────────────────────────────
+describe('reportExperimentConverted()', () => {
+  it('POSTs the right payload to /api/v1/experiments/converted', async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse({ ok: true }))
+    await reportExperimentConverted({
+      experiment: 'upgrade_button',
+      variant: 'urgent',
+      action: 'checkout_started',
+    })
+    const [url, init] = m.mock.calls[0]
+    expect(String(url)).toContain('/api/v1/experiments/converted')
+    expect((init as any).method).toBe('POST')
+    expect(JSON.parse((init as any).body)).toEqual({
+      experiment: 'upgrade_button',
+      variant: 'urgent',
+      action: 'checkout_started',
+    })
+  })
+
+  it('swallows network errors (analytics tail must not wag the conversion dog)', async () => {
+    const m = installFetch()
+    m.mockRejectedValueOnce(new Error('offline'))
+    // Must NOT throw. If it does, the test fails by surfacing the rejection.
+    await reportExperimentConverted({
+      experiment: 'upgrade_button',
+      variant: 'control',
+      action: 'checkout_started',
+    })
+  })
+
+  it('swallows 400 from a stale-variant rejection', async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse(
+      { ok: false, error: 'variant_mismatch' },
+      { status: 400 },
+    ))
+    await reportExperimentConverted({
+      experiment: 'upgrade_button',
+      variant: 'control',
+      action: 'checkout_started',
+    })
   })
 })

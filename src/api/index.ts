@@ -143,7 +143,7 @@ async function call<T>(
 
 // ─── Auth / me ───────────────────────────────────────────────────────────
 // GET /auth/me on the agent API returns:
-//   { ok, user_id, team_id, email, tier, trial_ends_at }
+//   { ok, user_id, team_id, email, tier, trial_ends_at, experiments }
 // The dashboard expected { user, team } — we adapt here so the rest of
 // the dashboard still consumes the richer fixture shape.
 export async function fetchMe(): Promise<AuthMeResponse> {
@@ -154,6 +154,11 @@ export async function fetchMe(): Promise<AuthMeResponse> {
     email: string
     tier: string
     trial_ends_at: string | null
+    /** A/B-test bucket per registered experiment, e.g.
+     *  `{ upgrade_button: "urgent" }`. Older API builds omit this
+     *  field entirely — callers must treat undefined as "no
+     *  experiment, render control variant". */
+    experiments?: Record<string, string>
   }
   // No try/catch — errors propagate. The previous fixture fallback masked
   // backend outages by serving the `aanya@acme.dev` mock identity, which
@@ -184,6 +189,33 @@ export async function fetchMe(): Promise<AuthMeResponse> {
       tier: me.tier as any,
       created_at: '',
     },
+    experiments: me.experiments,
+  }
+}
+
+// ─── A/B-experiment conversion ───────────────────────────────────────────
+// reportExperimentConverted — fires POST /api/v1/experiments/converted to
+// record that the user took the conversion action on a server-bucketed
+// experiment (e.g. clicked the Upgrade button). Best-effort:
+//   - swallows every error (network down, 400 from a stale variant, etc.)
+//   - never blocks navigation; callers race it against a short timeout
+//     and proceed regardless.
+//
+// The matching server-side endpoint writes an audit_log row with
+// kind="experiment.conversion" and metadata={experiment, variant,
+// action_taken}. See api/internal/handlers/experiments.go.
+export async function reportExperimentConverted(input: {
+  experiment: string
+  variant: string
+  action: string
+}): Promise<void> {
+  try {
+    await call<{ ok: boolean }>('/api/v1/experiments/converted', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    })
+  } catch {
+    /* analytics tail must not wag the conversion dog */
   }
 }
 

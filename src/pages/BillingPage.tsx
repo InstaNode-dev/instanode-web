@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { ROBanner, ContractBanner, TierPill } from '../components/Common'
+import { UpgradeButton } from '../components/UpgradeButton'
 import * as api from '../api'
 import type { BillingDetails, BillingUsage, Invoice, Promotion } from '../api'
 import { useDashboardCtx } from '../hooks/useDashboardCtx'
@@ -426,14 +427,29 @@ export function BillingPage() {
             />
           )}
           <div style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center' }}>
-            <button
-              className="btn btn-secondary btn-sm"
-              onClick={handleChangePlan}
-              disabled={!plan.nextTier || checkoutLoading}
-              title={plan.nextTier ? `Upgrade to ${PLANS[plan.nextTier]?.label ?? plan.nextTier}` : 'You are on the highest plan'}
-            >
-              {plan.nextTier ? `Upgrade to ${PLANS[plan.nextTier]?.label ?? plan.nextTier}` : 'Change plan'}
-            </button>
+            {plan.nextTier === 'pro' ? (
+              // A/B-tested upgrade CTA — variant comes from /auth/me's
+              // experiments map and decides both copy + colour. The
+              // button fires POST /api/v1/experiments/converted before
+              // navigating, capped at 500ms so a slow analytics
+              // endpoint never delays the checkout flow.
+              <UpgradeButton
+                variant={me?.experiments?.upgrade_button}
+                onClick={handleChangePlan}
+                disabled={checkoutLoading}
+                title="Upgrade to Pro"
+                testId="upgrade-button"
+              />
+            ) : (
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={handleChangePlan}
+                disabled={!plan.nextTier || checkoutLoading}
+                title={plan.nextTier ? `Upgrade to ${PLANS[plan.nextTier]?.label ?? plan.nextTier}` : 'You are on the highest plan'}
+              >
+                {plan.nextTier ? `Upgrade to ${PLANS[plan.nextTier]?.label ?? plan.nextTier}` : 'Change plan'}
+              </button>
+            )}
             <a
               className="btn btn-ghost btn-sm"
               href="mailto:support@instanode.dev?subject=Cancel%20subscription"

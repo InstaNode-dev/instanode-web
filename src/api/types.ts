@@ -231,20 +231,19 @@ export interface OverviewStats {
 }
 
 // ---------- Auth/me response (locked) ----------
+// `experiments` is the server-bucketed A/B map (keyed by experiment
+// name → variant). The dashboard reads this to render variant copy
+// and to know which variant to send back when firing the conversion
+// endpoint. Missing or {} means "no experiments running" — every
+// consumer treats absent variants as "control" so the field is
+// safe to omit on older API builds.
 //
-// `experiments` is an optional bag of A/B-test variants the agent API
-// attaches to the /auth/me response. The dashboard reads `upgrade_cta`
-// (set by track P1) to vary the upgrade button label across visitors.
-// Modelled as optional + permissive so the dashboard ships before the
-// API side lands without forcing a coordinated rollout.
+// Known keys today (track P1): "upgrade_button" → "control" | "urgent" | "value".
+// The variant→label/style mapping lives in src/components/UpgradeButton.tsx;
+// U2's UpgradePromptCard composes that component so it doesn't read variants directly.
 export interface AuthMeResponse {
   user: User
   team: DashboardTeam
   access_token?: string
-  experiments?: {
-    upgrade_cta?: {
-      variant?: string
-      label?: string
-    }
-  }
+  experiments?: Record<string, string>
 }

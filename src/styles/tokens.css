@@ -424,6 +424,49 @@ input, textarea, select { font-family: inherit; }
 .btn-danger:hover { background: rgba(255,122,138,0.1); }
 .btn-sm { padding: 5px 10px; font-size: 12px; }
 
+/* ---------- upgrade-button A/B variants (P1 pricing experiment) ----------
+   Three variants, one CSS surface. The variant is decided server-side
+   (GET /auth/me's `experiments.upgrade_button`) and applied via a
+   data-variant attribute on a .btn-upgrade element. Each variant
+   reuses an existing palette token so the visual identity stays on
+   brand and the variant difference is the colour + copy only.
+
+   control  → primary-blue (--blue)    "Upgrade to Pro"        baseline
+   urgent   → cta-green   (--accent)   "Get Pro now"           urgent
+   value    → premium-violet(--violet) "Unlock Pro features"   premium
+
+   Disabled state is shared. Hover lifts the brightness by ~10% via
+   color-mix so we don't need three separate hover declarations. */
+.btn-upgrade {
+  /* Same geometry as .btn-secondary so layout stays identical
+     across variants — only the visual fill changes. */
+  padding: 5px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: filter 100ms ease;
+}
+.btn-upgrade:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-upgrade:hover:not(:disabled) { filter: brightness(1.1); }
+
+.btn-upgrade[data-variant='control'] {
+  background: var(--blue);
+  color: var(--ink);
+  box-shadow: 0 0 0 1px rgba(108,206,255,0.4) inset;
+}
+.btn-upgrade[data-variant='urgent'] {
+  background: var(--accent);
+  color: var(--ink);
+  box-shadow: 0 0 0 1px var(--accent-deep) inset;
+}
+.btn-upgrade[data-variant='value'] {
+  background: var(--violet);
+  color: var(--ink);
+  box-shadow: 0 0 0 1px rgba(183,148,246,0.5) inset;
+}
+
 /* ---------- contract banners ---------- */
 .contract-banner {
   display: flex; gap: 14px; align-items: flex-start;
