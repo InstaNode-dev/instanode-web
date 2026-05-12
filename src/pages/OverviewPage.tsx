@@ -75,7 +75,7 @@ export function OverviewPage() {
 
   useEffect(() => {
     let alive = true
-    Promise.all([api.listResources(), api.fetchActivity()]).then(([r, a]) => {
+    Promise.all([api.listResources(ctx.env), api.fetchActivity()]).then(([r, a]) => {
       if (!alive) return
       setResources(r.items)
       setActivity(a.items)
@@ -84,7 +84,7 @@ export function OverviewPage() {
     return () => {
       alive = false
     }
-  }, [])
+  }, [ctx.env])
 
   // computed stats — no /overview endpoint exists, derived client-side
   const totalStorageMB = Math.round(resources.reduce((s, r) => s + r.storage_bytes, 0) / 1_000_000)
