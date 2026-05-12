@@ -4,6 +4,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { addEnv, setEnv, useDashboardCtx, type DashboardCtx } from '../hooks/useDashboardCtx'
 import * as api from '../api'
 import type { TeamSummary } from '../api'
+import { UserMenu } from './UserMenu'
 
 type Scope = 'read' | 'write' | 'agent'
 
@@ -237,7 +238,7 @@ export function AppShell() {
               </div>
               <div className="topbar-tools">
                 <ScopePill scope={meta.scope} />
-                <div className="avatar" title={ctx.me?.user?.email ?? ''}>A</div>
+                <UserMenu />
               </div>
             </header>
 
