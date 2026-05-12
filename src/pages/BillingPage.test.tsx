@@ -293,6 +293,33 @@ describe('BillingPage — initial render', () => {
     expect(screen.getByRole('button', { name: /upgrade to team/i })).toBeTruthy()
   })
 
+  // U2: the BillingPage CTA stays generic (this *is* the primary billing
+  // surface) but should expose a bulleted list of what the next tier unlocks
+  // above the button so the user knows what they're paying for.
+  it('renders the "what <next-tier> unlocks" bullet list for hobby users', async () => {
+    mockTier = 'hobby'
+    mockHappyBilling()
+    render(<BillingPage />)
+    await waitForLoaded()
+    const panel = screen.getByTestId('next-tier-unlocks')
+    expect(panel).toBeTruthy()
+    // At least one feature from the next-tier plan is rendered as a li.
+    expect(panel.querySelectorAll('li').length).toBeGreaterThan(0)
+    // Heading copy includes the next-tier label (lowercase).
+    expect(panel.textContent?.toLowerCase()).toContain('what pro unlocks')
+  })
+
+  it('hides the unlocks panel for team-tier users (no nextTier)', async () => {
+    mockTier = 'team'
+    mockHappyBilling()
+    render(<BillingPage />)
+    // Team-tier's CTA reads "Change plan" (disabled), not "Upgrade to …".
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /change plan/i })).toBeTruthy()
+    })
+    expect(screen.queryByTestId('next-tier-unlocks')).toBeNull()
+  })
+
   it('renders the payment method line from billing.payment_last4', async () => {
     mockTier = 'hobby'
     mockHappyBilling()

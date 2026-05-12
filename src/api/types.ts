@@ -231,8 +231,20 @@ export interface OverviewStats {
 }
 
 // ---------- Auth/me response (locked) ----------
+//
+// `experiments` is an optional bag of A/B-test variants the agent API
+// attaches to the /auth/me response. The dashboard reads `upgrade_cta`
+// (set by track P1) to vary the upgrade button label across visitors.
+// Modelled as optional + permissive so the dashboard ships before the
+// API side lands without forcing a coordinated rollout.
 export interface AuthMeResponse {
   user: User
   team: DashboardTeam
   access_token?: string
+  experiments?: {
+    upgrade_cta?: {
+      variant?: string
+      label?: string
+    }
+  }
 }

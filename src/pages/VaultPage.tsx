@@ -1,12 +1,25 @@
 import { useEffect, useState } from 'react'
 import { Card, PromptCard, RelTime } from '../components/Common'
+import { UpgradePromptCard } from '../components/UpgradePromptCard'
 import * as api from '../api'
-import type { VaultEntry } from '../api'
+import type { Tier, VaultEntry } from '../api'
 import { useDashboardCtx, addEnv as addEnvCtx } from '../hooks/useDashboardCtx'
+
+// Tiers that have multi-env vault access. Anything outside this set is
+// limited to the production env on its own tier (hobby = prod-only). Pasting
+// the API-side allowlist here keeps the dashboard from over-promising.
+const VAULT_MULTI_ENV_TIERS: ReadonlySet<Tier> = new Set(['pro', 'team', 'growth'])
 
 export function VaultPage() {
   const ctx = useDashboardCtx()
   const env = ctx.env
+  const tier = (ctx.me?.team.tier ?? 'hobby') as Tier
+  // The vault_prod upsell only makes sense for tiers that don't already
+  // have multi-env access. We surface it when the user has navigated to a
+  // non-production env tab on a single-env tier — the explicit signal that
+  // they're hitting the wall this tier enforces.
+  const showVaultUpsell =
+    !VAULT_MULTI_ENV_TIERS.has(tier) && env !== 'production'
   const [entries, setEntries] = useState<VaultEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState<string | null>(null)
@@ -54,6 +67,12 @@ export function VaultPage() {
       {err && (
         <div role="alert" style={{ borderLeft: '2px solid var(--rose)', padding: '10px 12px', marginBottom: 16, fontFamily: 'var(--font-mono)', fontSize: 12 }}>
           {err}
+        </div>
+      )}
+
+      {showVaultUpsell && (
+        <div style={{ marginBottom: 16 }}>
+          <UpgradePromptCard feature="vault_prod" />
         </div>
       )}
 
