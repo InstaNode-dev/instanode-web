@@ -309,15 +309,23 @@ describe('createCheckout()', () => {
     expect(r).toEqual({ ok: true, short_url: 'https://rzp.io/i/abc', subscription_id: 'sub_123' })
   })
 
-  it('POSTs to /api/v1/billing/checkout with the plan in the body', async () => {
+  it('POSTs to /api/v1/billing/checkout with the plan and default monthly frequency', async () => {
     const m = installFetch()
     m.mockResolvedValueOnce(jsonResponse({ ok: true, short_url: 'https://rzp.io/i/abc' }))
     await createCheckout('pro')
     const [url, init] = m.mock.calls[0]
     expect(String(url)).toContain('/api/v1/billing/checkout')
     expect(init.method).toBe('POST')
-    expect(init.body).toBe(JSON.stringify({ plan: 'pro' }))
+    expect(init.body).toBe(JSON.stringify({ plan: 'pro', plan_frequency: 'monthly' }))
     expect((init.headers as Headers).get('Content-Type')).toBe('application/json')
+  })
+
+  it('sends plan_frequency: yearly when the caller opts into annual billing', async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse({ ok: true, short_url: 'https://rzp.io/i/year' }))
+    await createCheckout('pro', 'yearly')
+    const init = m.mock.calls[0][1]
+    expect(init.body).toBe(JSON.stringify({ plan: 'pro', plan_frequency: 'yearly' }))
   })
 
   it('omits subscription_id when the API does not return one', async () => {
@@ -345,7 +353,7 @@ describe('createCheckout()', () => {
     m.mockResolvedValueOnce(jsonResponse({ ok: true, short_url: 'https://rzp.io/i/xyz' }))
     await createCheckout('team')
     const init = m.mock.calls[0][1]
-    expect(init.body).toBe(JSON.stringify({ plan: 'team' }))
+    expect(init.body).toBe(JSON.stringify({ plan: 'team', plan_frequency: 'monthly' }))
   })
 })
 
