@@ -203,6 +203,29 @@ describe('ClaimPage — email entry (pre-claim)', () => {
     )
     expect(screen.getByText(/missing claim link/i)).toBeTruthy()
   })
+
+  // §10.21: previously a malformed/expired JWT left the page blank with
+  // just the email form. Now it renders an explicit error banner with a
+  // pricing CTA so the user knows to ask their agent for a fresh link.
+  it('renders the invalid-link state when ?t=<bad-jwt>', async () => {
+    render(
+      <MemoryRouter initialEntries={['/claim?t=not-a-valid-jwt-blob']}>
+        <ClaimPage />
+      </MemoryRouter>,
+    )
+    await waitFor(() => {
+      expect(screen.getByTestId('claim-invalid')).toBeTruthy()
+    })
+    // Specific copy from the spec
+    expect(screen.getByTestId('claim-invalid').textContent?.toLowerCase()).toContain('invalid or expired')
+    // Pricing CTA present
+    const link = screen.getByTestId('claim-invalid-pricing') as HTMLAnchorElement
+    expect(link.tagName).toBe('A')
+    expect(link.getAttribute('href')).toBe('/pricing')
+    // No email form
+    expect(screen.queryByTestId('claim-email')).toBeNull()
+    expect(screen.queryByTestId('claim-submit')).toBeNull()
+  })
 })
 
 // ─── Submit → funnel transition ─────────────────────────────────────────

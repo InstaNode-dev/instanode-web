@@ -13,7 +13,50 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { render, screen, waitFor, fireEvent, cleanup } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { BillingPage } from './BillingPage'
-import { FIXTURE_BILLING, FIXTURE_INVOICES, FIXTURE_USER, FIXTURE_TEAM } from '../api/fixtures'
+import type { BillingDetails, DashboardTeam, Invoice, User } from '../api'
+
+// §10.21: the runtime `api/fixtures.ts` module is gone — test-only data
+// lives here, inlined and minimal. These shapes match the api types and
+// exist solely so the BillingPage tests can pin expected rendering.
+const FIXTURE_USER: User = {
+  id: 'u_test',
+  email: 'aanya@acme.dev',
+  tier: 'pro',
+  team_id: 't_test',
+  created_at: new Date(Date.now() - 42 * 86_400_000).toISOString(),
+  display_name: 'Aanya Patel',
+  role: 'owner',
+}
+
+const FIXTURE_TEAM: DashboardTeam = {
+  id: 't_test',
+  name: 'acme-corp',
+  slug: 'acme-corp',
+  owner_id: 'u_test',
+  member_count: 1,
+  tier: 'pro',
+  created_at: new Date(Date.now() - 42 * 86_400_000).toISOString(),
+  display_name: 'acme-corp',
+  default_env: 'production',
+}
+
+const FIXTURE_BILLING: BillingDetails = {
+  status: 'active',
+  current_period_end: new Date(Date.now() + 9 * 86_400_000).toISOString(),
+  razorpay_configured: true,
+  subscription_status: 'active',
+  payment_last4: '4242',
+  payment_exp_month: 9,
+  payment_exp_year: 27,
+  payment_network: 'visa',
+  cancel_at_period_end: false,
+}
+
+const FIXTURE_INVOICES: Invoice[] = [
+  { id: 'inv_QzN8bD', period_start: '2026-04-22', period_end: '2026-05-22', plan: 'pro',   amount_cents: 4900, currency: 'USD', status: 'paid' },
+  { id: 'inv_Pp7K2c', period_start: '2026-03-22', period_end: '2026-04-22', plan: 'pro',   amount_cents: 4900, currency: 'USD', status: 'paid' },
+  { id: 'inv_Lm4F9a', period_start: '2026-02-20', period_end: '2026-03-22', plan: 'hobby', amount_cents:  900, currency: 'USD', status: 'paid' },
+]
 
 // ─── Module-level mocks ──────────────────────────────────────────────────
 // We mock the api module so tests never hit fetch(); each test sets up
@@ -168,6 +211,33 @@ afterEach(() => {
   vi.clearAllMocks()
   vi.restoreAllMocks()
   restoreLocation()
+})
+
+// ─── §10.21: backend-down error state (no fixture fallback) ──────────────
+describe('BillingPage — backend-down error state (§10.21)', () => {
+  it('renders the billing-error banner when fetchBilling rejects (no fixture fallback)', async () => {
+    ;(api.fetchBilling as any).mockRejectedValue(Object.assign(new Error('Razorpay is not configured'), { status: 503 }))
+    ;(api.listInvoices as any).mockResolvedValue({ ok: true, invoices: [] })
+    ;(api.fetchBillingUsage as any).mockResolvedValue(makeUsageResp({}))
+    render(<BillingPage />)
+    await waitFor(() => {
+      expect(screen.getByTestId('billing-error')).toBeTruthy()
+    })
+    // Critical: must NOT render the upgrade CTA (which would imply a working
+    // billing surface). The error state is exclusive.
+    expect(screen.queryByRole('button', { name: /upgrade to/i })).toBeNull()
+  })
+
+  it('surfaces the error message on the billing-error banner', async () => {
+    ;(api.fetchBilling as any).mockRejectedValue(new Error('Razorpay is not configured'))
+    ;(api.listInvoices as any).mockResolvedValue({ ok: true, invoices: [] })
+    ;(api.fetchBillingUsage as any).mockResolvedValue(makeUsageResp({}))
+    const { container } = render(<BillingPage />)
+    await waitFor(() => {
+      expect(screen.getByTestId('billing-error')).toBeTruthy()
+    })
+    expect(container.textContent).toContain('Razorpay is not configured')
+  })
 })
 
 // ─── Initial render ──────────────────────────────────────────────────────

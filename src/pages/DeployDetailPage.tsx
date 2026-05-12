@@ -97,9 +97,6 @@ export function DeployDetailPage() {
         Logs and status stream live, but mutations go through the agent. <strong>Common prompts:</strong> redeploy · rollback · stop · update env-vars · scale replicas.
       </ROBanner>
 
-      <ContractBanner kind="blocked" badge="🔒 blocked">
-        <strong>Redeploy / Rollback / Stop are partially wired.</strong> <code>POST /api/v1/stacks/:slug/redeploy</code> routes to the agent API. Rollback and Stop don't exist on the agent API yet.
-      </ContractBanner>
 
       <div className="tabs">
         {TABS.map((t) => (
@@ -115,13 +112,7 @@ export function DeployDetailPage() {
       {tab === 'Logs' && <LiveBuild d={d} />}
       {tab === 'Env vars' && <EnvVars />}
       {tab === 'Resources' && <BoundResources />}
-      {(tab === 'Metrics' || tab === 'Audit') && (
-        <ContractBanner kind="blocked" badge="🔒 blocked">
-          <strong>{tab} tab unbuilt.</strong> See Contracts page for proposed shape.
-        </ContractBanner>
-      )}
-
-      {canUseCustomDomains
+            {canUseCustomDomains
         ? <CustomDomainPanel stackSlug={d.slug} />
         : <CustomDomainUpsell />}
     </>

@@ -66,10 +66,6 @@ export function ResourceDetailPage() {
         The dashboard mirrors the resource — it never writes. <strong>To rotate, rename, or delete this Postgres, prompt your agent.</strong> The agent calls the same locked API endpoints listed below.
       </ROBanner>
 
-      <ContractBanner kind="locked" badge="locked">
-        <strong>GET /api/v1/resources/:id</strong> · returns the full <code>Resource</code> shape including <code>connection_url</code>.
-        The connection URL is single-use safe — frontend keeps it in memory only, masks by default, reveals on click.
-      </ContractBanner>
 
       {/* Time-remaining card — only when this resource has a TTL (claimed,
           not yet on an active subscription). Loud, near the top, with a
@@ -248,10 +244,6 @@ export function ResourceDetailPage() {
       {/* METRICS — blocked */}
       {tab === 'Metrics' && (
         <>
-          <ContractBanner kind="blocked" badge="🔒 blocked">
-            <strong>Metrics tab is unbuilt.</strong> Backend has no <code>GET /api/v1/resources/:id/metrics</code> endpoint.
-            Brief §5.5 requires storage / connections / query-rate over 24h / 7d / 30d. <strong>Frontend is blocked until contract locks.</strong> See <Link to="/contracts" style={{ textDecoration: 'underline' }}>Contracts</Link>.
-          </ContractBanner>
           <Card title="Metrics · 24h" right={<span style={{ color: 'var(--rose)' }}>no data source</span>}>
             <div style={{ opacity: 0.4, padding: 32, textAlign: 'center', fontFamily: 'var(--font-mono)', color: 'var(--text-dim)' }}>
               awaiting backend
@@ -261,13 +253,7 @@ export function ResourceDetailPage() {
       )}
 
       {/* AUDIT — blocked */}
-      {tab === 'Audit' && (
-        <ContractBanner kind="blocked" badge="🔒 blocked">
-          <strong>Audit tab is unbuilt.</strong> No <code>GET /api/v1/resources/:id/audit</code> endpoint exists. Lock proposal in{' '}
-          <Link to="/contracts" style={{ textDecoration: 'underline' }}>Contracts</Link>.
-        </ContractBanner>
-      )}
-    </>
+          </>
   )
 }
 

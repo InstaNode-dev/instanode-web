@@ -162,27 +162,36 @@ export function BillingPage() {
 
   const [billing, setBilling] = useState<BillingDetails | null>(null)
   const [invoices, setInvoices] = useState<Invoice[]>([])
-  // §10.20: Usage panel reads from /api/v1/billing/usage (server-side cached
-  // 30s with singleflight), not from /resources. The browser no longer pulls
-  // every resource row just to compute six aggregate numbers — the server
-  // does it once per team per cache window and shares it across surfaces.
+  // §10.20: Usage panel reads from /api/v1/billing/usage (server-side
+  // cached 30s with singleflight) — not from /resources. The browser
+  // no longer pulls every resource row to compute six aggregates.
   const [billingUsage, setBillingUsage] = useState<BillingUsage | null>(null)
+  // §10.21: fetchBilling no longer falls back to fixture data on 503,
+  // so we surface its error explicitly via this banner state.
+  const [billingErr, setBillingErr] = useState<string | null>(null)
+  const [billingLoading, setBillingLoading] = useState(true)
   const [checkoutErr, setCheckoutErr] = useState<string | null>(null)
   const [checkoutLoading, setCheckoutLoading] = useState(false)
 
   useEffect(() => {
-    // Three independent reads — billing state, invoices, and the cached
-    // usage aggregate. A failure on one shouldn't blank the whole page,
-    // so each is guarded individually and fed into its own state slot.
-    Promise.all([
-      api.fetchBilling(),
-      api.listInvoices(),
-      api.fetchBillingUsage().catch(() => null),
-    ]).then(([b, i, u]) => {
-      setBilling(b.billing)
-      setInvoices(i.invoices)
-      if (u) setBillingUsage(u)
-    })
+    // Independent reads — each guarded individually so a failure on one
+    // doesn't blank the whole page. Billing error → banner. Invoices
+    // error → empty section. Usage error → zero rows on the Usage panel.
+    let alive = true
+    api.fetchBilling()
+      .then((b) => { if (alive) setBilling(b.billing) })
+      .catch((e: any) => {
+        if (!alive) return
+        setBillingErr(e?.message ?? 'billing is currently unavailable')
+      })
+      .finally(() => { if (alive) setBillingLoading(false) })
+    api.listInvoices()
+      .then((i) => { if (alive) setInvoices(i.invoices) })
+      .catch(() => { /* surfaced in the banner via billingErr; invoices section will read 0 */ })
+    api.fetchBillingUsage()
+      .then((u) => { if (alive) setBillingUsage(u) })
+      .catch(() => { /* usage panel reads 0 — non-fatal */ })
+    return () => { alive = false }
   }, [])
 
   // §10.20: Derive Usage panel inputs from the server-side cached payload.
@@ -206,7 +215,38 @@ export function BillingPage() {
     team_seats: u?.members?.count && u.members.count > 0 ? u.members.count : 1,
   }
 
-  if (!billing) return <div className="skel" style={{ width: '100%', height: 320 }} />
+  if (billingLoading && !billing) return <div className="skel" style={{ width: '100%', height: 320 }} />
+
+  // §10.21: fetchBilling no longer returns FIXTURE_BILLING on 503. If the
+  // backend is unreachable we surface a real error banner rather than
+  // rendering the page with stale/fake data.
+  if (!billing) {
+    return (
+      <div
+        role="alert"
+        data-testid="billing-error"
+        style={{
+          padding: '16px 18px',
+          border: '1px solid var(--rose)',
+          borderLeft: '3px solid var(--rose)',
+          borderRadius: 6,
+          background: 'var(--surface)',
+          color: 'var(--text)',
+          fontSize: 13.5,
+        }}
+      >
+        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10.5, color: 'var(--rose)', textTransform: 'uppercase', letterSpacing: 0.06, marginBottom: 6 }}>
+          billing unavailable
+        </div>
+        <div>
+          We couldn't load your billing details right now. {billingErr ? <code style={{ color: 'var(--text-dim)' }}>{billingErr}</code> : null}
+        </div>
+        <div style={{ marginTop: 8, fontSize: 12, color: 'var(--text-dim)' }}>
+          Try again in a moment, or contact <a href="mailto:support@instanode.dev" style={{ color: 'var(--accent)' }}>support@instanode.dev</a> if it persists.
+        </div>
+      </div>
+    )
+  }
 
   const { symbol, rest } = splitPrice(plan.price)
 
@@ -237,9 +277,6 @@ export function BillingPage() {
         we don't expose a self-serve path on purpose.
       </ROBanner>
 
-      <ContractBanner kind="locked" badge="locked">
-        <strong>6 endpoints live.</strong> <code>GET /billing</code> · <code>POST /checkout</code> · <code>/cancel</code> · <code>GET /invoices</code> · <code>POST /update-payment</code> · <code>POST /change-plan</code>.
-      </ContractBanner>
 
       <div className="plan-card">
         <div className="plan-summary">

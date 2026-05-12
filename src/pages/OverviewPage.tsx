@@ -122,19 +122,38 @@ export function OverviewPage() {
         <Stat k="vault entries" v={vaultCount.toString()} d={vaultSub} dCls="dim" spark="flat" sparkColor="rgba(255,122,138,0.4)" />
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr', gap: 16 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr', gap: 16, minWidth: 0 }}>
         {/* recent resources */}
-        <div>
+        <div style={{ minWidth: 0 }}>
           <div className="section-h">
             <h2>Recently active</h2>
-            <Link to="/resources" className="sub" style={{ textDecoration: 'underline', textUnderlineOffset: 3, textDecorationColor: 'var(--text-ghost)' }}>
+            <Link to="/app/resources" className="sub" style={{ textDecoration: 'underline', textUnderlineOffset: 3, textDecorationColor: 'var(--text-ghost)' }}>
               View all {resources.length} →
             </Link>
           </div>
-          <div className="table">
+          <div className="table" data-testid="recently-active">
+            {/* §10.21: render at least one row from the live resource list.
+                The Link targets the /app/resources/:id route (previously
+                /resources/:id, which only redirected). minWidth:0 on the
+                parent grid container lets the table-row grid shrink
+                correctly inside the 1.5fr column when names are long. */}
+            {recent.length === 0 && !loading && (
+              <div
+                className="table-row"
+                data-testid="recently-active-empty"
+                style={{ gridTemplateColumns: '1fr', color: 'var(--text-faint)', fontSize: 12.5 }}
+              >
+                no resources yet — provision one with your agent
+              </div>
+            )}
             {recent.map((r) => (
-              <div key={r.id} className="table-row" style={{ gridTemplateColumns: '1.4fr 0.5fr 0.55fr 1fr 0.6fr 28px' }}>
-                <Link to={`/resources/${r.id}`} className="res-name">
+              <div
+                key={r.id}
+                className="table-row"
+                data-testid={`recently-active-row-${r.id}`}
+                style={{ gridTemplateColumns: '1.4fr 0.5fr 0.55fr 1fr 0.6fr 28px' }}
+              >
+                <Link to={`/app/resources/${r.id}`} className="res-name">
                   <ResourceIcon type={r.resource_type} />
                   <div className="info">
                     <span className="n">{r.name ?? r.id}</span>
