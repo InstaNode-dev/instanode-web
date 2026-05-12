@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
 import {
   ROBanner, ContractBanner, EnvPill, StatusPill, TierPill, ResourceIcon, PromptCard, RelTime
 } from '../components/Common'
 import { CustomDomainPanel } from '../components/CustomDomainPanel'
 import { useDashboardCtx } from '../hooks/useDashboardCtx'
 import * as api from '../api'
-import type { DashboardStack, Tier, StackFamilyMember } from '../api'
+import type { DashboardStack, DashboardDeployment, Tier, StackFamilyMember } from '../api'
 import { streamSSE } from '../lib/sseStream'
 
 // Tiers that have access to custom domains. Anonymous and hobby see an
@@ -57,20 +57,126 @@ type StreamState = 'connecting' | 'open' | 'closed' | 'error'
 const TABS = ['Overview', 'Logs', 'Env vars', 'Resources', 'Metrics', 'Audit'] as const
 type Tab = (typeof TABS)[number]
 
+// View-model wrapping the two backing surfaces. The same DeployDetailPage
+// renders both single-container `/deploy/new` deployments and legacy
+// multi-service `/stacks/new` stacks; the kind discriminator lets the
+// page route around the differences (log SSE URL, env vars source,
+// bound resources source) without duplicating the chrome.
+type DeployView =
+  | {
+      kind: 'deployment'
+      id: string
+      name: string
+      status: DashboardDeployment['status']
+      env: DashboardDeployment['env']
+      tier: DashboardDeployment['tier']
+      url: string | null
+      env_vars: Record<string, string>
+      resource_id?: string
+      build_duration_s?: number
+      last_deploy_at?: string
+      // Slug for the (currently disabled) CustomDomainPanel — deployments
+      // don't have a stack slug, so we surface the app_id and the panel
+      // is hidden in render.
+      slug: string
+    }
+  | {
+      kind: 'stack'
+      data: DashboardStack
+    }
+
 export function DeployDetailPage() {
   const { id } = useParams()
-  const [d, setD] = useState<DashboardStack | null>(null)
+  const [view, setView] = useState<DeployView | null>(null)
+  const [loaded, setLoaded] = useState(false)
   const [tab, setTab] = useState<Tab>('Overview')
   const ctx = useDashboardCtx()
   const tier = (ctx.me?.user.tier ?? 'anonymous') as Tier
   const canUseCustomDomains = CUSTOM_DOMAIN_TIERS.has(tier)
 
+  // Detect /deploy/new deployments first; fall back to legacy /stacks/new
+  // multi-service deploys. Both render through the same page chrome — the
+  // discriminated union below routes the panels to the right data source.
   useEffect(() => {
     if (!id) return
-    api.listStacks().then((r) => setD(r.items.find((s) => s.id === id) ?? r.items[0]))
+    let cancelled = false
+    setLoaded(false)
+    ;(async () => {
+      try {
+        const r = await api.getDeployment(id)
+        if (cancelled) return
+        if (r.deployment) {
+          const d = r.deployment
+          setView({
+            kind: 'deployment',
+            id: d.id,
+            name: d.name,
+            status: d.status,
+            env: d.env,
+            tier: d.tier,
+            url: d.url,
+            env_vars: d.env_vars,
+            resource_id: d.resource_id,
+            build_duration_s: d.build_duration_s,
+            last_deploy_at: d.last_deploy_at,
+            slug: d.app_id,
+          })
+          setLoaded(true)
+          return
+        }
+      } catch {
+        /* fall through to stack lookup */
+      }
+      // Fall back to listStacks() for legacy multi-service deploys. The
+      // dashboard surface keeps supporting both paths so users mid-
+      // migration don't lose access to their stack-mode deploys.
+      try {
+        const r = await api.listStacks()
+        if (cancelled) return
+        const stack = r.items.find((s) => s.id === id) ?? null
+        if (stack) {
+          setView({ kind: 'stack', data: stack })
+        } else {
+          setView(null)
+        }
+      } catch {
+        if (!cancelled) setView(null)
+      } finally {
+        if (!cancelled) setLoaded(true)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
   }, [id])
 
-  if (!d) return <div className="skel" style={{ width: '100%', height: 320 }} />
+  if (!loaded || !view) return <div className="skel" style={{ width: '100%', height: 320 }} />
+
+  // Project the discriminated view into the flat fields the chrome
+  // already consumes. The Overview / EnvVars / Resources / log panels
+  // below switch on `view.kind` to pick the right data source.
+  const d: DashboardStack =
+    view.kind === 'stack'
+      ? view.data
+      : ({
+          id: view.id,
+          slug: view.slug,
+          name: view.name,
+          // 'deploying' is mapped through StatusPill (renders like
+          // 'building'); 'healthy' stays as 'running' in shared chrome.
+          status: (view.status === 'deploying'
+            ? 'building'
+            : view.status === 'healthy'
+            ? 'running'
+            : (view.status as DashboardStack['status'])),
+          url: view.url,
+          created_at: '',
+          team_id: '',
+          env: view.env,
+          tier: view.tier,
+          build_duration_s: view.build_duration_s,
+          last_deploy_at: view.last_deploy_at,
+        } as DashboardStack)
 
   return (
     <>
@@ -108,13 +214,16 @@ export function DeployDetailPage() {
         ))}
       </div>
 
-      {tab === 'Overview' && <Overview d={d} tier={tier} />}
-      {tab === 'Logs' && <LiveBuild d={d} />}
-      {tab === 'Env vars' && <EnvVars />}
-      {tab === 'Resources' && <BoundResources />}
-            {canUseCustomDomains
-        ? <CustomDomainPanel stackSlug={d.slug} />
-        : <CustomDomainUpsell />}
+      {tab === 'Overview' && <Overview d={d} tier={tier} view={view} />}
+      {tab === 'Logs' && <LiveBuild d={d} view={view} />}
+      {tab === 'Env vars' && <EnvVars view={view} />}
+      {tab === 'Resources' && <BoundResources view={view} />}
+      {/* Custom domains panel is stack-scoped; deployments don't expose a
+          stack slug. Hide the panel entirely for deployment view; legacy
+          stacks keep the tier-gated panel/upsell pair. */}
+      {view.kind === 'stack' && (canUseCustomDomains
+        ? <CustomDomainPanel stackSlug={view.data.slug} />
+        : <CustomDomainUpsell />)}
     </>
   )
 }
@@ -139,7 +248,7 @@ function CustomDomainUpsell() {
   )
 }
 
-function Overview({ d, tier }: { d: DashboardStack; tier: Tier }) {
+function Overview({ d, tier, view }: { d: DashboardStack; tier: Tier; view: DeployView }) {
   // Pro+ unlocks multi-env workflows. Hobby / anonymous see the upsell card
   // — the API enforces the same gate with a 402 + agent_action, so the UI
   // tier check stays in sync with server policy by design.
@@ -151,7 +260,7 @@ function Overview({ d, tier }: { d: DashboardStack; tier: Tier }) {
   const toEnv  = d.env === PROMOTE_DEFAULT_TARGET ? d.env : PROMOTE_DEFAULT_TARGET
   return (
     <>
-      <LiveBuild d={d} />
+      <LiveBuild d={d} view={view} />
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, margin: '24px 0' }}>
         <PromptCard
           title="Redeploy"
@@ -480,19 +589,29 @@ function PromoteUpsell() {
   )
 }
 
-function LiveBuild({ d }: { d: DashboardStack }) {
+function LiveBuild({ d, view }: { d: DashboardStack; view: DeployView }) {
   const [logs, setLogs] = useState<string[]>([])
   const [streamState, setStreamState] = useState<StreamState>('connecting')
   const logBoxRef = useRef<HTMLDivElement | null>(null)
 
+  // Choose the right SSE endpoint for the surface we're rendering. The
+  // single-container `/deploy/new` deployment stream lives under
+  // GET /deploy/:id/logs (no service segment — there's only one
+  // container per deployment). The agent API resolves `:id` against the
+  // app_id column, so we use view.slug (= app_id for deployments) here,
+  // never the UUID `view.id`. Legacy multi-service stacks keep using
+  // /api/v1/stacks/:slug/logs/:svc with the canonical `web` service. We
+  // re-compute the path on every view change so switching between deploy
+  // and stack on the same id (browser back, etc.) re-subscribes.
+  const ssePath = view.kind === 'deployment'
+    ? `/deploy/${encodeURIComponent(view.slug)}/logs`
+    : `/api/v1/stacks/${encodeURIComponent(view.data.slug)}/logs/${STACK_LOG_SERVICE}`
+
   useEffect(() => {
-    if (!d.slug) return
+    if (!ssePath) return
     setLogs([])
     setStreamState('connecting')
-    // The dashboard works on stacks (DashboardStack); the matching SSE endpoint
-    // is /api/v1/stacks/:slug/logs/:svc. Single-container `/deploy/:id/logs`
-    // can be wired separately when that surface gets its own page.
-    const path = `/api/v1/stacks/${encodeURIComponent(d.slug)}/logs/${STACK_LOG_SERVICE}`
+    const path = ssePath
     let everOpened = false
     const cleanup = streamSSE(path, {
       onLine: (line) => {
@@ -509,7 +628,7 @@ function LiveBuild({ d }: { d: DashboardStack }) {
       onClose: () => setStreamState((s) => (s === 'error' ? 'error' : 'closed')),
     })
     return cleanup
-  }, [d.slug])
+  }, [ssePath])
 
   // Autoscroll lock: only snap to bottom when the user is already near the
   // bottom — keeps scrolled-up reading position stable.
@@ -604,26 +723,267 @@ function SideKv({ title, rows }: { title: string; rows: [string, string][] }) {
   )
 }
 
-function EnvVars() {
+// Vault refs look like vault://env/KEY — the deploy injects the
+// resolved value at run time. The pattern is anchored so values that
+// merely contain the substring (e.g. a documentation example) don't
+// accidentally light up the vault badge.
+const VAULT_REF_RE = /^vault:\/\/(?:[a-zA-Z0-9_-]+\/)?[A-Z_][A-Z0-9_]*$/
+
+// Lowercase UUID v1-v5. We use it to surface env_var values that look
+// like resource tokens (the agent API returns resource IDs as UUIDs) so
+// the BoundResources panel can link them.
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
+function EnvVars({ view }: { view: DeployView }) {
+  // Stack view doesn't surface env_vars on the listStacks() payload yet;
+  // keep the legacy hint for that path. Deployment view parses the real
+  // env_vars map from the API response.
+  if (view.kind !== 'deployment') {
+    return (
+      <div
+        data-testid="env-vars-stack-hint"
+        style={{ padding: 24, color: 'var(--text-dim)', fontSize: 13, lineHeight: 1.6 }}
+      >
+        <strong style={{ color: 'var(--text)', fontWeight: 500 }}>
+          Env vars for stacks aren't surfaced here yet.
+        </strong>
+        <div style={{ marginTop: 8 }}>
+          List them with <code>GET /api/v1/stacks/{view.data.slug}/env</code> once the endpoint ships.
+        </div>
+      </div>
+    )
+  }
+
+  const entries = Object.entries(view.env_vars ?? {}).sort(([a], [b]) => a.localeCompare(b))
+
+  if (entries.length === 0) {
+    return (
+      <div
+        data-testid="env-vars-empty"
+        style={{ padding: 24, color: 'var(--text-dim)', fontSize: 13, lineHeight: 1.6 }}
+      >
+        <strong style={{ color: 'var(--text)', fontWeight: 500 }}>
+          No env vars set.
+        </strong>
+        <div style={{ marginTop: 8 }}>
+          Update them with{' '}
+          <code>PATCH /deploy/{view.slug}/env</code> and redeploy to apply.
+        </div>
+      </div>
+    )
+  }
+
   return (
-    <div style={{ padding: 24, color: 'var(--text-dim)', fontSize: 13, lineHeight: 1.6 }}>
-      <strong style={{ color: 'var(--text)', fontWeight: 500 }}>No env vars to show yet.</strong>
-      <div style={{ marginTop: 8 }}>
-        Env vars come from your Dockerfile + the vault. View them with{' '}
-        <code>kubectl get deploy &lt;name&gt; -o yaml</code>. A per-deploy{' '}
-        <code>/env</code> endpoint ships in Phase 1.
+    <div data-testid="env-vars-panel" style={{ padding: '12px 0' }}>
+      <div className="table">
+        <div
+          className="table-row head"
+          style={{ gridTemplateColumns: '240px 1fr 90px' }}
+        >
+          <span>key</span>
+          <span>value</span>
+          <span>source</span>
+        </div>
+        {entries.map(([k, v]) => {
+          const isVaultRef = VAULT_REF_RE.test(v)
+          return (
+            <div
+              key={k}
+              className="table-row"
+              data-testid={`env-var-row-${k}`}
+              style={{ gridTemplateColumns: '240px 1fr 90px', alignItems: 'center' }}
+            >
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>{k}</span>
+              <span
+                style={{
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: 11.5,
+                  color: 'var(--text-dim)',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+                title={v}
+              >
+                {v}
+              </span>
+              {isVaultRef ? (
+                <span
+                  className="tag"
+                  data-testid={`env-var-vault-badge-${k}`}
+                  title="Resolved from the vault at deploy time"
+                >
+                  vault
+                </span>
+              ) : (
+                <span style={{ fontSize: 10.5, color: 'var(--text-faint)' }}>inline</span>
+              )}
+            </div>
+          )
+        })}
       </div>
     </div>
   )
 }
 
-function BoundResources() {
+function BoundResources({ view }: { view: DeployView }) {
+  // Stack view: still no GET /api/v1/stacks/:slug detail endpoint exposing
+  // bound resources. Keep the honest hint until that ships.
+  if (view.kind !== 'stack') {
+    return <DeploymentBoundResources view={view} />
+  }
   return (
-    <div style={{ padding: 24, color: 'var(--text-dim)', fontSize: 13, lineHeight: 1.6 }}>
-      <strong style={{ color: 'var(--text)', fontWeight: 500 }}>No bound resources to show yet.</strong>
+    <div
+      data-testid="bound-resources-stack-hint"
+      style={{ padding: 24, color: 'var(--text-dim)', fontSize: 13, lineHeight: 1.6 }}
+    >
+      <strong style={{ color: 'var(--text)', fontWeight: 500 }}>
+        No bound resources to show yet.
+      </strong>
       <div style={{ marginTop: 8 }}>
         Resources are bound at deploy time. List them via{' '}
-        <code>GET /api/v1/stacks/:slug</code> once the endpoint is live.
+        <code>GET /api/v1/stacks/{view.data.slug}</code> once the endpoint is live.
+      </div>
+    </div>
+  )
+}
+
+function DeploymentBoundResources({
+  view,
+}: {
+  view: Extract<DeployView, { kind: 'deployment' }>
+}) {
+  const [resources, setResources] = useState<Awaited<ReturnType<typeof api.listResources>>['items'] | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    api
+      .listResources()
+      .then((r) => {
+        if (!cancelled) setResources(r.items)
+      })
+      .catch(() => {
+        if (!cancelled) setResources([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  // Find env-var values that look like resource tokens. The matching
+  // strategy is conservative: a value must be a UUID, AND that UUID must
+  // appear in the user's listResources() response (matching by id OR by
+  // the public token). This avoids fabricating "bound resource" rows for
+  // arbitrary user UUIDs that happen to live in env_vars (e.g. a
+  // STRIPE_CUSTOMER_ID).
+  const bound: Array<{
+    envVarKey: string
+    resourceID: string
+    resourceType: string
+    name: string | null
+  }> = []
+  if (resources) {
+    // Direct binding via resource_id field on the deployment.
+    if (view.resource_id) {
+      const r = resources.find((x) => x.id === view.resource_id || x.token === view.resource_id)
+      if (r) {
+        bound.push({
+          envVarKey: '<resource_id>',
+          resourceID: r.id,
+          resourceType: r.resource_type,
+          name: r.name,
+        })
+      }
+    }
+    for (const [k, v] of Object.entries(view.env_vars ?? {})) {
+      if (!UUID_RE.test(v)) continue
+      const r = resources.find((x) => x.id === v || x.token === v)
+      if (!r) continue
+      // De-dupe if the same resource was already added via resource_id.
+      if (bound.some((b) => b.resourceID === r.id)) continue
+      bound.push({
+        envVarKey: k,
+        resourceID: r.id,
+        resourceType: r.resource_type,
+        name: r.name,
+      })
+    }
+  }
+
+  if (resources === null) {
+    return (
+      <div
+        data-testid="bound-resources-loading"
+        style={{ padding: 24 }}
+      >
+        <span className="skel" style={{ width: '60%', height: 18 }} />
+      </div>
+    )
+  }
+
+  if (bound.length === 0) {
+    return (
+      <div
+        data-testid="bound-resources-empty"
+        style={{ padding: 24, color: 'var(--text-dim)', fontSize: 13, lineHeight: 1.6 }}
+      >
+        <strong style={{ color: 'var(--text)', fontWeight: 500 }}>
+          No bound resources detected.
+        </strong>
+        <div style={{ marginTop: 8 }}>
+          Resources show up here when an env-var holds a UUID matching one
+          of your resources, or when the deployment was created with a{' '}
+          <code>resource_id</code>.
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div data-testid="bound-resources-panel" style={{ padding: '12px 0' }}>
+      <div className="table">
+        <div
+          className="table-row head"
+          style={{ gridTemplateColumns: '160px 1fr 200px' }}
+        >
+          <span>env var</span>
+          <span>resource</span>
+          <span>id</span>
+        </div>
+        {bound.map((b) => (
+          <Link
+            key={`${b.envVarKey}-${b.resourceID}`}
+            to={`/resources/${b.resourceID}`}
+            className="table-row"
+            data-testid={`bound-resource-row-${b.envVarKey}`}
+            style={{
+              gridTemplateColumns: '160px 1fr 200px',
+              alignItems: 'center',
+              textDecoration: 'none',
+              color: 'inherit',
+            }}
+          >
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>{b.envVarKey}</span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <ResourceIcon type={b.resourceType as any} />
+              <span>{b.name ?? b.resourceType}</span>
+            </span>
+            <span
+              style={{
+                fontFamily: 'var(--font-mono)',
+                fontSize: 10.5,
+                color: 'var(--text-faint)',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+              title={b.resourceID}
+            >
+              {b.resourceID}
+            </span>
+          </Link>
+        ))}
       </div>
     </div>
   )

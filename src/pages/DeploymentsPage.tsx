@@ -4,17 +4,39 @@ import {
   ContractBanner, EnvPill, StatusPill, ResourceIcon, RelTime
 } from '../components/Common'
 import * as api from '../api'
-import type { DashboardStack } from '../api'
+import type { DashboardDeployment } from '../api'
 
 export function DeploymentsPage() {
-  const [items, setItems] = useState<DashboardStack[]>([])
+  const [items, setItems] = useState<DashboardDeployment[]>([])
   const [loading, setLoading] = useState(true)
 
+  // Source of truth: GET /api/v1/deployments (single-container apps via
+  // POST /deploy/new). This replaces the previous listStacks() call,
+  // which only returned multi-service stacks and therefore showed an
+  // empty list for any team that had only ever used /deploy/new — even
+  // when they had a live deployment. We keep falling back to listStacks
+  // implicitly on DeployDetailPage so legacy stack-mode deploys still
+  // open, but the primary surface is the deployments list.
   useEffect(() => {
-    api.listStacks().then((r) => {
-      setItems(r.items)
-      setLoading(false)
-    })
+    let cancelled = false
+    api
+      .listDeployments()
+      .then((r) => {
+        if (cancelled) return
+        setItems(r.items)
+        setLoading(false)
+      })
+      .catch(() => {
+        // Honest empty state on failure — the page renders the no-
+        // deployments hint rather than fabricating placeholder rows.
+        if (!cancelled) {
+          setItems([])
+          setLoading(false)
+        }
+      })
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   return (
@@ -39,6 +61,7 @@ export function DeploymentsPage() {
         {!loading && items.length === 0 && (
           <div
             className="table-row"
+            data-testid="deployments-empty"
             style={{
               gridTemplateColumns: '1fr',
               textAlign: 'center',
@@ -51,15 +74,22 @@ export function DeploymentsPage() {
             <div>
               <strong style={{ color: 'var(--text)', fontWeight: 500 }}>No deployments yet.</strong>
               <div style={{ marginTop: 6 }}>
-                Deployment lands in Phase 1 — see roadmap. For now, use kubectl on your own
-                cluster or contact <a href="mailto:support@instanode.dev">support</a>.
+                Ask your agent to ship one — e.g.{' '}
+                <code>POST https://api.instanode.dev/deploy/new</code> with your
+                Dockerfile + INSTANODE_TOKEN. Your deploy URL will appear here as soon
+                as the build starts.
               </div>
             </div>
           </div>
         )}
         {items.map((d) => (
+          // We link by app_id (not the UUID `id`) because the agent API's
+          // GET /api/v1/deployments/:id route resolves `:id` against the
+          // app_id column. Routing by UUID would 404. app_id is also the
+          // segment used by /deploy/:id/logs, so the same param threads
+          // through to the SSE log stream on DeployDetailPage.
           <Link
-            to={`/deployments/${d.id}`}
+            to={`/deployments/${d.app_id}`}
             key={d.id}
             className="table-row"
             style={{ gridTemplateColumns: '1.5fr 1fr 100px 80px 100px 80px 28px', textDecoration: 'none', color: 'inherit' }}
@@ -69,7 +99,7 @@ export function DeploymentsPage() {
               <div className="info">
                 <span className="n">{d.name}</span>
                 <span className="id">
-                  {d.id} · {d.tier}
+                  {d.app_id} · {d.tier}
                 </span>
               </div>
             </div>

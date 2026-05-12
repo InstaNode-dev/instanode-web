@@ -28,6 +28,8 @@ import {
   listAPIKeys,
   listStacks,
   fetchStackFamily,
+  listDeployments,
+  getDeployment,
 } from './index'
 // §10.21: FIXTURE_BILLING / FIXTURE_INVOICES imports retired. The 503
 // fallback paths in fetchBilling() and listInvoices() were removed —
@@ -612,6 +614,193 @@ describe('listStacks() env field', () => {
     }))
     const r = await listStacks()
     expect(r.items[0].env).toBe('production')
+  })
+})
+
+// ─── listDeployments() — GET /api/v1/deployments adapter ─────────────────
+// The dashboard's /app/deployments surface previously queried listStacks(),
+// which only returned multi-service stacks and therefore showed an empty
+// list for any team that had only ever called POST /deploy/new. The new
+// listDeployments() adapter is the load-bearing fix — it must:
+//   1. hit GET /api/v1/deployments,
+//   2. normalise the server's 'healthy' status → 'running' so the shared
+//      StatusPill renders the live state correctly,
+//   3. swap `env` (env_vars map) and `environment` (scope name) into the
+//      dashboard's vocabulary (env_vars + env), and
+//   4. surface `app_id` / `id` / `url` faithfully so DeployDetailPage can
+//      link back to the row.
+describe('listDeployments()', () => {
+  it('adapts the API response — env_vars + env scope swap, status normalisation', async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse({
+      ok: true,
+      total: 2,
+      items: [
+        {
+          id: '11111111-1111-1111-1111-111111111111',
+          app_id: '6fffcc21',
+          token: '6fffcc21',
+          url: 'https://6fffcc21.deployment.instanode.dev',
+          status: 'healthy',
+          port: 8080,
+          tier: 'pro',
+          env: { DATABASE_URL: 'postgres://...', NODE_ENV: 'production' },
+          environment: 'production',
+          created_at: '2026-05-12T11:00:00Z',
+          updated_at: '2026-05-12T11:30:00Z',
+        },
+        {
+          id: '22222222-2222-2222-2222-222222222222',
+          app_id: 'abc123',
+          url: 'https://abc123.deployment.instanode.dev',
+          status: 'building',
+          port: 3000,
+          tier: 'hobby',
+          env: { PORT: '3000' },
+          environment: 'staging',
+          created_at: '2026-05-12T11:10:00Z',
+          updated_at: '2026-05-12T11:11:00Z',
+        },
+      ],
+    }))
+    const r = await listDeployments()
+    expect(r.ok).toBe(true)
+    expect(r.total).toBe(2)
+    expect(r.items.length).toBe(2)
+
+    const a = r.items[0]
+    expect(a.id).toBe('11111111-1111-1111-1111-111111111111')
+    expect(a.app_id).toBe('6fffcc21')
+    // 'healthy' on the wire maps to 'running' for the dashboard's StatusPill.
+    expect(a.status).toBe('running')
+    expect(a.url).toBe('https://6fffcc21.deployment.instanode.dev')
+    // Env scope from `environment`; env_vars from `env`.
+    expect(a.env).toBe('production')
+    expect(a.env_vars).toEqual({ DATABASE_URL: 'postgres://...', NODE_ENV: 'production' })
+    expect(a.port).toBe(8080)
+    expect(a.tier).toBe('pro')
+    // last_deploy_at falls back to updated_at when the API doesn't yet
+    // expose a dedicated last-deploy field.
+    expect(a.last_deploy_at).toBe('2026-05-12T11:30:00Z')
+    // Display name falls through to app_id until the API exposes one.
+    expect(a.name).toBe('6fffcc21')
+
+    expect(r.items[1].env).toBe('staging')
+    expect(r.items[1].status).toBe('building')
+  })
+
+  it('hits GET /api/v1/deployments', async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse({ ok: true, items: [], total: 0 }))
+    await listDeployments()
+    const [url, init] = m.mock.calls[0]
+    expect(String(url)).toContain('/api/v1/deployments')
+    // GET (default method) — no body, no method override.
+    expect(init?.method ?? 'GET').toBe('GET')
+  })
+
+  it('falls back to items.length when total is omitted', async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse({
+      ok: true,
+      items: [
+        { id: 'd1', app_id: 'd1', status: 'building', port: 80, tier: 'free', env: {}, environment: 'production', created_at: 'x', updated_at: 'x' },
+      ],
+    }))
+    const r = await listDeployments()
+    expect(r.total).toBe(1)
+  })
+
+  it('returns env_vars: {} when env_vars / env map are omitted', async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse({
+      ok: true,
+      items: [{
+        id: 'd1', app_id: 'd1', status: 'running', port: 80, tier: 'free',
+        environment: 'production', created_at: 'x', updated_at: 'x',
+      }],
+    }))
+    const r = await listDeployments()
+    expect(r.items[0].env_vars).toEqual({})
+  })
+
+  it('accepts the dedicated env_vars field (forward compat)', async () => {
+    // The audit doc spec listed `env_vars` directly. The live API still
+    // returns env-map under `env`, so we accept either to insulate the
+    // dashboard from the field rename whenever the API ships it.
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse({
+      ok: true,
+      items: [{
+        id: 'd1', app_id: 'd1', status: 'running', port: 80, tier: 'pro',
+        environment: 'production',
+        env_vars: { FOO: 'bar' },
+        env: 'production', // string env scope alongside env_vars (forward compat)
+        created_at: 'x', updated_at: 'x',
+      }],
+    }))
+    const r = await listDeployments()
+    expect(r.items[0].env_vars).toEqual({ FOO: 'bar' })
+    expect(r.items[0].env).toBe('production')
+  })
+
+  it('defaults env to "production" when the API omits both fields', async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse({
+      ok: true,
+      items: [{ id: 'd1', app_id: 'd1', status: 'running', port: 80, tier: 'pro', created_at: 'x', updated_at: 'x' }],
+    }))
+    const r = await listDeployments()
+    expect(r.items[0].env).toBe('production')
+  })
+
+  it('propagates errors so the page can surface them honestly', async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse({ error: 'list_failed' }, { status: 503 }))
+    await expect(listDeployments()).rejects.toMatchObject({ status: 503 })
+  })
+})
+
+// ─── getDeployment() — single-deploy detail loader ───────────────────────
+describe('getDeployment()', () => {
+  it('returns {ok, deployment} on success', async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse({
+      ok: true,
+      item: {
+        id: 'd1', app_id: 'd1', status: 'healthy', port: 8080, tier: 'pro',
+        url: 'https://d1.deployment.instanode.dev',
+        env: { DATABASE_URL: 'vault://env/DATABASE_URL' },
+        environment: 'production',
+        created_at: 'x', updated_at: 'y',
+      },
+    }))
+    const r = await getDeployment('d1')
+    expect(r.ok).toBe(true)
+    expect(r.deployment?.id).toBe('d1')
+    expect(r.deployment?.status).toBe('running')
+    expect(r.deployment?.env_vars).toEqual({ DATABASE_URL: 'vault://env/DATABASE_URL' })
+  })
+
+  it('hits GET /api/v1/deployments/:id (URI-encoded)', async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse({ ok: true, item: { id: 'd weird', app_id: 'd', status: 'running', port: 1, tier: 'free', env: {}, environment: 'production', created_at: 'x', updated_at: 'x' } }))
+    await getDeployment('d weird')
+    expect(String(m.mock.calls[0][0])).toContain('/api/v1/deployments/d%20weird')
+  })
+
+  it('returns {ok:true, deployment: null} on 404 so the page can fall back to the stack lookup', async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse({ error: 'not_found' }, { status: 404 }))
+    const r = await getDeployment('missing-id')
+    expect(r.ok).toBe(true)
+    expect(r.deployment).toBeNull()
+  })
+
+  it('propagates non-404 errors (e.g. 500)', async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse({ error: 'boom' }, { status: 500 }))
+    await expect(getDeployment('d1')).rejects.toMatchObject({ status: 500 })
   })
 })
 
