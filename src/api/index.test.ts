@@ -30,6 +30,8 @@ import {
   fetchStackFamily,
   listDeployments,
   getDeployment,
+  createDeploy,
+  updateDeploymentAccess,
   reportExperimentConverted,
   validatePromotion,
 } from './index'
@@ -962,6 +964,173 @@ describe('getDeployment()', () => {
     const m = installFetch()
     m.mockResolvedValueOnce(jsonResponse({ error: 'boom' }, { status: 500 }))
     await expect(getDeployment('d1')).rejects.toMatchObject({ status: 500 })
+  })
+
+  it('surfaces private + allowed_ips when the API returns them', async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse({
+      ok: true,
+      item: {
+        id: 'd1', app_id: 'd1', status: 'running', port: 8080, tier: 'pro',
+        env: {}, environment: 'production', created_at: 'x', updated_at: 'x',
+        private: true,
+        allowed_ips: ['8.8.8.8', '10.0.0.0/8'],
+      },
+    }))
+    const r = await getDeployment('d1')
+    expect(r.deployment?.private).toBe(true)
+    expect(r.deployment?.allowed_ips).toEqual(['8.8.8.8', '10.0.0.0/8'])
+  })
+
+  it('defaults private=false and allowed_ips=[] when the API omits both', async () => {
+    // Older Track A builds don't expose the privacy fields. The adapter
+    // must NOT silently inherit `private` from a stale frontend cache —
+    // it should normalise to false.
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse({
+      ok: true,
+      item: {
+        id: 'd1', app_id: 'd1', status: 'running', port: 8080, tier: 'pro',
+        env: {}, environment: 'production', created_at: 'x', updated_at: 'x',
+      },
+    }))
+    const r = await getDeployment('d1')
+    expect(r.deployment?.private).toBe(false)
+    expect(r.deployment?.allowed_ips).toEqual([])
+  })
+})
+
+// ─── createDeploy() — POST /deploy/new with private + allowed_ips ────────
+// The dashboard's createDeploy helper is the wire-shape source of truth
+// for the private-deploy fields. The agent prompt on DeploymentsPage
+// renders these same keys, so a contract drift here would silently leak
+// into the prompt copy. We lock the field names + path explicitly.
+describe('createDeploy()', () => {
+  it('POSTs to /deploy/new with private + allowed_ips in the body', async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse({
+      ok: true,
+      item: {
+        id: 'd1', app_id: 'd1', status: 'building', port: 8080, tier: 'pro',
+        env: { FOO: 'bar' }, environment: 'production',
+        created_at: 'x', updated_at: 'x',
+        private: true, allowed_ips: ['8.8.8.8'],
+      },
+    }))
+    const r = await createDeploy({
+      name: 'my-app',
+      port: 8080,
+      env: 'production',
+      env_vars: { FOO: 'bar' },
+      private: true,
+      allowed_ips: ['8.8.8.8'],
+    })
+    expect(r.ok).toBe(true)
+    expect(r.deployment.private).toBe(true)
+    expect(r.deployment.allowed_ips).toEqual(['8.8.8.8'])
+
+    const [url, init] = m.mock.calls[0]
+    expect(String(url)).toContain('/deploy/new')
+    expect(init?.method).toBe('POST')
+    const sent = JSON.parse(String(init!.body))
+    expect(sent.private).toBe(true)
+    expect(sent.allowed_ips).toEqual(['8.8.8.8'])
+    // env_vars rides under the server's legacy `env` alias; the env scope
+    // goes in `environment`.
+    expect(sent.env).toEqual({ FOO: 'bar' })
+    expect(sent.environment).toBe('production')
+  })
+
+  it('omits private + allowed_ips when caller does not pass them (public deploy)', async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse({
+      ok: true,
+      item: {
+        id: 'd1', app_id: 'd1', status: 'building', port: 8080, tier: 'free',
+        env: {}, environment: 'production',
+        created_at: 'x', updated_at: 'x',
+      },
+    }))
+    await createDeploy({ name: 'my-app', port: 8080, env: 'production' })
+    const sent = JSON.parse(String(m.mock.calls[0][1]!.body))
+    expect(sent).not.toHaveProperty('private')
+    expect(sent).not.toHaveProperty('allowed_ips')
+  })
+
+  it('propagates 402 (tier gate) so the page can render an upgrade prompt', async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse(
+      { error: 'upgrade_required', agent_action: 'upgrade_to_pro' },
+      { status: 402 },
+    ))
+    await expect(
+      createDeploy({ private: true, allowed_ips: ['8.8.8.8'] }),
+    ).rejects.toMatchObject({ status: 402 })
+  })
+
+  it('propagates 400 (validation_error) so the page can show inline IP errors', async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse(
+      { error: 'validation_error', message: 'allowed_ips empty when private=true' },
+      { status: 400 },
+    ))
+    await expect(
+      createDeploy({ private: true, allowed_ips: [] }),
+    ).rejects.toMatchObject({ status: 400 })
+  })
+})
+
+// ─── updateDeploymentAccess() — PATCH /api/v1/deployments/:id ────────────
+// Track A's PATCH endpoint is still in flight. The dashboard helper still
+// issues the request — a 404 means "endpoint not yet shipped" and the
+// caller (PrivacyPanel on DeployDetailPage) surfaces a friendly hint.
+describe('updateDeploymentAccess()', () => {
+  it('PATCHes /api/v1/deployments/:id with private + allowed_ips', async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse({
+      ok: true,
+      item: {
+        id: 'd1', app_id: 'd1', status: 'running', port: 8080, tier: 'pro',
+        env: {}, environment: 'production',
+        created_at: 'x', updated_at: 'y',
+        private: true, allowed_ips: ['1.1.1.1'],
+      },
+    }))
+    const r = await updateDeploymentAccess('d1', true, ['1.1.1.1'])
+    expect(r.deployment.private).toBe(true)
+    expect(r.deployment.allowed_ips).toEqual(['1.1.1.1'])
+    const [url, init] = m.mock.calls[0]
+    expect(String(url)).toContain('/api/v1/deployments/d1')
+    expect(init?.method).toBe('PATCH')
+    const sent = JSON.parse(String(init!.body))
+    expect(sent).toEqual({ private: true, allowed_ips: ['1.1.1.1'] })
+  })
+
+  it('URI-encodes the deployment id', async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse({
+      ok: true,
+      item: { id: 'd weird', app_id: 'd', status: 'running', port: 1, tier: 'pro', env: {}, environment: 'production', created_at: 'x', updated_at: 'y' },
+    }))
+    await updateDeploymentAccess('d weird', false, [])
+    expect(String(m.mock.calls[0][0])).toContain('/api/v1/deployments/d%20weird')
+  })
+
+  it('propagates 404 so the page can surface "edits pending backend"', async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse({ error: 'not_found' }, { status: 404 }))
+    await expect(updateDeploymentAccess('d1', true, ['8.8.8.8']))
+      .rejects.toMatchObject({ status: 404 })
+  })
+
+  it('propagates 402 (tier gate)', async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse(
+      { error: 'upgrade_required', agent_action: 'upgrade_to_pro' },
+      { status: 402 },
+    ))
+    await expect(updateDeploymentAccess('d1', true, ['8.8.8.8']))
+      .rejects.toMatchObject({ status: 402 })
   })
 })
 

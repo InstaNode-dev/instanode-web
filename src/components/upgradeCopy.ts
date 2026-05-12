@@ -27,6 +27,7 @@ export type UpgradeFeature =
   | 'family_bindings'
   | 'quota_wall'
   | 'custom_domain'
+  | 'private_deploy'
 
 /** Shape of a single feature's prompt. `title` is the strong lead; `body` is
  *  the explainer that follows; `priceLine` is the small mono "$9/mo · ~30s
@@ -76,6 +77,11 @@ export const UPGRADE_COPY: Record<UpgradeFeature, UpgradeCopy> = {
   custom_domain: {
     title: 'Custom domains are a Pro feature',
     body: 'Bind your own hostname (e.g. app.acme.com) to a deployment. TLS certs issued automatically via cert-manager.',
+    priceLine: '$9/mo · ~30s setup',
+  },
+  private_deploy: {
+    title: 'Private deploys with IP allow-list require Pro',
+    body: 'Lock your CRM, internal dashboard, or staging app to specific IPs.',
     priceLine: '$9/mo · ~30s setup',
   },
 }
