@@ -11,10 +11,6 @@ import { useDashboardCtx } from '../hooks/useDashboardCtx'
 const TYPES: (ResourceType | 'all')[] = ['all', 'postgres', 'redis', 'mongodb', 'queue', 'storage', 'webhook']
 
 export function ResourcesPage() {
-  // We still read team tier from ctx for the prompt cards — env, however,
-  // is intentionally NOT consumed here. The backend doesn't honor a multi-env
-  // filter (no GET /api/v1/resources?env=…), so surfacing chips would be a lie.
-  // Env stays scoped to VaultPage where it's genuinely backed by per-env rows.
   const ctx = useDashboardCtx()
   const [items, setItems] = useState<Resource[]>([])
   const [loading, setLoading] = useState(true)
@@ -28,7 +24,7 @@ export function ResourcesPage() {
     let alive = true
     setLoading(true)
     setErr(null)
-    api.listResources()
+    api.listResources(ctx.env)
       .then((r) => {
         if (!alive) return
         setItems(r.items)
@@ -40,7 +36,7 @@ export function ResourcesPage() {
         setLoading(false)
       })
     return () => { alive = false }
-  }, [])
+  }, [ctx.env])
 
   const filtered = useMemo(
     () => items.filter((r) => type === 'all' || r.resource_type === type),

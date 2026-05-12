@@ -5,22 +5,20 @@ import {
 } from '../components/Common'
 import * as api from '../api'
 import type { DashboardDeployment } from '../api'
+import { useDashboardCtx } from '../hooks/useDashboardCtx'
 
 export function DeploymentsPage() {
+  const ctx = useDashboardCtx()
   const [items, setItems] = useState<DashboardDeployment[]>([])
   const [loading, setLoading] = useState(true)
 
   // Source of truth: GET /api/v1/deployments (single-container apps via
-  // POST /deploy/new). This replaces the previous listStacks() call,
-  // which only returned multi-service stacks and therefore showed an
-  // empty list for any team that had only ever used /deploy/new — even
-  // when they had a live deployment. We keep falling back to listStacks
-  // implicitly on DeployDetailPage so legacy stack-mode deploys still
-  // open, but the primary surface is the deployments list.
+  // POST /deploy/new). The env switcher in the sidebar drives the ?env=
+  // query param; switching envs triggers a refetch via the dep array.
   useEffect(() => {
     let cancelled = false
     api
-      .listDeployments()
+      .listDeployments(ctx.env)
       .then((r) => {
         if (cancelled) return
         setItems(r.items)
@@ -37,7 +35,7 @@ export function DeploymentsPage() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [ctx.env])
 
   return (
     <>

@@ -284,8 +284,10 @@ function adaptResource(r: any): Resource {
   }
 }
 
-export async function listResources(): Promise<{ ok: true; items: Resource[]; total: number }> {
-  const r = await call<ResourceListResp>('/api/v1/resources')
+export async function listResources(env?: string): Promise<{ ok: true; items: Resource[]; total: number }> {
+  // ?env= filters server-side. Omit for all envs (the legacy behavior).
+  const path = env ? `/api/v1/resources?env=${encodeURIComponent(env)}` : '/api/v1/resources'
+  const r = await call<ResourceListResp>(path)
   const items = (r.items ?? []).map(adaptResource)
   return { ok: true, items, total: r.total ?? items.length }
 }
@@ -458,11 +460,13 @@ function adaptDeployment(d: DeploymentRespItem): DashboardDeployment {
   }
 }
 
-export async function listDeployments(): Promise<{ ok: true; items: DashboardDeployment[]; total: number }> {
+export async function listDeployments(env?: string): Promise<{ ok: true; items: DashboardDeployment[]; total: number }> {
   // No try/catch fallback to empty — errors propagate so DeploymentsPage
   // can render a real error state instead of silently lying. The list
   // endpoint requires auth; 401 still triggers the AuthGate redirect.
-  const r = await call<DeploymentsListResp>('/api/v1/deployments')
+  // ?env= filters server-side; omitting returns all envs (legacy behavior).
+  const path = env ? `/api/v1/deployments?env=${encodeURIComponent(env)}` : '/api/v1/deployments'
+  const r = await call<DeploymentsListResp>(path)
   const items = (r.items ?? []).map(adaptDeployment)
   return { ok: true, items, total: r.total ?? items.length }
 }
