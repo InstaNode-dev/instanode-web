@@ -27,7 +27,9 @@ import {
   deleteResource,
   listAPIKeys,
 } from './index'
-import { FIXTURE_BILLING, FIXTURE_INVOICES } from './fixtures'
+// §10.21: FIXTURE_BILLING / FIXTURE_INVOICES imports retired. The 503
+// fallback paths in fetchBilling() and listInvoices() were removed —
+// errors now propagate so consumers can render real error banners.
 
 // ─── Test helpers ────────────────────────────────────────────────────────
 

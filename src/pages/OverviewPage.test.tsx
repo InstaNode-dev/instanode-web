@@ -42,6 +42,7 @@ vi.mock('../hooks/useDashboardCtx', () => ({
 }))
 
 import { OverviewPage } from './OverviewPage'
+import * as api from '../api'
 
 // A factory for a minimal Resource. Only the fields the banner reads are
 // meaningful — the rest match the locked shape.
@@ -304,5 +305,67 @@ describe('OverviewPage — quick prompts', () => {
     expect(arg).toContain('pro')
     // Endpoint hint should be present so the agent has the call site.
     expect(arg).toContain('POST https://api.instanode.dev/db/new')
+  })
+})
+
+// ─── Recently-active rows (§10.21) ───────────────────────────────────────
+// Previously the section could render 0 rows even when listResources returned
+// 2+ items, leaving the largest panel of the Overview page visually empty.
+// Pin the contract: 2 resources mocked → at least 1 row in the table.
+describe('OverviewPage — Recently active', () => {
+  function mockTwoResources() {
+    const now = new Date().toISOString()
+    ;(api.listResources as any).mockResolvedValueOnce({
+      ok: true,
+      total: 2,
+      items: [
+        {
+          id: 'res_a', token: 'res_a', resource_type: 'postgres',
+          tier: 'pro', status: 'active', name: 'analytics-db',
+          env: 'production', storage_bytes: 1_000_000,
+          storage_limit_bytes: 500_000_000, storage_exceeded: false,
+          connections_in_use: 1, connections_limit: 5,
+          expires_at: null, created_at: now,
+        },
+        {
+          id: 'res_b', token: 'res_b', resource_type: 'redis',
+          tier: 'pro', status: 'active', name: 'cache',
+          env: 'production', storage_bytes: 500_000,
+          storage_limit_bytes: 50_000_000, storage_exceeded: false,
+          connections_in_use: 2, connections_limit: 20,
+          expires_at: null, created_at: now,
+        },
+      ],
+    })
+    ;(api.fetchActivity as any).mockResolvedValueOnce({ ok: true, items: [] })
+  }
+
+  it('renders at least 1 row when 2 resources are returned by listResources', async () => {
+    mockTwoResources()
+    render(withRouter(<OverviewPage />))
+    await waitFor(() => {
+      expect(screen.getByTestId('recently-active-row-res_a')).toBeTruthy()
+    })
+    expect(screen.getByTestId('recently-active-row-res_b')).toBeTruthy()
+  })
+
+  it('renders the row name + resource_type inside each row', async () => {
+    mockTwoResources()
+    render(withRouter(<OverviewPage />))
+    await waitFor(() => {
+      const row = screen.getByTestId('recently-active-row-res_a')
+      expect(row.textContent).toContain('analytics-db')
+      expect(row.textContent).toContain('postgres')
+    })
+  })
+
+  it('renders the link to /app/resources/:id (not the legacy /resources/:id)', async () => {
+    mockTwoResources()
+    render(withRouter(<OverviewPage />))
+    await waitFor(() => {
+      const row = screen.getByTestId('recently-active-row-res_a')
+      const link = row.querySelector('a.res-name') as HTMLAnchorElement
+      expect(link.getAttribute('href')).toBe('/app/resources/res_a')
+    })
   })
 })
