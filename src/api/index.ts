@@ -1081,3 +1081,25 @@ export type TeamSummary = {
 export async function fetchTeamSummary(): Promise<TeamSummary> {
   return call<TeamSummary>('/api/v1/team/summary')
 }
+
+// ─── Usage wall (Track U1) ──────────────────────────────────────────────
+// GET /api/v1/usage/wall — most recent near_quota_wall row for the
+// caller's team within the last 24h. Drives the QuotaWallBanner upgrade
+// nudge. When near_wall=false the response carries only `{ok, near_wall}`;
+// when true the metadata fields (tier/axis/service/current/limit/
+// percent_used/at) are flattened in alongside ok/near_wall.
+export type QuotaWallResponse = {
+  ok: true
+  near_wall: boolean
+  tier?: string
+  axis?: 'storage' | 'connections' | 'provisions'
+  service?: string
+  current?: number
+  limit?: number
+  percent_used?: number
+  at?: string
+}
+
+export async function fetchQuotaWall(): Promise<QuotaWallResponse> {
+  return call<QuotaWallResponse>('/api/v1/usage/wall')
+}

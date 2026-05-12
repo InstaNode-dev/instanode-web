@@ -4,6 +4,7 @@ import {
   ContractBanner, EnvPill, ExpiryBadge, TierPill, ResourceIcon, RelTime, UsageBar, PromptCard,
   useExpiryTick
 } from '../components/Common'
+import { QuotaWallBanner } from '../components/QuotaWallBanner'
 import { UpgradePromptCard } from '../components/UpgradePromptCard'
 import * as api from '../api'
 import type { Resource, ResourceType, Tier } from '../api'
@@ -73,6 +74,11 @@ export function ResourcesPage() {
 
   return (
     <>
+      {/* QuotaWallBanner (U1): 80% pre-wall nudge driven by worker scan.
+          UpgradePromptCard quota_wall (U2): at-wall prompt rendered client-side
+          when the user has actually hit the cap. Layered: gentle nudge first,
+          firm prompt when stuck. */}
+      <QuotaWallBanner teamId={ctx.me?.team?.id} />
       {showQuotaPrompt && (
         <div style={{ marginBottom: 12 }}>
           <UpgradePromptCard feature="quota_wall" />
