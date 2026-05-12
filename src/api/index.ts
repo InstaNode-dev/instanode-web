@@ -143,7 +143,7 @@ async function call<T>(
 
 // ─── Auth / me ───────────────────────────────────────────────────────────
 // GET /auth/me on the agent API returns:
-//   { ok, user_id, team_id, email, tier, trial_ends_at }
+//   { ok, user_id, team_id, email, tier, trial_ends_at, experiments }
 // The dashboard expected { user, team } — we adapt here so the rest of
 // the dashboard still consumes the richer fixture shape.
 export async function fetchMe(): Promise<AuthMeResponse> {
@@ -154,6 +154,11 @@ export async function fetchMe(): Promise<AuthMeResponse> {
     email: string
     tier: string
     trial_ends_at: string | null
+    /** A/B-test bucket per registered experiment, e.g.
+     *  `{ upgrade_button: "urgent" }`. Older API builds omit this
+     *  field entirely — callers must treat undefined as "no
+     *  experiment, render control variant". */
+    experiments?: Record<string, string>
   }
   // No try/catch — errors propagate. The previous fixture fallback masked
   // backend outages by serving the `aanya@acme.dev` mock identity, which
@@ -184,6 +189,33 @@ export async function fetchMe(): Promise<AuthMeResponse> {
       tier: me.tier as any,
       created_at: '',
     },
+    experiments: me.experiments,
+  }
+}
+
+// ─── A/B-experiment conversion ───────────────────────────────────────────
+// reportExperimentConverted — fires POST /api/v1/experiments/converted to
+// record that the user took the conversion action on a server-bucketed
+// experiment (e.g. clicked the Upgrade button). Best-effort:
+//   - swallows every error (network down, 400 from a stale variant, etc.)
+//   - never blocks navigation; callers race it against a short timeout
+//     and proceed regardless.
+//
+// The matching server-side endpoint writes an audit_log row with
+// kind="experiment.conversion" and metadata={experiment, variant,
+// action_taken}. See api/internal/handlers/experiments.go.
+export async function reportExperimentConverted(input: {
+  experiment: string
+  variant: string
+  action: string
+}): Promise<void> {
+  try {
+    await call<{ ok: boolean }>('/api/v1/experiments/converted', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    })
+  } catch {
+    /* analytics tail must not wag the conversion dog */
   }
 }
 
@@ -741,15 +773,106 @@ export type PlanFrequency = 'monthly' | 'yearly'
 export async function createCheckout(
   plan: string,
   planFrequency: PlanFrequency = 'monthly',
+  opts?: { promotion_code?: string },
 ): Promise<{ ok: true; short_url: string; subscription_id?: string }> {
+  const body: Record<string, unknown> = { plan, plan_frequency: planFrequency }
+  // Only include the promotion_code field when the caller actually passed
+  // one — sending an empty string would cause the api to treat it as an
+  // invalid promo and reject the checkout. Trimming guards against UI
+  // whitespace leaks (the dashboard already trims, this is belt+braces).
+  const code = opts?.promotion_code?.trim()
+  if (code) body.promotion_code = code
   const r = await call<{ ok: boolean; short_url: string; subscription_id?: string }>(
     '/api/v1/billing/checkout',
-    {
-      method: 'POST',
-      body: JSON.stringify({ plan, plan_frequency: planFrequency }),
-    },
+    { method: 'POST', body: JSON.stringify(body) },
   )
   return { ok: true, short_url: r.short_url, subscription_id: r.subscription_id }
+}
+
+// ─── Promotion validation (P3 — mocked until api ships endpoint) ────────
+//
+// Contract proposed for `POST /api/v1/billing/promotion/validate`:
+//   request:  { code: string, plan: string }
+//   response: { ok: true, code, discount: { kind: "percent_off" | "amount_off"
+//                                          | "free_period",
+//                                          value: number,
+//                                          applies_to?: number,
+//                                          unit?: "months" | "days" },
+//              valid_until: string /* ISO */ }
+//   errors:   404 { error: "promotion_not_found", message: "Code not found." }
+//             410 { error: "promotion_expired",   message: "This code has expired." }
+//             409 { error: "promotion_not_applicable",
+//                   message: "Code can't be applied to this plan." }
+//
+// api/internal/plans/promotion_test.go already has the engine
+// (`plans.validatePromotion(code, plan) (Promotion, error)`) — the missing
+// piece is the HTTP handler. Until that ships, this function transparently
+// falls back to a small in-memory table of three seed codes so the upgrade
+// flow is testable end-to-end. The mock activates on 404 (endpoint not
+// registered) OR on a network error to /api/v1/billing/promotion/validate.
+export type Promotion = {
+  code: string
+  discount: {
+    kind: 'percent_off' | 'amount_off' | 'free_period'
+    value: number
+    applies_to?: number
+    unit?: 'months' | 'days'
+  }
+  valid_until: string
+}
+
+const PROMOTION_SEEDS: Record<string, Promotion['discount']> = {
+  TWITTER15: { kind: 'percent_off', value: 15, applies_to: 3, unit: 'months' },
+  LAUNCH50:  { kind: 'percent_off', value: 50, applies_to: 1, unit: 'months' },
+  COMEBACK10: { kind: 'percent_off', value: 10, applies_to: 1, unit: 'months' },
+}
+
+export async function validatePromotion(
+  code: string,
+  plan: string,
+): Promise<{ ok: true; promotion: Promotion }> {
+  const normalized = code.trim().toUpperCase()
+  if (!normalized) {
+    throw new APIError(400, 'promotion_invalid', 'Enter a code.')
+  }
+  try {
+    const r = await call<{
+      ok: boolean
+      code: string
+      discount: Promotion['discount']
+      valid_until: string
+    }>('/api/v1/billing/promotion/validate', {
+      method: 'POST',
+      body: JSON.stringify({ code: normalized, plan }),
+    })
+    return {
+      ok: true,
+      promotion: { code: r.code, discount: r.discount, valid_until: r.valid_until },
+    }
+  } catch (e: any) {
+    // 404 = endpoint not yet shipped on api → fall back to local seeds so
+    // the upgrade flow is demo-able. Any other status (400/410/409/etc.)
+    // is a real validation error and propagates so the UI can show it.
+    const status = e?.status
+    if (status === 404 || status === undefined || status === 0) {
+      const seed = PROMOTION_SEEDS[normalized]
+      if (!seed) {
+        throw new APIError(404, 'promotion_not_found', 'Code not found.')
+      }
+      return {
+        ok: true,
+        promotion: {
+          code: normalized,
+          discount: seed,
+          // Mocked seeds are valid through 2026-09-01 — matches the spec
+          // example in the P3 brief. Replace with server response once the
+          // endpoint ships.
+          valid_until: '2026-09-01T00:00:00Z',
+        },
+      }
+    }
+    throw e
+  }
 }
 
 export async function cancelSubscription(): Promise<{ ok: true }> {
@@ -966,4 +1089,26 @@ export type TeamSummary = {
 
 export async function fetchTeamSummary(): Promise<TeamSummary> {
   return call<TeamSummary>('/api/v1/team/summary')
+}
+
+// ─── Usage wall (Track U1) ──────────────────────────────────────────────
+// GET /api/v1/usage/wall — most recent near_quota_wall row for the
+// caller's team within the last 24h. Drives the QuotaWallBanner upgrade
+// nudge. When near_wall=false the response carries only `{ok, near_wall}`;
+// when true the metadata fields (tier/axis/service/current/limit/
+// percent_used/at) are flattened in alongside ok/near_wall.
+export type QuotaWallResponse = {
+  ok: true
+  near_wall: boolean
+  tier?: string
+  axis?: 'storage' | 'connections' | 'provisions'
+  service?: string
+  current?: number
+  limit?: number
+  percent_used?: number
+  at?: string
+}
+
+export async function fetchQuotaWall(): Promise<QuotaWallResponse> {
+  return call<QuotaWallResponse>('/api/v1/usage/wall')
 }

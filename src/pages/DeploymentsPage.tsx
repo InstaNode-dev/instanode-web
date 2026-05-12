@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import {
   ContractBanner, EnvPill, StatusPill, ResourceIcon, RelTime
 } from '../components/Common'
+import { QuotaWallBanner } from '../components/QuotaWallBanner'
 import * as api from '../api'
 import type { DashboardDeployment } from '../api'
 import { useDashboardCtx } from '../hooks/useDashboardCtx'
@@ -39,7 +40,10 @@ export function DeploymentsPage() {
 
   return (
     <>
-
+      {/* QuotaWallBanner — Track U1. Deployment-count is one of the
+          axes (provisions), and deploys are a frequent landing spot
+          for paid-tier consideration. */}
+      <QuotaWallBanner teamId={ctx.me?.team?.id} />
 
       <div className="table">
         <div className="table-row head" style={{ gridTemplateColumns: '1.5fr 1fr 100px 80px 100px 80px 28px' }}>

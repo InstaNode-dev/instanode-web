@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { ROBanner, ContractBanner, TierPill } from '../components/Common'
+import { UpgradeButton } from '../components/UpgradeButton'
 import * as api from '../api'
-import type { BillingDetails, BillingUsage, Invoice, PlanFrequency } from '../api'
+import type { BillingDetails, BillingUsage, Invoice, PlanFrequency, Promotion } from '../api'
 import { useDashboardCtx } from '../hooks/useDashboardCtx'
 
 // P2: monthly/yearly preference is persisted in localStorage so the
@@ -221,6 +222,17 @@ export function BillingPage() {
     writeStoredFrequency(f)
   }
 
+  // ── Discount code state (P3) ───────────────────────────────────────────
+  // The input lives behind a "Have a discount code?" toggle so the upgrade
+  // CTA isn't crowded for the 95% of users who don't have a code. Once a
+  // code validates green it persists into the checkout call via
+  // applied.code; users can clear it to type a different one.
+  const [promoOpen, setPromoOpen] = useState(false)
+  const [promoCode, setPromoCode] = useState('')
+  const [promoErr, setPromoErr] = useState<string | null>(null)
+  const [promoValidating, setPromoValidating] = useState(false)
+  const [appliedPromo, setAppliedPromo] = useState<Promotion | null>(null)
+
   useEffect(() => {
     // Independent reads — each guarded individually so a failure on one
     // doesn't blank the whole page. Billing error → banner. Invoices
@@ -308,7 +320,13 @@ export function BillingPage() {
       // and the operator hasn't created the yearly Razorpay plan yet —
       // that surfaces in checkoutErr below so users see a real reason
       // rather than a silent failure.
-      const r = await api.createCheckout(plan.nextTier!, frequency)
+      // P3: pass promotion_code only when a code has actually been
+      // validated green — never the raw input string. The third-arg opts
+      // carry the promo code when applied; otherwise omitted so the
+      // request body matches the pre-P3 shape.
+      const r = appliedPromo
+        ? await api.createCheckout(plan.nextTier!, frequency, { promotion_code: appliedPromo.code })
+        : await api.createCheckout(plan.nextTier!, frequency)
       if (r.short_url) {
         window.location.href = r.short_url
         return
@@ -319,6 +337,42 @@ export function BillingPage() {
     } finally {
       setCheckoutLoading(false)
     }
+  }
+
+  async function handleApplyPromo() {
+    if (!plan.nextTier) return
+    const code = promoCode.trim()
+    if (!code) {
+      setPromoErr('Enter a code.')
+      return
+    }
+    setPromoErr(null)
+    setPromoValidating(true)
+    try {
+      const r = await api.validatePromotion(code, plan.nextTier)
+      setAppliedPromo(r.promotion)
+    } catch (e: any) {
+      // Network errors (no status, no message): show the friendly fallback.
+      // API errors carrying a server message (404/409/410): surface it.
+      if (e?.status === undefined && (e?.name === 'TypeError' || /network|fetch/i.test(e?.message ?? ''))) {
+        setPromoErr("couldn't reach the server, try again")
+      } else {
+        setPromoErr(e?.message ?? 'Code not valid.')
+      }
+      setAppliedPromo(null)
+    } finally {
+      setPromoValidating(false)
+    }
+  }
+
+  function handleClearPromo() {
+    setAppliedPromo(null)
+    setPromoCode('')
+    setPromoErr(null)
+    // Collapse back to the discreet toggle — auto-reopening the input
+    // would steal focus and surprise the user. They can click "Have a
+    // discount code?" again if they want to try a different one.
+    setPromoOpen(false)
   }
 
   return (
@@ -365,20 +419,113 @@ export function BillingPage() {
               </li>
             ))}
           </ul>
-          <div style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center' }}>
-            <button
-              className="btn btn-secondary btn-sm"
-              onClick={handleChangePlan}
-              disabled={!plan.nextTier || checkoutLoading}
-              title={plan.nextTier ? `Upgrade to ${PLANS[plan.nextTier]?.label ?? plan.nextTier}` : 'You are on the highest plan'}
-              data-testid="upgrade-button"
+          {/* U2: "what unlocks" bulleted list above the primary CTA. Driven
+              by the next-tier definition in PLANS so we never duplicate the
+              feature copy. Only renders when the user has a higher tier to
+              move to. */}
+          {plan.nextTier && PLANS[plan.nextTier] && (
+            <div
+              data-testid="next-tier-unlocks"
+              style={{
+                marginBottom: 10,
+                padding: '10px 12px',
+                border: '1px solid var(--border)',
+                borderRadius: 6,
+                background: 'var(--surface)',
+              }}
             >
-              {plan.nextTier
-                ? `Upgrade to ${PLANS[plan.nextTier]?.label ?? plan.nextTier}${
-                    YEARLY_PRICING[plan.nextTier] && frequency === 'yearly' ? ' (yearly)' : ''
-                  }`
-                : 'Change plan'}
-            </button>
+              <div
+                style={{
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: 10.5,
+                  color: 'var(--text-faint)',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.05em',
+                  marginBottom: 6,
+                }}
+              >
+                what {PLANS[plan.nextTier]!.label.toLowerCase()} unlocks
+              </div>
+              <ul style={{ listStyle: 'disc', paddingLeft: 18, margin: 0 }}>
+                {PLANS[plan.nextTier]!.features.map((f, i) => (
+                  <li
+                    key={i}
+                    style={{
+                      fontSize: 12.5,
+                      color: 'var(--text-dim)',
+                      opacity: f.comingSoon ? 0.6 : 1,
+                      lineHeight: 1.55,
+                    }}
+                  >
+                    {f.text}
+                    {f.comingSoon && (
+                      <span style={{
+                        marginLeft: 6, padding: '1px 6px', fontSize: 10,
+                        fontFamily: 'var(--font-mono)', color: 'var(--violet)',
+                        border: '1px solid rgba(183,148,246,0.3)', borderRadius: 4,
+                        textTransform: 'uppercase', letterSpacing: 0.06,
+                      }}>soon</span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {/* ── Discount code (P3) ───────────────────────────────────────
+              Sits below the unlocks list, above the upgrade CTA. Only
+              rendered when an upgrade target exists (no point applying
+              a discount on team-tier — there's nothing left to upgrade to). */}
+          {plan.nextTier && (
+            <PromoCodePanel
+              open={promoOpen}
+              code={promoCode}
+              validating={promoValidating}
+              err={promoErr}
+              applied={appliedPromo}
+              onOpen={() => setPromoOpen(true)}
+              onChangeCode={setPromoCode}
+              onApply={handleApplyPromo}
+              onClear={handleClearPromo}
+            />
+          )}
+          <div style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center' }}>
+            {plan.nextTier === 'pro' ? (
+              // A/B-tested upgrade CTA — variant comes from /auth/me's
+              // experiments map and decides both copy + colour. The
+              // button fires POST /api/v1/experiments/converted before
+              // navigating, capped at 500ms so a slow analytics
+              // endpoint never delays the checkout flow.
+              // P2 merge: when the yearly toggle is active and the next
+              // tier has yearly pricing, override the variant's default
+              // label to suffix "(yearly)" so the user sees what cadence
+              // they're about to commit to.
+              <UpgradeButton
+                variant={me?.experiments?.upgrade_button}
+                onClick={handleChangePlan}
+                disabled={checkoutLoading}
+                title="Upgrade to Pro"
+                testId="upgrade-button"
+                label={
+                  YEARLY_PRICING[plan.nextTier] && frequency === 'yearly'
+                    ? `Upgrade to Pro (yearly)`
+                    : undefined
+                }
+              />
+            ) : (
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={handleChangePlan}
+                disabled={!plan.nextTier || checkoutLoading}
+                title={plan.nextTier ? `Upgrade to ${PLANS[plan.nextTier]?.label ?? plan.nextTier}` : 'You are on the highest plan'}
+                data-testid="upgrade-button"
+              >
+                {plan.nextTier
+                  ? `Upgrade to ${PLANS[plan.nextTier]?.label ?? plan.nextTier}${
+                      YEARLY_PRICING[plan.nextTier] && frequency === 'yearly' ? ' (yearly)' : ''
+                    }`
+                  : 'Change plan'}
+              </button>
+            )}
             <a
               className="btn btn-ghost btn-sm"
               href="mailto:support@instanode.dev?subject=Cancel%20subscription"
@@ -657,6 +804,188 @@ function BillingFrequencyToggle({
       )}
     </div>
   )
+}
+
+// ─── PromoCodePanel (P3) ───────────────────────────────────────────────
+// Collapsed state: a small "Have a discount code?" link button.
+// Open + unapplied state: input + Apply button + (optional) error msg.
+// Open + applied state: green checkmark + applied description + Remove.
+//
+// Keeping this as a sub-component keeps BillingPage scannable — the
+// upgrade flow is the headline; this is a side rail. State lives in the
+// parent so the applied code can be passed into createCheckout.
+function PromoCodePanel({
+  open,
+  code,
+  validating,
+  err,
+  applied,
+  onOpen,
+  onChangeCode,
+  onApply,
+  onClear,
+}: {
+  open: boolean
+  code: string
+  validating: boolean
+  err: string | null
+  applied: Promotion | null
+  onOpen: () => void
+  onChangeCode: (s: string) => void
+  onApply: () => void
+  onClear: () => void
+}) {
+  // Applied state — small green chip with the discount description and a
+  // Remove action. Sits where the input was so the layout doesn't jump.
+  if (applied) {
+    return (
+      <div
+        data-testid="promo-applied"
+        style={{
+          marginBottom: 12,
+          padding: '8px 12px',
+          background: 'rgba(46, 160, 67, 0.08)',
+          border: '1px solid rgba(46, 160, 67, 0.3)',
+          borderLeft: '3px solid var(--green, #2ea043)',
+          borderRadius: 6,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          fontSize: 12.5,
+        }}
+      >
+        <span aria-hidden="true" style={{ color: 'var(--green, #2ea043)', fontSize: 14, lineHeight: 1 }}>✓</span>
+        <span data-testid="promo-applied-text">
+          <code style={{ fontFamily: 'var(--font-mono)', fontSize: 11.5, color: 'var(--text)' }}>{applied.code}</code>
+          {' '}applied: {formatDiscount(applied)}
+        </span>
+        <button
+          type="button"
+          data-testid="promo-clear"
+          onClick={onClear}
+          className="btn btn-ghost btn-sm"
+          style={{ marginLeft: 'auto', fontSize: 11 }}
+        >
+          Remove
+        </button>
+      </div>
+    )
+  }
+
+  // Collapsed state — single discreet link. Click expands the input.
+  if (!open) {
+    return (
+      <div style={{ marginBottom: 12 }}>
+        <button
+          type="button"
+          data-testid="promo-toggle"
+          onClick={onOpen}
+          className="btn btn-ghost btn-sm"
+          style={{
+            padding: '2px 0',
+            fontSize: 12,
+            color: 'var(--text-dim)',
+            background: 'transparent',
+            border: 'none',
+            textDecoration: 'underline',
+            textDecorationStyle: 'dotted',
+            textUnderlineOffset: 3,
+            cursor: 'pointer',
+          }}
+        >
+          Have a discount code?
+        </button>
+      </div>
+    )
+  }
+
+  // Open + unapplied state — input + Apply.
+  return (
+    <div data-testid="promo-input-row" style={{ marginBottom: 12 }}>
+      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+        <input
+          type="text"
+          data-testid="promo-input"
+          aria-label="Discount code"
+          placeholder="DISCOUNT CODE"
+          value={code}
+          onChange={(e) => onChangeCode(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              if (!validating) onApply()
+            }
+          }}
+          autoFocus
+          disabled={validating}
+          style={{
+            flex: '1 1 auto',
+            maxWidth: 220,
+            padding: '6px 10px',
+            fontSize: 12,
+            fontFamily: 'var(--font-mono)',
+            textTransform: 'uppercase',
+            letterSpacing: '0.04em',
+            background: 'var(--surface)',
+            color: 'var(--text)',
+            border: '1px solid var(--border)',
+            borderRadius: 4,
+          }}
+        />
+        <button
+          type="button"
+          data-testid="promo-apply"
+          onClick={onApply}
+          disabled={validating || !code.trim()}
+          className="btn btn-secondary btn-sm"
+          style={{ fontSize: 12 }}
+        >
+          {validating ? 'Checking…' : 'Apply'}
+        </button>
+      </div>
+      {err && (
+        <div
+          data-testid="promo-error"
+          role="alert"
+          style={{
+            marginTop: 6,
+            fontSize: 11.5,
+            color: 'var(--danger, #c33)',
+            fontFamily: 'var(--font-mono)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+          }}
+        >
+          <span aria-hidden="true">✗</span>
+          <span>{err}</span>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// formatDiscount — turns a Promotion.discount object into a human-friendly
+// chip. Falls back to a generic "discount applied" for unknown kinds so the
+// UI is forward-compatible if the api ships a new discount shape.
+function formatDiscount(p: Promotion): string {
+  const d = p.discount
+  if (d.kind === 'percent_off') {
+    const span = d.applies_to && d.unit
+      ? ` first ${d.applies_to} ${d.unit}`
+      : d.applies_to === 1
+        ? ' first month'
+        : ''
+    return `${d.value}% off${span}`
+  }
+  if (d.kind === 'amount_off') {
+    return `$${(d.value / 100).toFixed(2)} off`
+  }
+  if (d.kind === 'free_period') {
+    const unit = d.unit ?? 'months'
+    return `${d.value} ${unit} free`
+  }
+  return 'discount applied'
 }
 
 function UsageRow({ k, used, limit, pct, warn = false }: { k: string; used: string; limit: string; pct: number; warn?: boolean }) {

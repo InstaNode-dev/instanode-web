@@ -14,15 +14,12 @@ import { useEffect, useState } from 'react'
 import * as api from '../api'
 import type { CustomDomain, CustomDomainRecord, CustomDomainStatus } from '../api'
 import { copyToClipboard } from './Common'
+import { UpgradePromptCard } from './UpgradePromptCard'
 
 // Endpoint hint shown beneath the section header. The exact path is
 // /api/v1/stacks/:slug/domains — keeping it as a constant so the heading
 // and the docs string don't drift apart.
 const DOMAINS_ENDPOINT_HINT = 'POST /api/v1/stacks/:slug/domains'
-
-// Billing page anchor we link to from the 402 upsell — matches the route
-// already mounted in App.tsx for the in-app billing surface.
-const BILLING_PATH = '/app/billing'
 
 type Props = { stackSlug: string }
 
@@ -149,11 +146,8 @@ export function CustomDomainPanel({ stackSlug }: Props) {
             <span className="help">Fully qualified hostname. We'll guide you through DNS records once it's added.</span>
           </div>
           {createErr && createErr.kind === 'upgrade_required' && (
-            <div style={{
-              fontSize: 12.5, color: 'var(--amber)', marginBottom: 8,
-              padding: '8px 10px', borderLeft: '2px solid var(--amber)', background: 'rgba(255,192,105,0.04)',
-            }}>
-              {createErr.message} <a href={BILLING_PATH} style={{ color: 'var(--accent)' }}>Upgrade to Pro →</a>
+            <div style={{ marginBottom: 8 }} data-testid="custom-domain-upgrade-banner">
+              <UpgradePromptCard feature="custom_domain" dense />
             </div>
           )}
           {createErr && createErr.kind === 'other' && (

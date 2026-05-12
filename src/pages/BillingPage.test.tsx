@@ -76,6 +76,9 @@ vi.mock('../api', async () => {
     fetchBillingUsage: vi.fn(),
     createCheckout: vi.fn(),
     cancelSubscription: vi.fn(),
+    // P3: discount-code path validates with the api before applying the
+    // code to checkout. Mocked so tests can drive both ok + error shapes.
+    validatePromotion: vi.fn(),
   }
 })
 
@@ -703,5 +706,194 @@ describe('BillingPage — monthly/yearly toggle', () => {
       expect(screen.queryByRole('button', { name: /change plan/i })).toBeTruthy()
     })
     expect(screen.queryByTestId('billing-frequency-toggle')).toBeNull()
+  })
+})
+
+describe('BillingPage — discount code on checkout flow (P3)', () => {
+  it('renders the "Have a discount code?" toggle when a next-tier exists', async () => {
+    mockTier = 'hobby'
+    mockHappyBilling()
+    render(<BillingPage />)
+    await waitForLoaded()
+    expect(screen.getByTestId('promo-toggle')).toBeTruthy()
+    // Input is collapsed until the toggle is clicked.
+    expect(screen.queryByTestId('promo-input')).toBeNull()
+  })
+
+  it('does NOT render the toggle for team-tier (no upgrade target)', async () => {
+    mockTier = 'team'
+    mockHappyBilling()
+    render(<BillingPage />)
+    // Team tier renders the disabled "Change plan" button — wait for it
+    // before asserting the toggle's absence so we know the page has
+    // settled past its loading skeleton.
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /change plan/i })).toBeTruthy()
+    })
+    expect(screen.queryByTestId('promo-toggle')).toBeNull()
+  })
+
+  it('expands the input when the toggle is clicked', async () => {
+    mockTier = 'hobby'
+    mockHappyBilling()
+    render(<BillingPage />)
+    await waitForLoaded()
+    fireEvent.click(screen.getByTestId('promo-toggle'))
+    expect(screen.getByTestId('promo-input')).toBeTruthy()
+    expect(screen.getByTestId('promo-apply')).toBeTruthy()
+  })
+
+  it('shows a green "applied" state when validatePromotion returns ok', async () => {
+    mockTier = 'hobby'
+    mockHappyBilling()
+    ;(api.validatePromotion as any).mockResolvedValue({
+      ok: true,
+      promotion: {
+        code: 'TWITTER15',
+        discount: { kind: 'percent_off', value: 15, applies_to: 3, unit: 'months' },
+        valid_until: '2026-09-01T00:00:00Z',
+      },
+    })
+    render(<BillingPage />)
+    await waitForLoaded()
+    fireEvent.click(screen.getByTestId('promo-toggle'))
+    fireEvent.change(screen.getByTestId('promo-input'), { target: { value: 'TWITTER15' } })
+    fireEvent.click(screen.getByTestId('promo-apply'))
+    await waitFor(() => {
+      expect(screen.getByTestId('promo-applied')).toBeTruthy()
+    })
+    // Green chip text mentions the code and the human-readable discount.
+    const text = screen.getByTestId('promo-applied-text').textContent ?? ''
+    expect(text).toContain('TWITTER15')
+    expect(text.toLowerCase()).toContain('15% off')
+    expect(text.toLowerCase()).toContain('first 3 months')
+  })
+
+  it('passes (code, plan) to validatePromotion (upper-cased + trimmed by api helper)', async () => {
+    mockTier = 'hobby'
+    mockHappyBilling()
+    ;(api.validatePromotion as any).mockResolvedValue({
+      ok: true,
+      promotion: {
+        code: 'LAUNCH50',
+        discount: { kind: 'percent_off', value: 50, applies_to: 1, unit: 'months' },
+        valid_until: '2026-09-01T00:00:00Z',
+      },
+    })
+    render(<BillingPage />)
+    await waitForLoaded()
+    fireEvent.click(screen.getByTestId('promo-toggle'))
+    fireEvent.change(screen.getByTestId('promo-input'), { target: { value: 'LAUNCH50' } })
+    fireEvent.click(screen.getByTestId('promo-apply'))
+    await waitFor(() => expect(api.validatePromotion).toHaveBeenCalledTimes(1))
+    // Plan is the next-tier target ("pro" when user is on hobby).
+    expect(api.validatePromotion).toHaveBeenCalledWith('LAUNCH50', 'pro')
+  })
+
+  it('shows a red error state when validatePromotion rejects with an api message', async () => {
+    mockTier = 'hobby'
+    mockHappyBilling()
+    ;(api.validatePromotion as any).mockRejectedValue(
+      Object.assign(new Error('Code not found.'), { status: 404 }),
+    )
+    render(<BillingPage />)
+    await waitForLoaded()
+    fireEvent.click(screen.getByTestId('promo-toggle'))
+    fireEvent.change(screen.getByTestId('promo-input'), { target: { value: 'NOPE' } })
+    fireEvent.click(screen.getByTestId('promo-apply'))
+    await waitFor(() => {
+      const err = screen.getByTestId('promo-error')
+      expect(err.textContent).toContain('Code not found.')
+    })
+    // Must NOT enter the applied state on failure.
+    expect(screen.queryByTestId('promo-applied')).toBeNull()
+  })
+
+  it('shows a friendly network-error message when validatePromotion has no status', async () => {
+    mockTier = 'hobby'
+    mockHappyBilling()
+    // A real network failure surfaces as TypeError("Failed to fetch") with
+    // no `status`. The handler should drop into the friendly fallback
+    // rather than surfacing the bare TypeError message.
+    const netErr = new TypeError('Failed to fetch')
+    ;(api.validatePromotion as any).mockRejectedValue(netErr)
+    render(<BillingPage />)
+    await waitForLoaded()
+    fireEvent.click(screen.getByTestId('promo-toggle'))
+    fireEvent.change(screen.getByTestId('promo-input'), { target: { value: 'TWITTER15' } })
+    fireEvent.click(screen.getByTestId('promo-apply'))
+    await waitFor(() => {
+      const err = screen.getByTestId('promo-error')
+      expect(err.textContent?.toLowerCase()).toContain("couldn't reach the server")
+    })
+  })
+
+  it('passes promotion_code to createCheckout once a code is applied', async () => {
+    mockTier = 'hobby'
+    mockHappyBilling()
+    ;(api.validatePromotion as any).mockResolvedValue({
+      ok: true,
+      promotion: {
+        code: 'TWITTER15',
+        discount: { kind: 'percent_off', value: 15, applies_to: 3, unit: 'months' },
+        valid_until: '2026-09-01T00:00:00Z',
+      },
+    })
+    ;(api.createCheckout as any).mockResolvedValue({
+      ok: true, short_url: 'https://rzp.io/i/p3',
+    })
+    render(<BillingPage />)
+    await waitForLoaded()
+    fireEvent.click(screen.getByTestId('promo-toggle'))
+    fireEvent.change(screen.getByTestId('promo-input'), { target: { value: 'TWITTER15' } })
+    fireEvent.click(screen.getByTestId('promo-apply'))
+    await waitFor(() => expect(screen.queryByTestId('promo-applied')).toBeTruthy())
+    fireEvent.click(screen.getByRole('button', { name: /upgrade to pro/i }))
+    await waitFor(() => expect(api.createCheckout).toHaveBeenCalledTimes(1))
+    // Merged signature: (plan, plan_frequency, opts). Frequency defaults
+    // to 'monthly' (P2 toggle is not touched in this test).
+    expect(api.createCheckout).toHaveBeenCalledWith('pro', 'monthly', { promotion_code: 'TWITTER15' })
+  })
+
+  it('does NOT pass promotion_code to createCheckout when no code is applied', async () => {
+    mockTier = 'hobby'
+    mockHappyBilling()
+    ;(api.createCheckout as any).mockResolvedValue({
+      ok: true, short_url: 'https://rzp.io/i/p3-nopromo',
+    })
+    render(<BillingPage />)
+    await waitForLoaded()
+    // Click upgrade without ever touching the discount-code toggle.
+    fireEvent.click(screen.getByRole('button', { name: /upgrade to pro/i }))
+    await waitFor(() => expect(api.createCheckout).toHaveBeenCalledTimes(1))
+    // Strict signature when no promo is applied — frequency defaults to
+    // 'monthly' (P2 merge). No opts third arg, so the call shape is
+    // exactly two positional args. Guards against a regression where
+    // every upgrade silently grows an empty opts object.
+    expect(api.createCheckout).toHaveBeenCalledWith('pro', 'monthly')
+  })
+
+  it('Remove clears the applied code and lets the user enter a different one', async () => {
+    mockTier = 'hobby'
+    mockHappyBilling()
+    ;(api.validatePromotion as any).mockResolvedValue({
+      ok: true,
+      promotion: {
+        code: 'COMEBACK10',
+        discount: { kind: 'percent_off', value: 10, applies_to: 1, unit: 'months' },
+        valid_until: '2026-09-01T00:00:00Z',
+      },
+    })
+    render(<BillingPage />)
+    await waitForLoaded()
+    fireEvent.click(screen.getByTestId('promo-toggle'))
+    fireEvent.change(screen.getByTestId('promo-input'), { target: { value: 'COMEBACK10' } })
+    fireEvent.click(screen.getByTestId('promo-apply'))
+    await waitFor(() => expect(screen.queryByTestId('promo-applied')).toBeTruthy())
+    fireEvent.click(screen.getByTestId('promo-clear'))
+    // Back to the collapsed-toggle state — applied row gone, input row
+    // not auto-reopened (we don't want to surprise-focus the user).
+    expect(screen.queryByTestId('promo-applied')).toBeNull()
+    expect(screen.getByTestId('promo-toggle')).toBeTruthy()
   })
 })

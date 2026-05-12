@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import {
   ROBanner, EnvPill, TierPill, ResourceIcon, RelTime, UsageBar, Card, Sparkline,
   copyToClipboard
 } from '../components/Common'
+import { QuotaWallBanner } from '../components/QuotaWallBanner'
+import { UpgradeButton } from '../components/UpgradeButton'
 import * as api from '../api'
 import type { Resource, ActivityItem } from '../api'
 import { useDashboardCtx } from '../hooks/useDashboardCtx'
@@ -17,9 +19,16 @@ export function OverviewPage() {
   const [loading, setLoading] = useState(true)
   const [copiedPrompt, setCopiedPrompt] = useState<string | null>(null)
   const ctx = useDashboardCtx()
+  const navigate = useNavigate()
   const tier = ctx.me?.team.tier ?? 'hobby'
   const env = ctx.env
   const vaultCount = ctx.counts.vault
+  // Show the Pro upgrade CTA on the overview's prompt card only on
+  // tiers that have something to gain by going to Pro. Team/growth
+  // are already past Pro; on those the slot stays empty (the page
+  // doesn't need a second upgrade CTA when /app/billing already has
+  // one).
+  const showProUpgrade = tier === 'anonymous' || tier === 'free' || tier === 'hobby'
 
   // Tier-aware quick prompts. Each one is a real, copyable instruction the
   // user pastes into their agent — interpolating the live tier so the agent
@@ -109,6 +118,11 @@ export function OverviewPage() {
 
   return (
     <>
+      {/* QuotaWallBanner — Track U1. Renders only when the worker has
+          flagged this team as approaching a tier limit (>=80% on any
+          axis) within the last 24h. Dismissible per-team. */}
+      <QuotaWallBanner teamId={ctx.me?.team?.id} />
+
       <ROBanner>
         The whole dashboard is a <strong>mirror.</strong> Resources, deploys, vault keys, audit trails — everything you see came from your agent calling the API. To <em>do</em> something, prompt your agent. <strong>Billing is the only exception.</strong>
       </ROBanner>
@@ -179,6 +193,33 @@ export function OverviewPage() {
               <strong>Quick prompts</strong>
               <span className="right">copy → paste in agent</span>
             </div>
+            {showProUpgrade && (
+              // Pro-upgrade A/B-tested CTA. Variant comes from
+              // /auth/me's experiments map (server-side bucketed)
+              // and decides both the copy and the colour. Click
+              // fires POST /api/v1/experiments/converted before
+              // navigating to /app/billing where the user can
+              // actually pay; the report is capped at 500ms so a
+              // slow analytics endpoint never delays navigation.
+              <div
+                data-testid="overview-upgrade-cta"
+                style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  padding: '8px 10px', marginBottom: 8,
+                  border: '1px dashed var(--border)', borderRadius: 6,
+                }}
+              >
+                <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>
+                  Want bigger limits and longer TTLs?
+                </span>
+                <UpgradeButton
+                  variant={ctx.me?.experiments?.upgrade_button}
+                  onClick={() => navigate('/app/billing')}
+                  testId="overview-upgrade-button"
+                  action="overview_upgrade_clicked"
+                />
+              </div>
+            )}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               {QUICK_PROMPTS.map((p) => {
                 const isCopied = copiedPrompt === p.id

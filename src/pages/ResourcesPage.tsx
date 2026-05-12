@@ -4,9 +4,20 @@ import {
   ContractBanner, EnvPill, ExpiryBadge, TierPill, ResourceIcon, RelTime, UsageBar, PromptCard,
   useExpiryTick
 } from '../components/Common'
+import { QuotaWallBanner } from '../components/QuotaWallBanner'
+import { UpgradePromptCard } from '../components/UpgradePromptCard'
 import * as api from '../api'
-import type { Resource, ResourceType } from '../api'
+import type { Resource, ResourceType, Tier } from '../api'
 import { useDashboardCtx } from '../hooks/useDashboardCtx'
+
+// Tiers that benefit from a quota-wall upgrade prompt. Pro / team / growth
+// already have higher caps — showing the prompt to them would be noise.
+const QUOTA_UPGRADE_TIERS: ReadonlySet<Tier> = new Set(['anonymous', 'free', 'hobby'])
+
+// Trigger threshold for the quota-wall prompt: any single resource at or
+// above 80% of its storage cap. Mirrors the `isWarn` rule on BillingPage so
+// the two surfaces agree on what "approaching the wall" means.
+const QUOTA_WARN_PCT = 0.8
 
 const TYPES: (ResourceType | 'all')[] = ['all', 'postgres', 'redis', 'mongodb', 'queue', 'storage', 'webhook']
 
@@ -45,8 +56,34 @@ export function ResourcesPage() {
 
   const totalGB = items.reduce((s, r) => s + r.storage_bytes, 0) / 1_000_000_000
 
+  // Quota-wall prompt visibility — show only when the user is on a tier
+  // that has a higher tier to upgrade to AND at least one resource is at
+  // or above 80% of its storage cap. Read from the live resource list so
+  // we don't have to round-trip through /billing/usage. Resources with
+  // `storage_limit_bytes <= 0` (rare; defensively guarded) are skipped so
+  // we don't divide by zero.
+  const tier = (ctx.me?.team.tier ?? 'hobby') as Tier
+  const showQuotaPrompt = useMemo(() => {
+    if (!QUOTA_UPGRADE_TIERS.has(tier)) return false
+    return items.some(
+      (r) =>
+        r.storage_limit_bytes > 0 &&
+        r.storage_bytes / r.storage_limit_bytes >= QUOTA_WARN_PCT,
+    )
+  }, [items, tier])
+
   return (
     <>
+      {/* QuotaWallBanner (U1): 80% pre-wall nudge driven by worker scan.
+          UpgradePromptCard quota_wall (U2): at-wall prompt rendered client-side
+          when the user has actually hit the cap. Layered: gentle nudge first,
+          firm prompt when stuck. */}
+      <QuotaWallBanner teamId={ctx.me?.team?.id} />
+      {showQuotaPrompt && (
+        <div style={{ marginBottom: 12 }}>
+          <UpgradePromptCard feature="quota_wall" />
+        </div>
+      )}
 
       <div className="filters">
         {TYPES.map((t) => (
