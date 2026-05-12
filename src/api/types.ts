@@ -231,8 +231,15 @@ export interface OverviewStats {
 }
 
 // ---------- Auth/me response (locked) ----------
+// `experiments` is the server-bucketed A/B map (keyed by experiment
+// name → variant). The dashboard reads this to render variant copy
+// and to know which variant to send back when firing the conversion
+// endpoint. Missing or {} means "no experiments running" — every
+// consumer treats absent variants as "control" so the field is
+// safe to omit on older API builds.
 export interface AuthMeResponse {
   user: User
   team: DashboardTeam
   access_token?: string
+  experiments?: Record<string, string>
 }
