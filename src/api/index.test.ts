@@ -26,6 +26,8 @@ import {
   listResources,
   deleteResource,
   listAPIKeys,
+  listStacks,
+  fetchStackFamily,
 } from './index'
 // §10.21: FIXTURE_BILLING / FIXTURE_INVOICES imports retired. The 503
 // fallback paths in fetchBilling() and listInvoices() were removed —
@@ -571,5 +573,125 @@ describe('non-JSON response bodies', () => {
     const m = installFetch()
     m.mockResolvedValueOnce(textResponse('upstream timeout', { status: 502, statusText: 'Bad Gateway' }))
     await expect(cancelSubscription()).rejects.toMatchObject({ status: 502 })
+  })
+})
+
+// ─── listStacks() — env field plumbed through ────────────────────────────
+// Verifies the §10.17 follow-up: dashboard reads real `env` from the API
+// response instead of hardcoding 'production'. Locks in the contract the
+// agent API now serves (GET /api/v1/stacks includes env + parent_stack_id).
+describe('listStacks() env field', () => {
+  it('returns the real env value from the API', async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse({
+      ok: true,
+      total: 2,
+      items: [
+        {
+          stack_id: 'stk-prod', name: 'demo', status: 'running', tier: 'pro',
+          namespace: 'ns', env: 'production', parent_stack_id: '',
+          created_at: '2026-05-12T00:00:00Z',
+        },
+        {
+          stack_id: 'stk-staging', name: 'demo', status: 'running', tier: 'pro',
+          namespace: 'ns', env: 'staging', parent_stack_id: 'root-id',
+          created_at: '2026-05-12T00:01:00Z',
+        },
+      ],
+    }))
+    const r = await listStacks()
+    expect(r.items[0].env).toBe('production')
+    expect(r.items[1].env).toBe('staging')
+  })
+
+  it("falls back to 'production' when the API omits env (legacy stack rows)", async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse({
+      ok: true,
+      items: [{ stack_id: 'stk-old', name: 'legacy', status: 'running', tier: 'pro', namespace: 'ns', created_at: 'x' }],
+    }))
+    const r = await listStacks()
+    expect(r.items[0].env).toBe('production')
+  })
+})
+
+// ─── fetchStackFamily() — Pro+ env grid loader ───────────────────────────
+// The discriminated-union return shape is load-bearing for the dashboard's
+// Environments grid: it decides between rendering the grid (ok=true),
+// the existing PromoteUpsell card (upgrade_required), or the silent fall-
+// through (not_found / unknown). Cover each branch explicitly so a future
+// shape change can't silently regress the UI behaviour.
+describe('fetchStackFamily()', () => {
+  it('adapts the family payload and preserves order', async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse({
+      ok: true,
+      slug: 'stk-prod',
+      total: 3,
+      family: [
+        {
+          slug: 'stk-prod', name: 'demo', env: 'production', status: 'running', tier: 'pro',
+          url: 'https://demo.deployment.instanode.dev', is_root: true, parent_stack_id: '',
+          last_deploy_at: '2026-05-12T01:00:00Z', created_at: '2026-05-12T00:00:00Z',
+        },
+        {
+          slug: 'stk-staging', name: 'demo', env: 'staging', status: 'building', tier: 'pro',
+          url: '', is_root: false, parent_stack_id: 'root-id',
+          last_deploy_at: '2026-05-12T02:00:00Z', created_at: '2026-05-12T00:02:00Z',
+        },
+        {
+          slug: 'stk-dev', name: 'demo', env: 'dev', status: 'running', tier: 'pro',
+          url: 'https://dev-demo.deployment.instanode.dev', is_root: false, parent_stack_id: 'root-id',
+          last_deploy_at: '2026-05-12T03:00:00Z', created_at: '2026-05-12T00:03:00Z',
+        },
+      ],
+    }))
+    const r = await fetchStackFamily('stk-prod')
+    expect(r.ok).toBe(true)
+    if (!r.ok) throw new Error('typeguard')
+    expect(r.slug).toBe('stk-prod')
+    expect(r.total).toBe(3)
+    expect(r.family.map((m) => m.env)).toEqual(['production', 'staging', 'dev'])
+    expect(r.family[0].is_root).toBe(true)
+    expect(r.family[1].is_root).toBe(false)
+    expect(r.family[1].parent_stack_id).toBe('root-id')
+  })
+
+  it('returns upgrade_required on 402 so the UI can render PromoteUpsell', async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse(
+      { ok: false, error: 'upgrade_required', agent_action: 'Tell user to upgrade...' },
+      { status: 402 },
+    ))
+    const r = await fetchStackFamily('stk-hobby')
+    expect(r.ok).toBe(false)
+    if (r.ok) throw new Error('typeguard')
+    expect(r.reason).toBe('upgrade_required')
+  })
+
+  it('returns not_found on 404 so the UI silently falls back', async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse({ ok: false, error: 'not_found' }, { status: 404 }))
+    const r = await fetchStackFamily('stk-missing')
+    expect(r.ok).toBe(false)
+    if (r.ok) throw new Error('typeguard')
+    expect(r.reason).toBe('not_found')
+  })
+
+  it("buckets every other failure under reason='unknown'", async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse({ ok: false, error: 'internal' }, { status: 500 }))
+    const r = await fetchStackFamily('stk-x')
+    expect(r.ok).toBe(false)
+    if (r.ok) throw new Error('typeguard')
+    expect(r.reason).toBe('unknown')
+  })
+
+  it('URI-encodes the slug so weird inputs do not bypass the route', async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse({ ok: true, slug: '', family: [], total: 0 }))
+    await fetchStackFamily('stk weird/slug')
+    const [url] = m.mock.calls[0]
+    expect(String(url)).toContain('/api/v1/stacks/stk%20weird%2Fslug/family')
   })
 })

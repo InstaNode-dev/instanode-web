@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import {
-  ROBanner, ContractBanner, EnvPill, StatusPill, TierPill, ResourceIcon, PromptCard
+  ROBanner, ContractBanner, EnvPill, StatusPill, TierPill, ResourceIcon, PromptCard, RelTime
 } from '../components/Common'
 import { CustomDomainPanel } from '../components/CustomDomainPanel'
 import { useDashboardCtx } from '../hooks/useDashboardCtx'
 import * as api from '../api'
-import type { DashboardStack, Tier } from '../api'
+import type { DashboardStack, Tier, StackFamilyMember } from '../api'
 import { streamSSE } from '../lib/sseStream'
 
 // Tiers that have access to custom domains. Anonymous and hobby see an
@@ -216,9 +216,10 @@ function Overview({ d, tier }: { d: DashboardStack; tier: Tier }) {
         />
       </div>
 
-      {/* Environments section — Pro+ feature. Promote one env to another.
-          For non-Pro tiers, render an inline upsell that mirrors the
-          custom-domains pattern. */}
+      {/* Environments section — Pro+ feature. Renders a live grid of every
+          env-sibling of the current stack (production · staging · dev) above
+          the Promote / Copy-vault prompt cards. For non-Pro tiers, render an
+          inline upsell that mirrors the custom-domains pattern. */}
       <section style={{ marginTop: 32 }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, marginBottom: 12 }}>
           <h3 style={{ fontSize: 14, fontWeight: 500, color: 'var(--text)', margin: 0 }}>
@@ -233,56 +234,230 @@ function Overview({ d, tier }: { d: DashboardStack; tier: Tier }) {
         </div>
 
         {canPromote ? (
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <PromptCard
-              title={`Promote ${fromEnv} → ${toEnv}`}
-              prompt={
-                <>
-                  Promote the <em>{d.name}</em> stack from <code>{fromEnv}</code> to{' '}
-                  <code>{toEnv}</code>. Config (image, env-var bindings, resource
-                  bindings) is copied to the target env.
-                </>
-              }
-              promptText={
-                `Promote my instanode stack "${d.name}" from ${fromEnv} to ${toEnv}.\n` +
-                `\n` +
-                `- Source stack slug: ${d.slug}\n` +
-                `- Endpoint: POST https://api.instanode.dev/api/v1/stacks/${d.slug}/promote\n` +
-                `- Auth: use my INSTANODE_TOKEN env var as Bearer\n` +
-                `- Body: {"from":"${fromEnv}","to":"${toEnv}"}\n` +
-                `\n` +
-                `The promote endpoint copies the stack's config (image binding, resource bindings, name) to a sibling stack in the target env. If the target env already has a sibling, its status is reset to "building" (in-place re-promote); otherwise a new stack row is created with parent_stack_id pointing at the source. Poll GET /stacks/<new-slug> for status. Returns 402 with agent_action on free / hobby tiers.`
-              }
-              method="POST"
-              endpoint={`/api/v1/stacks/${d.slug}/promote`}
-            />
-            <PromptCard
-              title={`Copy vault secrets ${fromEnv} → ${toEnv}`}
-              prompt={
-                <>
-                  Bulk-copy vault entries from <code>{fromEnv}</code> to{' '}
-                  <code>{toEnv}</code>. Default: skip existing keys. Use{' '}
-                  <code>dry_run:true</code> to preview the plan first.
-                </>
-              }
-              promptText={
-                `Copy my instanode vault secrets from ${fromEnv} to ${toEnv}.\n` +
-                `\n` +
-                `- Endpoint: POST https://api.instanode.dev/api/v1/vault/copy\n` +
-                `- Auth: use my INSTANODE_TOKEN env var as Bearer\n` +
-                `- Body: {"from":"${fromEnv}","to":"${toEnv}","dry_run":true}\n` +
-                `\n` +
-                `Set dry_run=true to preview the per-key plan (copy / overwrite / skip / missing / quota_exceeded). Drop it to actually persist. Use {"overwrite": true} to bump existing target-env keys to a new version. Pro / Team only — returns 402 with agent_action otherwise.`
-              }
-              method="POST"
-              endpoint={`/api/v1/vault/copy`}
-            />
-          </div>
+          <>
+            <EnvironmentsGrid slug={d.slug} stackName={d.name} />
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 12 }}>
+              <PromptCard
+                title={`Promote ${fromEnv} → ${toEnv}`}
+                prompt={
+                  <>
+                    Promote the <em>{d.name}</em> stack from <code>{fromEnv}</code> to{' '}
+                    <code>{toEnv}</code>. Config (image, env-var bindings, resource
+                    bindings) is copied to the target env.
+                  </>
+                }
+                promptText={
+                  `Promote my instanode stack "${d.name}" from ${fromEnv} to ${toEnv}.\n` +
+                  `\n` +
+                  `- Source stack slug: ${d.slug}\n` +
+                  `- Endpoint: POST https://api.instanode.dev/api/v1/stacks/${d.slug}/promote\n` +
+                  `- Auth: use my INSTANODE_TOKEN env var as Bearer\n` +
+                  `- Body: {"from":"${fromEnv}","to":"${toEnv}"}\n` +
+                  `\n` +
+                  `The promote endpoint copies the stack's config (image binding, resource bindings, name) to a sibling stack in the target env. If the target env already has a sibling, its status is reset to "building" (in-place re-promote); otherwise a new stack row is created with parent_stack_id pointing at the source. Poll GET /stacks/<new-slug> for status. Returns 402 with agent_action on free / hobby tiers.`
+                }
+                method="POST"
+                endpoint={`/api/v1/stacks/${d.slug}/promote`}
+              />
+              <PromptCard
+                title={`Copy vault secrets ${fromEnv} → ${toEnv}`}
+                prompt={
+                  <>
+                    Bulk-copy vault entries from <code>{fromEnv}</code> to{' '}
+                    <code>{toEnv}</code>. Default: skip existing keys. Use{' '}
+                    <code>dry_run:true</code> to preview the plan first.
+                  </>
+                }
+                promptText={
+                  `Copy my instanode vault secrets from ${fromEnv} to ${toEnv}.\n` +
+                  `\n` +
+                  `- Endpoint: POST https://api.instanode.dev/api/v1/vault/copy\n` +
+                  `- Auth: use my INSTANODE_TOKEN env var as Bearer\n` +
+                  `- Body: {"from":"${fromEnv}","to":"${toEnv}","dry_run":true}\n` +
+                  `\n` +
+                  `Set dry_run=true to preview the per-key plan (copy / overwrite / skip / missing / quota_exceeded). Drop it to actually persist. Use {"overwrite": true} to bump existing target-env keys to a new version. Pro / Team only — returns 402 with agent_action otherwise.`
+                }
+                method="POST"
+                endpoint={`/api/v1/vault/copy`}
+              />
+            </div>
+          </>
         ) : (
           <PromoteUpsell />
         )}
       </section>
     </>
+  )
+}
+
+// Loading skeleton shown while fetchStackFamily is in flight. Matches the
+// 3-tile production/staging/dev grid layout so the page doesn't reflow
+// when data arrives.
+function EnvironmentsGridSkeleton() {
+  return (
+    <div
+      data-testid="env-grid-skeleton"
+      style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}
+    >
+      {[0, 1, 2].map((i) => (
+        <div key={i} className="skel" style={{ height: 96 }} />
+      ))}
+    </div>
+  )
+}
+
+// Empty-state hint shown when the API returns ok=true but the family is
+// empty. In practice we always include the root, so this only fires on
+// degraded responses. Keeping the surface honest beats fabricating a tile.
+function EnvironmentsGridEmpty() {
+  return (
+    <div
+      data-testid="env-grid-empty"
+      className="card"
+      style={{ padding: '14px 18px', fontSize: 12.5, color: 'var(--text-dim)' }}
+    >
+      No env siblings yet. Use the Promote prompt below to ship this stack to
+      another env.
+    </div>
+  )
+}
+
+// Live grid of every env-sibling for the current stack. Pro+ only —
+// fetchStackFamily returns {ok:false, reason:'upgrade_required'} on hobby
+// teams, in which case we collapse to nothing (the parent already shows
+// PromoteUpsell). On 404/unknown we fail quietly to the same single-env
+// fallback so we never block the page on a flaky family lookup.
+//
+// Exported (named) so the env-aware deployments test suite can drive it
+// without booting the whole DeployDetailPage (which depends on SSE +
+// react-router + useDashboardCtx). Internal-only API — pages should
+// continue to use DeployDetailPage as the entry point.
+export function EnvironmentsGrid({ slug, stackName }: { slug: string; stackName: string }) {
+  const [members, setMembers] = useState<StackFamilyMember[] | null>(null)
+  const [errored, setErrored] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    setErrored(false)
+    setMembers(null)
+    api
+      .fetchStackFamily(slug)
+      .then((r) => {
+        if (cancelled) return
+        if (r.ok) {
+          setMembers(r.family)
+        } else {
+          setErrored(true)
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setErrored(true)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [slug])
+
+  if (errored) {
+    // Silent failure — parent already renders PromptCards below this. The
+    // grid is enrichment, not a hard requirement. We log to console for
+    // dev visibility but never block the page.
+    return null
+  }
+  if (members === null) return <EnvironmentsGridSkeleton />
+  if (members.length === 0) return <EnvironmentsGridEmpty />
+
+  return (
+    <div
+      data-testid="env-grid"
+      style={{ display: 'grid', gridTemplateColumns: `repeat(${Math.min(members.length, 3)}, 1fr)`, gap: 12 }}
+    >
+      {members.map((m) => (
+        <EnvironmentCard key={m.slug} member={m} stackName={stackName} />
+      ))}
+    </div>
+  )
+}
+
+// Single env tile in the grid. Renders env pill + status + URL +
+// last-deploy timestamp; non-root members get a "Promote from here"
+// PromptCard inline so the agent prose stays adjacent to the source env.
+function EnvironmentCard({ member, stackName }: { member: StackFamilyMember; stackName: string }) {
+  const isRoot = member.is_root
+  // Default promote target: anything that isn't production promotes UP to
+  // production. The root (production) doesn't get a per-card promote prompt
+  // — that's what the top-level Promote / vault-copy prompts cover.
+  const promoteTarget = isRoot ? '' : 'production'
+  return (
+    <div className="card" data-testid={`env-card-${member.env}`} style={{ padding: 14 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+        <EnvPill env={member.env} />
+        <StatusPill status={member.status} />
+        {isRoot && (
+          <span
+            className="tag"
+            style={{ marginLeft: 'auto', fontSize: 9.5 }}
+            title="The family root — every other env was promoted from this stack"
+          >
+            root
+          </span>
+        )}
+      </div>
+      <div
+        style={{
+          fontFamily: 'var(--font-mono)',
+          fontSize: 11,
+          color: 'var(--text-dim)',
+          marginBottom: 6,
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+        }}
+        title={member.slug}
+      >
+        {member.slug}
+      </div>
+      {member.url ? (
+        <a
+          href={member.url}
+          target="_blank"
+          rel="noreferrer"
+          style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--blue)', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+        >
+          {member.url.replace(/^https?:\/\//, '')} ↗
+        </a>
+      ) : (
+        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-faint)' }}>
+          no URL yet
+        </div>
+      )}
+      <div style={{ fontSize: 10.5, color: 'var(--text-faint)', marginTop: 8 }}>
+        last deploy <RelTime at={member.last_deploy_at} />
+      </div>
+      {!isRoot && promoteTarget && (
+        <div style={{ marginTop: 10 }}>
+          <PromptCard
+            title={`Promote ${member.env} → ${promoteTarget}`}
+            prompt={
+              <>
+                Promote <em>{stackName}</em>'s <code>{member.env}</code> env to{' '}
+                <code>{promoteTarget}</code>.
+              </>
+            }
+            promptText={
+              `Promote my instanode stack "${stackName}" from ${member.env} to ${promoteTarget}.\n` +
+              `\n` +
+              `- Source stack slug: ${member.slug}\n` +
+              `- Endpoint: POST https://api.instanode.dev/api/v1/stacks/${member.slug}/promote\n` +
+              `- Auth: use my INSTANODE_TOKEN env var as Bearer\n` +
+              `- Body: {"from":"${member.env}","to":"${promoteTarget}"}\n`
+            }
+            method="POST"
+            endpoint={`/api/v1/stacks/${member.slug}/promote`}
+          />
+        </div>
+      )}
+    </div>
   )
 }
 
