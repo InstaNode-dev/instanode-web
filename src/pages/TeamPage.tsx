@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ContractBanner, RolePill, RelTime, PromptPill, PromptCard, Card } from '../components/Common'
+import { ContractBanner, RolePill, RelTime, PromptCard, Card } from '../components/Common'
 import * as api from '../api'
 import type { TeamMember, TeamInvitation } from '../api'
 import { useDashboardCtx } from '../hooks/useDashboardCtx'
@@ -23,6 +23,20 @@ export function TeamPage() {
   const userDomain = ctx.me?.user?.email?.split('@')[1] ?? 'example.com'
   const exampleEmail = `kavya@${userDomain}`
 
+  // Tier-aware seat limit text. Values mirror api/plans.yaml team_members.
+  // The dashboard never writes — this is just human-facing copy.
+  const tier = ctx.me?.team?.tier
+  const seatLimitByTier: Record<string, string> = {
+    anonymous: '1 team seat',
+    free: '1 team seat',
+    hobby: '1 team seat',
+    pro: '5 team seats',
+    team: 'unlimited team seats',
+    growth: '10 team seats',
+  }
+  const tierLabel = tier ? `${tier} tier` : 'Your tier'
+  const seatLabel = tier ? seatLimitByTier[tier] ?? 'seat limits per plan' : 'seat limits per plan'
+
   return (
     <>
       <ContractBanner kind="locked" badge="locked">
@@ -39,20 +53,80 @@ export function TeamPage() {
         <div>
           <div className="section-h">
             <h2>Members · {members.length}</h2>
-            <PromptPill label="invite teammate" />
           </div>
 
           <PromptCard
-            title="Invite via agent"
+            title="Invite a teammate"
             hint="most-used team prompt"
-            prompt={<>Invite <em>{exampleEmail}</em> as a developer with the welcome note "staging cluster is ready"</>}
+            prompt={
+              <>
+                Invite <em>{exampleEmail}</em> to my instanode team as a <strong>developer</strong> with
+                the welcome note <em>"staging cluster is ready"</em>. Use the team API endpoint and
+                my INSTANODE_TOKEN for auth.
+              </>
+            }
+            promptText={
+              `Invite ${exampleEmail} to my instanode team as a developer with the welcome note "staging cluster is ready".\n` +
+              `\n` +
+              `- Team has ${members.length} members today (limit is plan-dependent — ${tierLabel} · ${seatLabel}).\n` +
+              `- Endpoint: POST https://api.instanode.dev/api/v1/team/members/invite\n` +
+              `- Body: {"email":"${exampleEmail}","role":"developer","welcome_note":"staging cluster is ready"}\n` +
+              `- Auth: use my INSTANODE_TOKEN env var as Bearer\n` +
+              `\n` +
+              `The invitee receives an email with a 7-day claim link. If the role is wrong, run the same endpoint again — the latest invite supersedes earlier ones.`
+            }
             method="POST"
             endpoint="/api/v1/team/members/invite"
           />
 
+          <PromptCard
+            title="Revoke a pending invitation"
+            hint="via agent"
+            prompt={
+              <>
+                Revoke a pending team invitation by id. The invitee's claim link stops working
+                immediately. Re-invite anytime with the invite prompt above.
+              </>
+            }
+            promptText={
+              `Revoke a pending instanode team invitation.\n` +
+              `\n` +
+              `- Invitation id: <INVITATION_ID — see Pending list in the dashboard>\n` +
+              `- Endpoint: DELETE https://api.instanode.dev/api/v1/team/invitations/<INVITATION_ID>\n` +
+              `- Auth: use my INSTANODE_TOKEN env var as Bearer\n` +
+              `\n` +
+              `Team has ${invites.length} pending invitation(s) today. The 7-day claim link is invalidated; the invitee can be re-invited at any time.`
+            }
+            method="DELETE"
+            endpoint="/api/v1/team/invitations/{id}"
+          />
+
+          <PromptCard
+            danger
+            title="Remove a teammate"
+            hint="data loss"
+            prompt={
+              <>
+                Remove a teammate by user id. They lose access to every resource scoped to this
+                team. Their personal API tokens are revoked at the same moment.
+              </>
+            }
+            promptText={
+              `Remove a teammate from my instanode team.\n` +
+              `\n` +
+              `- User id: <USER_ID — see Members list in the dashboard>\n` +
+              `- Endpoint: DELETE https://api.instanode.dev/api/v1/team/members/<USER_ID>\n` +
+              `- Auth: use my INSTANODE_TOKEN env var as Bearer\n` +
+              `\n` +
+              `Team has ${members.length} member(s) today (${tierLabel} · ${seatLabel}). The removed user's INSTANODE_TOKENs stop working immediately. To re-add later, send a fresh invitation.`
+            }
+            method="DELETE"
+            endpoint="/api/v1/team/members/{user_id}"
+          />
+
           <div className="card" style={{ padding: 0, marginTop: 16 }}>
             {members.map((m) => (
-              <div key={m.id} className="team-row">
+              <div key={m.id} className="team-row" style={{ gridTemplateColumns: '36px 1fr 1fr' }}>
                 <div
                   className="av"
                   style={{
@@ -68,7 +142,6 @@ export function TeamPage() {
                   <div className="email">{m.email}</div>
                 </div>
                 <RolePill role={m.role} />
-                <button className="res-action">⋯</button>
               </div>
             ))}
           </div>
@@ -90,14 +163,16 @@ export function TeamPage() {
                   </div>
                 </div>
                 <RolePill role={i.role} />
-                <button className="btn btn-sm btn-ghost">revoke</button>
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-faint)' }}>
+                  via agent ↓
+                </span>
               </div>
             ))}
           </div>
 
           <Card title="Plan limit" style={{ marginTop: 16 }}>
             <p style={{ fontSize: 12.5, color: 'var(--text-dim)', lineHeight: 1.55, marginBottom: 12 }}>
-              Pro tier · 5 team seats. Higher seat limits ship with the Team tier (coming soon).
+              {tierLabel} · {seatLabel}. Higher seat limits ship with the Team tier.
             </p>
             <Link to="/billing" className="btn btn-secondary btn-sm" style={{ display: 'inline-flex' }}>
               View billing →

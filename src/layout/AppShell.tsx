@@ -1,5 +1,5 @@
-import { NavLink, Outlet, useLocation } from 'react-router-dom'
-import { Brand, ScopePill } from '../components/Common'
+import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
+import { Brand, ExpiryWarningBanner, ScopePill, useExpiryTick } from '../components/Common'
 import { useState, type ReactNode } from 'react'
 import { addEnv, setEnv, useDashboardCtx, type DashboardCtx } from '../hooks/useDashboardCtx'
 
@@ -18,7 +18,6 @@ export const PAGE_META: Record<string, PageMeta> = {
   '/deployments':     m('Deployments',   'read'),
   '/deployments/:id': m('flashcards',    'read'),
   '/stacks':          m('Stacks',        'read'),
-  '/agent':           m('Ask agent',     'agent'),
   '/vault':           m('Vault',         'read'),
   '/team':            m('Team',          'read'),
   '/billing':         m('Billing',       'write'),
@@ -54,8 +53,6 @@ function computeCrumb(routeKey: string, pathname: string, ctx: DashboardCtx): st
       return 'deployments / live'
     case '/stacks':
       return ctx.env
-    case '/agent':
-      return 'prompt library · ⌘K'
     case '/vault':
       return `${ctx.env} · ${ctx.counts.vault} entries`
     case '/team': {
@@ -103,11 +100,6 @@ const icons = {
       <polygon points="7,1 13,4 7,7 1,4" />
       <polyline points="1,7 7,10 13,7" />
       <polyline points="1,10 7,13 13,10" />
-    </svg>
-  ),
-  agent: (
-    <svg className="nav-icon" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth={1.5}>
-      <path d="M7 1l1.5 3.5L12 6l-3.5 1.5L7 11l-1.5-3.5L2 6l3.5-1.5z" />
     </svg>
   ),
   vault: (
@@ -159,6 +151,10 @@ function NavRow({ to, icon, children, badge, badgeStyle }: { to: string; icon: R
 export function AppShell() {
   const location = useLocation()
   const ctx = useDashboardCtx()
+  // Layout-level tick so countdown text in the banner stays fresh
+  // (badges on the page itself re-render naturally via this same tick
+  //  whenever the user navigates or interacts).
+  const now = useExpiryTick(60_000)
   const routeKey = routeIdToKey(location.pathname, location.pathname)
   const meta = getMeta(routeKey)
   const crumb = computeCrumb(routeKey, location.pathname, ctx)
@@ -180,7 +176,8 @@ export function AppShell() {
             <span style={{ color: 'var(--text-dim)' }}>{crumb}</span>
           </span>
           <div className="doc-meta">
-            <span className="live">live · v0.7</span>
+            {/* No build-time version constant exists — leaving the meta slot
+                empty until one does. (§10.2.) */}
           </div>
         </div>
       </header>
@@ -206,18 +203,6 @@ export function AppShell() {
             <NavRow to="/app/stacks" icon={icons.stacks}>Stacks</NavRow>
 
             <div className="nav-section">platform</div>
-            <NavRow
-              to="/app/agent"
-              icon={icons.agent}
-              badge="⌘K"
-              badgeStyle={{
-                background: 'rgba(183,148,246,0.08)',
-                color: 'var(--violet)',
-                border: '1px solid rgba(183,148,246,0.2)'
-              }}
-            >
-              Ask agent
-            </NavRow>
             <NavRow to="/app/vault" icon={icons.vault} badge={String(ctx.counts.vault)}>Vault</NavRow>
             <NavRow to="/app/team" icon={icons.team} badge={String(ctx.counts.team)}>Team</NavRow>
             <NavRow to="/app/billing" icon={icons.billing}>Billing</NavRow>
@@ -238,15 +223,7 @@ export function AppShell() {
             </NavRow>
 
             <div className="sidebar-footer">
-              <div className="upgrade-card">
-                <div className="label">→ pro · live</div>
-                <div className="body">
-                  <strong>9 days to renewal</strong>
-                  <br />
-                  <span className="dim">card on file · auto-charges May 19.</span>
-                </div>
-                <button className="cta">Manage plan →</button>
-              </div>
+              <SidebarUpgradeCard ctx={ctx} now={now} />
             </div>
           </aside>
 
@@ -254,27 +231,18 @@ export function AppShell() {
             <header className="topbar">
               <h1>{meta.title}</h1>
               <div className="breadcrumb">
-                <span>acme-corp</span>
+                <span>{ctx.me?.team?.name ?? ctx.me?.team?.slug ?? 'workspace'}</span>
                 <span className="sep">/</span>
                 <span className="cur">{crumb}</span>
               </div>
               <div className="topbar-tools">
                 <ScopePill scope={meta.scope} />
-                <button className="search">
-                  <span style={{ opacity: 0.6 }}>⌕</span>
-                  <span>Search…</span>
-                  <span className="kbd">⌘ /</span>
-                </button>
-                <button className="ask-agent" title="Open prompt library — ⌘K">
-                  <span style={{ opacity: 0.8 }}>✦</span>
-                  <span>Ask agent</span>
-                  <span className="kbd">⌘ K</span>
-                </button>
                 <div className="avatar" title="aanya@acme.dev">A</div>
               </div>
             </header>
 
             <div className="page-body">
+              <ExpiryWarningBanner resources={ctx.resources} now={now} />
               <Outlet />
             </div>
           </section>
@@ -282,6 +250,90 @@ export function AppShell() {
       </main>
     </>
   )
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// SidebarUpgradeCard — replaces the old hardcoded "9 days to renewal / card
+// on file · auto-charges May 19" block with live values from ctx.billing.
+//
+// Three states, three renders:
+//   - loading (no billing yet)          → small skeleton, no fake numbers
+//   - anonymous / free tier             → CTA to upgrade to Hobby
+//   - paid tier (hobby / pro / team)    → real next-renewal + payment hint
+//
+// "Manage plan →" is navigation, not an action — so it's a <Link>, never a
+// <button> with no onClick.
+function SidebarUpgradeCard({ ctx, now }: { ctx: DashboardCtx; now: number }) {
+  const tier = ctx.me?.team?.tier
+  const billing = ctx.billing
+  const loading = ctx.billingLoading
+
+  // Loading state — render a quiet skeleton instead of stale fixture text.
+  if (loading && !billing) {
+    return (
+      <div className="upgrade-card" data-testid="sidebar-upgrade-card-loading">
+        <div className="skel" style={{ width: '60%', height: 10, marginBottom: 8 }} />
+        <div className="skel" style={{ width: '90%', height: 10, marginBottom: 6 }} />
+        <div className="skel" style={{ width: '70%', height: 10 }} />
+      </div>
+    )
+  }
+
+  // Anonymous / free tier — there's nothing to renew. Show the upgrade
+  // wedge: $9 Hobby.
+  if (tier === 'anonymous' || tier === 'free' || tier === undefined) {
+    return (
+      <div className="upgrade-card" data-testid="sidebar-upgrade-card-anonymous">
+        <div className="label">→ hobby</div>
+        <div className="body">
+          <strong>Upgrade to Hobby</strong>
+          <br />
+          <span className="dim">$9/mo — keep resources past 24h.</span>
+        </div>
+        <Link to="/app/billing" className="cta" data-testid="sidebar-upgrade-cta">
+          Upgrade →
+        </Link>
+      </div>
+    )
+  }
+
+  // Paid tier — render real renewal date + payment hint, only when we
+  // actually have them. Never fall back to mock strings.
+  const renewalAt = billing?.current_period_end ? new Date(billing.current_period_end).getTime() : null
+  const renewalText = renewalAt ? formatDaysUntil(renewalAt, now) : null
+  const paymentHint =
+    billing?.payment_network && billing?.payment_last4
+      ? `${billing.payment_network.toLowerCase()} · ****${billing.payment_last4}`
+      : null
+
+  return (
+    <div className="upgrade-card" data-testid="sidebar-upgrade-card-paid">
+      <div className="label">{tier ? `→ ${tier} · live` : ''}</div>
+      <div className="body">
+        {renewalText ? (
+          <>
+            <strong>{renewalText}</strong>
+            <br />
+          </>
+        ) : null}
+        {paymentHint ? <span className="dim">{paymentHint}</span> : null}
+      </div>
+      <Link to="/app/billing" className="cta" data-testid="sidebar-manage-plan">
+        Manage plan →
+      </Link>
+    </div>
+  )
+}
+
+// Render an ms timestamp as a relative "N days to renewal" / "today" / etc.
+// Keeps the chrome honest when the period_end is just a day or two away.
+function formatDaysUntil(targetMs: number, nowMs: number): string {
+  const diffMs = targetMs - nowMs
+  const days = Math.round(diffMs / 86_400_000)
+  if (days < 0) return 'renewal overdue'
+  if (days === 0) return 'renews today'
+  if (days === 1) return '1 day to renewal'
+  return `${days} days to renewal`
 }
 
 // react-router gives us route-id strings — coerce to our PAGE_META key.

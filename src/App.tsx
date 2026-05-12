@@ -93,9 +93,6 @@ const BillingPage = lazy(() =>
 const SettingsPage = lazy(() =>
   import('./pages/SettingsPage').then((m) => ({ default: m.SettingsPage })),
 )
-const AgentPage = lazy(() =>
-  import('./pages/AgentPage').then((m) => ({ default: m.AgentPage })),
-)
 const ContractsPage = lazy(() =>
   import('./pages/ContractsPage').then((m) => ({ default: m.ContractsPage })),
 )
@@ -199,7 +196,6 @@ export function AppRoutes() {
           <Route path="team" element={<TeamPage />} />
           <Route path="billing" element={<BillingPage />} />
           <Route path="settings" element={<SettingsPage />} />
-          <Route path="agent" element={<AgentPage />} />
           <Route path="contracts" element={<ContractsPage />} />
         </Route>
 

@@ -4,6 +4,7 @@
 
 import { useState } from 'react'
 import { PublicShell } from '../layout/PublicShell'
+import { copyToClipboard } from '../components/Common'
 
 type TierKey = 'anonymous' | 'hobby' | 'pro' | 'team'
 
@@ -39,7 +40,12 @@ const ROWS: Row[] = [
   { label: 'Webhook stored', values: ['100', '1 000', '10k', SOON] },
   { label: 'Deploy apps', values: [{ mark: 'dash' }, '1 small', '10 medium', SOON] },
   { label: 'Domains',  values: [{ mark: 'dash' }, '*.deployment.instanode.dev', 'custom domain', SOON] },
-  { label: 'Multi-env',values: [{ mark: 'dash' }, { mark: 'dash' }, '✓ (dev/staging/prod + custom)', SOON] },
+  // Multi-env workflows (stack promotion + vault copy across envs) is a
+  // shipped Pro-tier feature: POST /api/v1/stacks/:slug/promote and
+  // POST /api/v1/vault/copy are live (RETRO-2026-05-12 §10.17). Hobby is
+  // single-env (production only); Pro / Team unlock dev / staging / prod
+  // with parent_stack_id linkage.
+  { label: 'Multi-env workflows', sub: 'stack promotion + vault copy', values: [{ mark: 'dash' }, { mark: 'dash' }, 'dev / staging / prod', SOON] },
   { label: 'RBAC + audit', values: [{ mark: 'dash' }, { mark: 'dash' }, { mark: 'dash' }, SOON] },
   { label: 'Vault entries', values: [{ mark: 'dash' }, '20', '200', SOON] },
   { label: 'Vault envs',    values: [{ mark: 'dash' }, 'production only', 'multi-env', SOON] },
@@ -58,7 +64,7 @@ const FAQ: { q: string; a: string }[] = [
   },
   {
     q: 'Can I move resources between envs?',
-    a: 'On Pro. Hobby is single-env. Team multi-env is coming soon.'
+    a: 'Yes — Pro and Team include multi-env workflows: POST /api/v1/stacks/:slug/promote moves a stack from staging to production (config + resource bindings preserved), and POST /api/v1/vault/copy bulk-copies vault secrets across envs with a dry-run preview. Hobby is single-env (production only).'
   },
   {
     q: 'What happens if I downgrade?',
@@ -206,13 +212,13 @@ function CellValue({ v }: { v: Cell }) {
 function CtaStrip({ command }: { command: string }) {
   const [copied, setCopied] = useState(false)
   const onCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(command)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1600)
-    } catch {
-      /* clipboard not available — fail silent */
+    const ok = await copyToClipboard(command)
+    if (!ok) {
+      console.warn('[PricingPage] copy failed — clipboard unavailable')
+      return
     }
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1600)
   }
   return (
     <section className="public-section pricing-cta-strip" id="try-curl" aria-labelledby="try-h">

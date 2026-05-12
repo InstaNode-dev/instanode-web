@@ -24,6 +24,7 @@ vi.mock('../api', async () => {
     ...actual,
     fetchBilling: vi.fn(),
     listInvoices: vi.fn(),
+    listResources: vi.fn(),
     createCheckout: vi.fn(),
     cancelSubscription: vi.fn(),
   }
@@ -59,6 +60,13 @@ function mockHappyBilling() {
   ;(api.listInvoices as any).mockResolvedValue({
     ok: true,
     invoices: FIXTURE_INVOICES,
+  })
+  // Default: no resources → Usage panel renders zeroes. Tests that care
+  // about specific usage figures override this themselves.
+  ;(api.listResources as any).mockResolvedValue({
+    ok: true,
+    items: [],
+    total: 0,
   })
 }
 
@@ -129,6 +137,7 @@ describe('BillingPage — initial render', () => {
   it('shows a skeleton while billing is loading', () => {
     ;(api.fetchBilling as any).mockReturnValue(new Promise(() => {}))   // never resolves
     ;(api.listInvoices as any).mockReturnValue(new Promise(() => {}))
+    ;(api.listResources as any).mockReturnValue(new Promise(() => {}))
     const { container } = render(<BillingPage />)
     expect(container.querySelector('.skel')).toBeTruthy()
   })
@@ -200,11 +209,15 @@ describe('BillingPage — initial render', () => {
     expect(api.listInvoices).toHaveBeenCalledTimes(1)
   })
 
-  it('renders the Cancel subscription button', async () => {
+  it('renders a Contact support link instead of a self-serve cancel button', async () => {
     mockHappyBilling()
     render(<BillingPage />)
     await waitForLoaded()
-    expect(screen.getByRole('button', { name: /cancel subscription/i })).toBeTruthy()
+    // Cancellation is intentionally not self-serve — must contact support.
+    expect(screen.queryByRole('button', { name: /cancel subscription/i })).toBeNull()
+    const link = screen.getByTestId('contact-support-cancel') as HTMLAnchorElement
+    expect(link.tagName).toBe('A')
+    expect(link.href.toLowerCase()).toContain('mailto:support@instanode.dev')
   })
 })
 
@@ -329,102 +342,27 @@ describe('BillingPage — handleChangePlan (upgrade flow)', () => {
   })
 })
 
-// ─── handleCancel ────────────────────────────────────────────────────────
-describe('BillingPage — handleCancel (cancellation flow)', () => {
-  it('prompts via window.confirm before calling cancelSubscription', async () => {
+// ─── No self-serve cancel ─────────────────────────────────────────────────
+// Cancellation must be support-mediated. The page must not call
+// api.cancelSubscription on any click — there is no in-product path.
+describe('BillingPage — cancellation is support-only', () => {
+  it('never calls api.cancelSubscription', async () => {
     mockTier = 'pro'
     mockHappyBilling()
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
     render(<BillingPage />)
     await waitForLoaded()
-    fireEvent.click(screen.getByRole('button', { name: /cancel subscription/i }))
-    expect(confirmSpy).toHaveBeenCalledTimes(1)
+    // Click every button on the page; none of them should fire cancelSubscription.
+    screen.queryAllByRole('button').forEach((b) => fireEvent.click(b))
     expect(api.cancelSubscription).not.toHaveBeenCalled()
   })
 
-  it('aborts when the user clicks Cancel in the confirm dialog', async () => {
+  it('exposes a mailto contact-support link in place of the cancel button', async () => {
     mockTier = 'pro'
     mockHappyBilling()
-    vi.spyOn(window, 'confirm').mockReturnValue(false)
     render(<BillingPage />)
     await waitForLoaded()
-    fireEvent.click(screen.getByRole('button', { name: /cancel subscription/i }))
-    // No cancel call AND no re-fetch on the page after the initial load.
-    expect(api.cancelSubscription).not.toHaveBeenCalled()
-    expect((api.fetchBilling as any).mock.calls.length).toBe(1)
-  })
-
-  it('calls api.cancelSubscription when confirm returns true', async () => {
-    mockTier = 'pro'
-    mockHappyBilling()
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
-    vi.spyOn(window, 'alert').mockImplementation(() => {})
-    ;(api.cancelSubscription as any).mockResolvedValue({ ok: true })
-    render(<BillingPage />)
-    await waitForLoaded()
-    fireEvent.click(screen.getByRole('button', { name: /cancel subscription/i }))
-    await waitFor(() => expect(api.cancelSubscription).toHaveBeenCalledTimes(1))
-  })
-
-  it('re-fetches billing after a successful cancel', async () => {
-    mockTier = 'pro'
-    mockHappyBilling()
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
-    vi.spyOn(window, 'alert').mockImplementation(() => {})
-    ;(api.cancelSubscription as any).mockResolvedValue({ ok: true })
-    render(<BillingPage />)
-    await waitForLoaded()
-    expect((api.fetchBilling as any).mock.calls.length).toBe(1)
-    fireEvent.click(screen.getByRole('button', { name: /cancel subscription/i }))
-    await waitFor(() => expect((api.fetchBilling as any).mock.calls.length).toBe(2))
-  })
-
-  it('shows the post-cancel alert message', async () => {
-    mockTier = 'pro'
-    mockHappyBilling()
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
-    const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {})
-    ;(api.cancelSubscription as any).mockResolvedValue({ ok: true })
-    render(<BillingPage />)
-    await waitForLoaded()
-    fireEvent.click(screen.getByRole('button', { name: /cancel subscription/i }))
-    await waitFor(() => expect(alertSpy).toHaveBeenCalled())
-    expect(alertSpy.mock.calls[0][0]).toMatch(/cancellation requested/i)
-  })
-
-  it('surfaces a cancel error in checkoutErr', async () => {
-    mockTier = 'pro'
-    mockHappyBilling()
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
-    ;(api.cancelSubscription as any).mockRejectedValue(new Error('no active subscription'))
-    const { container } = render(<BillingPage />)
-    await waitForLoaded()
-    fireEvent.click(screen.getByRole('button', { name: /cancel subscription/i }))
-    await waitFor(() => expect(container.textContent).toContain('no active subscription'))
-  })
-
-  it('falls back to "cancel failed" when the thrown error has no message', async () => {
-    mockTier = 'pro'
-    mockHappyBilling()
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
-    ;(api.cancelSubscription as any).mockRejectedValue({ /* no message */ })
-    const { container } = render(<BillingPage />)
-    await waitForLoaded()
-    fireEvent.click(screen.getByRole('button', { name: /cancel subscription/i }))
-    await waitFor(() => expect(container.textContent).toContain('cancel failed'))
-  })
-
-  it('does NOT re-fetch billing on a cancel error', async () => {
-    mockTier = 'pro'
-    mockHappyBilling()
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
-    ;(api.cancelSubscription as any).mockRejectedValue(new Error('boom'))
-    render(<BillingPage />)
-    await waitForLoaded()
-    fireEvent.click(screen.getByRole('button', { name: /cancel subscription/i }))
-    await waitFor(() => expect(api.cancelSubscription).toHaveBeenCalled())
-    // fetchBilling called once on mount only, never re-fetched on error.
-    expect((api.fetchBilling as any).mock.calls.length).toBe(1)
+    const link = screen.getByTestId('contact-support-cancel') as HTMLAnchorElement
+    expect(link.href.toLowerCase()).toContain('mailto:support@instanode.dev')
   })
 })
 
@@ -442,5 +380,110 @@ describe('BillingPage — userEvent integration', () => {
     await user.click(screen.getByRole('button', { name: /upgrade to pro/i }))
     await waitFor(() => expect(api.createCheckout).toHaveBeenCalledWith('pro'))
     await waitFor(() => expect(hrefSetTo).toBe('https://rzp.io/i/ue'))
+  })
+})
+
+// ─── Usage panel — real data from listResources() (§10.1) ───────────────
+// The old Usage panel hardcoded "47 / 500", "163 / 256", "1.64 / 2 GB", etc.
+// We now aggregate ctx.resources by type. These tests pin the contract:
+//   (a) values move when listResources moves,
+//   (b) the old fixture numbers no longer appear in the DOM.
+describe('BillingPage — Usage panel reflects listResources()', () => {
+  // Minimal Resource fixture factory — keeps the test contained.
+  function makePgResource(id: string, mb: number) {
+    return {
+      id,
+      token: id,
+      resource_type: 'postgres',
+      tier: 'hobby',
+      status: 'active',
+      name: id,
+      env: 'production',
+      storage_bytes: mb * 1024 * 1024,
+      storage_limit_bytes: 1024 * 1024 * 1024,
+      storage_exceeded: false,
+      expires_at: null,
+      created_at: new Date().toISOString(),
+    }
+  }
+
+  it('aggregates two postgres resources totalling 100 MB into one UsageRow', async () => {
+    mockTier = 'hobby'
+    mockHappyBilling()
+    ;(api.listResources as any).mockResolvedValue({
+      ok: true,
+      items: [makePgResource('p_a', 40), makePgResource('p_b', 60)],
+      total: 2,
+    })
+    const { container } = render(<BillingPage />)
+    await waitForLoaded()
+    // hobby postgres limit is 1024 MB → renders as "1 GB".
+    await waitFor(() => {
+      const text = container.textContent ?? ''
+      expect(text).toContain('100')
+      expect(text).toContain('1 GB')
+    })
+  })
+
+  it('renders 0 for the resource-driven UsageRows when the resource list is empty', async () => {
+    mockTier = 'hobby'
+    mockHappyBilling()
+    ;(api.listResources as any).mockResolvedValue({ ok: true, items: [], total: 0 })
+    const { container } = render(<BillingPage />)
+    await waitForLoaded()
+    await waitFor(() => {
+      const rows = container.querySelectorAll('.usage-row')
+      // 6 usage rows: postgres, redis, mongo, deployments, webhooks, team seats.
+      expect(rows.length).toBe(6)
+      // Resource-aggregated rows (postgres / redis / mongo / deployments /
+      // webhooks) must read "0 / …" when the list is empty. Team seats is a
+      // separate constant for now (no member-list endpoint) and is exempt.
+      const resourceRowKeys = ['postgres', 'redis', 'mongo', 'deployments', 'webhooks']
+      resourceRowKeys.forEach((key) => {
+        const row = Array.from(rows).find((r) => r.querySelector('.k')?.textContent === key)
+        expect(row, `missing usage row for ${key}`).toBeTruthy()
+        const num = row?.querySelector('.num')?.textContent ?? ''
+        expect(num.trim().startsWith('0')).toBe(true)
+      })
+    })
+  })
+
+  it('never renders the old hardcoded "47" Postgres fixture number', async () => {
+    mockTier = 'hobby'
+    mockHappyBilling()
+    const { container } = render(<BillingPage />)
+    await waitForLoaded()
+    expect(container.textContent).not.toMatch(/\b47\b/)
+  })
+})
+
+// ─── §10.8 cleanups: card expiry leak, invoice status, update mailto ────
+describe('BillingPage — §10.8 leak fixes', () => {
+  it('does not render the fabricated 9/27 card-expiry string', async () => {
+    mockTier = 'pro'
+    mockHappyBilling()
+    const { container } = render(<BillingPage />)
+    await waitForLoaded()
+    expect(container.textContent).not.toContain('9/27')
+  })
+
+  it('renders the real invoice status (paid), not a hardcoded "running" pill', async () => {
+    mockTier = 'pro'
+    mockHappyBilling()
+    const { container } = render(<BillingPage />)
+    await waitForLoaded()
+    // FIXTURE_INVOICES has three "paid" invoices — none are "running".
+    expect(container.textContent?.toLowerCase()).toContain('paid')
+    expect(container.textContent?.toLowerCase()).not.toContain('running')
+  })
+
+  it('exposes the Update payment-method action as a mailto link, not a dead button', async () => {
+    mockTier = 'pro'
+    mockHappyBilling()
+    render(<BillingPage />)
+    await waitForLoaded()
+    const link = screen.getByTestId('contact-support-update-payment') as HTMLAnchorElement
+    expect(link.tagName).toBe('A')
+    expect(link.href.toLowerCase()).toContain('mailto:support@instanode.dev')
   })
 })

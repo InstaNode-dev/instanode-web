@@ -1,22 +1,30 @@
 // Real API surface — talks to api.instanode.dev (via Vite proxy in dev,
-// same-origin in prod). Endpoints that do NOT exist on the live backend
-// (vault list, activity feed, team metadata, members CRUD) fall back to
-// fixtures so the dashboard remains usable end-to-end while engineering
-// catches up. Each fallback is annotated `[FIXTURE]` in the comment.
+// same-origin in prod).
+//
+// Mid-state, 2026-05-12: the §10.21 FIXTURE removal is in progress.
+//   - listStacks: cleaned (returns honest empty {items:[],total:0} on
+//     error). This is what /app/deployments consumes.
+//   - fetchTeam / updateTeam / listMembers / listInvitations / inviteMember:
+//     cleaned to honest derive-from-/auth/me or empty results.
+//   - getStack / getStackLogs / fetchActivity / fetchBilling 503 path /
+//     listInvoices 503 path / listVault: STILL use FIXTURE_* fallbacks.
+//     These are tracked under §10.21 to remove in a follow-up.
+//
+// The fixtures file is still imported below until that cleanup lands —
+// removing each usage requires a per-page UX decision (empty state vs.
+// error banner) that's easier to land in a focused PR.
 
-import { fake } from './client'
 import {
-  FIXTURE_STACKS,
-  FIXTURE_TEAM,
-  FIXTURE_USER,
-  FIXTURE_MEMBERS,
-  FIXTURE_INVITATIONS,
-  FIXTURE_BILLING,
-  FIXTURE_INVOICES,
-  FIXTURE_VAULT,
-  FIXTURE_ACTIVITY,
-  FIXTURE_BUILD_LOGS
+  FIXTURE_STACKS, FIXTURE_BUILD_LOGS, FIXTURE_BILLING, FIXTURE_INVOICES,
+  FIXTURE_VAULT, FIXTURE_ACTIVITY,
 } from './fixtures'
+
+// fake() — tiny helper for the remaining FIXTURE-fallback paths. Returns
+// the literal value as a resolved promise. Production code never calls
+// it on the happy path — only inside catch blocks for surfaces that
+// don't have a live API yet. Tracked for removal in §10.21.
+function fake<T>(value: T): Promise<T> { return Promise.resolve(value) }
+
 import type {
   Resource, DashboardStack, DashboardTeam, BillingDetails, Invoice,
   TeamMember, TeamInvitation, AuthMeResponse, VaultEntry, ActivityItem
@@ -164,32 +172,35 @@ export async function fetchMe(): Promise<AuthMeResponse> {
     tier: string
     trial_ends_at: string | null
   }
-  try {
-    const me = await call<AgentMe>('/auth/me')
-    return {
-      user: {
-        ...FIXTURE_USER,
-        id: me.user_id,
-        email: me.email,
-        team_id: me.team_id,
-        tier: me.tier as any,
-      },
-      team: {
-        ...FIXTURE_TEAM,
-        id: me.team_id,
-        // Derive a stable, non-fixture display name from the email's local
-        // part (the email is the only human-readable identity we have until
-        // a real team table exposes a slug).
-        slug: (me.email?.split('@')[0]?.toLowerCase().replace(/[^a-z0-9-]/g, '-')) || me.team_id.slice(0, 8),
-        name: (me.email?.split('@')[0]) || 'workspace',
-        tier: me.tier as any,
-      },
-    }
-  } catch (e: any) {
-    // 401 → bubble up so AuthGate can redirect.
-    if (e?.status === 401) throw e
-    // Other errors fall back to fixture so the demo keeps working.
-    return fake({ user: FIXTURE_USER, team: FIXTURE_TEAM })
+  // No try/catch — errors propagate. The previous fixture fallback masked
+  // backend outages by serving the `aanya@acme.dev` mock identity, which
+  // led to chrome lying ("acme-corp", "aanya@acme.dev") instead of
+  // surfacing the failure. (§10.21.1.) Callers handle errors:
+  //   - 401 → AuthGate redirects to /login
+  //   - other → useDashboardCtx records meErr; chrome shows a fallback
+  //     `workspace` placeholder and the page can render a banner.
+  const me = await call<AgentMe>('/auth/me')
+  // Derive a stable team slug from the email's local part — the only
+  // human-readable identity we have until a real team table exposes a slug.
+  const localPart = me.email?.split('@')[0] ?? ''
+  const slug = localPart.toLowerCase().replace(/[^a-z0-9-]/g, '-') || me.team_id.slice(0, 8)
+  return {
+    user: {
+      id: me.user_id,
+      email: me.email,
+      team_id: me.team_id,
+      tier: me.tier as any,
+      created_at: '',
+    },
+    team: {
+      id: me.team_id,
+      name: localPart || 'workspace',
+      slug,
+      owner_id: me.user_id,
+      member_count: 1,
+      tier: me.tier as any,
+      created_at: '',
+    },
   }
 }
 
@@ -198,61 +209,70 @@ export async function logout(): Promise<{ ok: true }> {
   return { ok: true }
 }
 
-// ─── Team (some surfaces missing on backend, fallback) ───────────────────
-// [FIXTURE] no GET /api/v1/team yet — fetchMe() returns enough team info.
+// ─── Team — honest empty/error states (no fixtures, §10.21.1) ────────────
 export async function fetchTeam(): Promise<{ ok: true; team: DashboardTeam }> {
-  try {
-    const me = await fetchMe()
-    return { ok: true, team: me.team }
-  } catch {
-    return fake({ ok: true as const, team: FIXTURE_TEAM })
-  }
+  // GET /api/v1/team isn't implemented yet — derive from /auth/me.
+  const me = await fetchMe()
+  return { ok: true, team: me.team }
 }
 
-export async function updateTeam(patch: { name?: string; display_name?: string }): Promise<{ ok: true; team: DashboardTeam }> {
-  // [FIXTURE] no PATCH /api/v1/team yet.
-  return fake({ ok: true as const, team: { ...FIXTURE_TEAM, ...patch } })
+export async function updateTeam(_patch: { name?: string; display_name?: string }): Promise<{ ok: true; team: DashboardTeam }> {
+  // PATCH /api/v1/team isn't implemented. Return current team unchanged
+  // and let the caller surface "this isn't editable yet" to the user.
+  const me = await fetchMe()
+  return { ok: true, team: me.team }
 }
 
 export async function listMembers(): Promise<{ ok: true; members: TeamMember[]; member_limit: number }> {
-  // LIVE — `GET /api/v1/team/members` shipped in v1.0.0.
-  // Falls back to a single-owner row derived from /auth/me when the call fails.
+  // LIVE — `GET /api/v1/team/members`. On failure (other than 401),
+  // fall back to a single-owner row derived from /auth/me — that's
+  // honest minimum data the user is guaranteed to own.
+  type Resp = { ok: boolean; members: any[]; member_limit: number }
   try {
-    type Resp = { ok: boolean; members: any[]; member_limit: number }
     const r = await call<Resp>('/api/v1/team/members')
     const members: TeamMember[] = (r.members ?? []).map((m) => ({
-      ...FIXTURE_MEMBERS[0],
       user_id: m.user_id,
       email: m.email,
       role: m.role,
       joined_at: m.joined_at,
-    } as TeamMember))
+      created_at: m.joined_at,
+      display_name: m.display_name ?? m.email,
+      id: m.user_id,
+    }) as unknown as TeamMember)
     return { ok: true, members, member_limit: r.member_limit ?? -1 }
   } catch (e: any) {
     if (e?.status === 401) throw e
-    try {
-      const me = await fetchMe()
-      return {
-        ok: true,
-        members: [{ ...FIXTURE_MEMBERS[0], user_id: me.user.id, email: me.user.email } as TeamMember],
-        member_limit: 999,
-      }
-    } catch {
-      return fake({ ok: true as const, members: FIXTURE_MEMBERS, member_limit: 999 })
+    // Honest fallback: a single owner row built from /auth/me. Not a fixture.
+    const me = await fetchMe()
+    return {
+      ok: true,
+      members: [{
+        id: me.user.id,
+        user_id: me.user.id,
+        email: me.user.email,
+        role: 'owner',
+        joined_at: me.user.created_at,
+        created_at: me.user.created_at,
+        display_name: me.user.email,
+      } as unknown as TeamMember],
+      member_limit: -1,
     }
   }
 }
 
 export async function listInvitations(): Promise<{ ok: true; invitations: TeamInvitation[] }> {
-  // The agent API has /api/v1/teams/:id/invitations — different shape and
-  // requires team_id in path. Mapping the live response to dashboard's
-  // TeamInvitation shape is a follow-up; using fixtures for now.
-  return fake({ ok: true as const, invitations: FIXTURE_INVITATIONS })
+  // GET /api/v1/teams/:id/invitations exists on the agent API but the
+  // dashboard adapter isn't wired yet. Return empty until then — better
+  // than fabricating pending invites that don't exist.
+  return { ok: true, invitations: [] }
 }
 
 export async function inviteMember(_body: { email: string; role: string }): Promise<{ ok: true }> {
-  // [FIXTURE] no /api/v1/team/members/invite — agent-driven in this model.
-  return fake({ ok: true as const })
+  // The team-invite flow is agent-driven in this product (see TeamPage
+  // PromptCard). The dashboard never POSTs invitations directly. Return
+  // ok so any legacy callers don't break; the actual invite is sent by
+  // the agent running the user's prompt.
+  return { ok: true }
 }
 
 // ─── Resources (LIVE) ───────────────────────────────────────────────────
@@ -317,12 +337,45 @@ export async function rotateResource(id: string): Promise<{ ok: true; connection
   }
 }
 
-// ─── Stacks / deployments (partial: deployments live, stacks fixture) ───
+// ─── Stacks / deployments ───
+// GET /api/v1/stacks exists on the agent API but returns a thinner shape than
+// the dashboard's DashboardStack (no env, no url, no last_deploy_at, no
+// build_duration_s yet). We adapt what's available and leave optional fields
+// undefined — the UI handles missing fields gracefully. Until POST /deploy/new
+// ships in Phase 1, expect this to return an empty list for most teams.
+type StacksListResp = {
+  ok: boolean
+  items?: Array<{
+    stack_id?: string
+    name?: string
+    status?: string
+    tier?: string
+    namespace?: string
+    created_at?: string
+  }>
+  total?: number
+}
+
 export async function listStacks(): Promise<{ ok: true; items: DashboardStack[]; total: number }> {
-  // The agent API has /api/v1/stacks but the dashboard's DashboardStack
-  // shape is denser than what the API returns. Falling back to fixtures
-  // until the shapes align.
-  return fake({ ok: true as const, items: FIXTURE_STACKS, total: FIXTURE_STACKS.length })
+  try {
+    const r = await call<StacksListResp>('/api/v1/stacks')
+    const items: DashboardStack[] = (r.items ?? []).map((s) => ({
+      id: s.stack_id ?? '',
+      slug: s.stack_id ?? '',
+      name: s.name ?? '',
+      status: (s.status as DashboardStack['status']) ?? 'building',
+      url: null,
+      created_at: s.created_at ?? '',
+      team_id: '',
+      env: 'production',
+      tier: (s.tier as DashboardStack['tier']) ?? 'free',
+    }))
+    return { ok: true, items, total: r.total ?? items.length }
+  } catch {
+    // Auth missing, endpoint unavailable, or other transient — show honest
+    // empty state rather than fixture data.
+    return { ok: true, items: [], total: 0 }
+  }
 }
 
 export async function getStack(slug: string): Promise<{ ok: true; stack: DashboardStack }> {
@@ -512,9 +565,11 @@ export async function listVault(env: string): Promise<{ ok: true; entries: Vault
     const entries: VaultEntry[] = (r.keys ?? []).map((key) => ({
       key,
       env,
-      // Backend doesn't expose rotated_at / last_read_at on the list; UI
-      // shows them when present. Filling with synthesised values.
-      rotated_at: new Date().toISOString(),
+      // Backend doesn't expose rotated_at / last_read_at on the list; the UI
+      // shows them only when the api actually returns a value. Leaving
+      // rotated_at null here so VaultPage hides the "rotated …" chip
+      // instead of fabricating "just now" for every row.
+      rotated_at: null,
       last_read_at: null,
       reads_24h: 0,
       deploys: 0,

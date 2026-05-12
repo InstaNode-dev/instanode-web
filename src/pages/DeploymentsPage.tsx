@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
-  ContractBanner, EnvPill, StatusPill, ResourceIcon, RelTime, PromptPill
+  ContractBanner, EnvPill, StatusPill, ResourceIcon, RelTime
 } from '../components/Common'
 import * as api from '../api'
 import type { DashboardStack } from '../api'
@@ -29,19 +29,6 @@ export function DeploymentsPage() {
         Status enum: <code>building | running | failed | stopped</code>.
       </ContractBanner>
 
-      <div className="filters">
-        <button className="chip on">all</button>
-        <button className="chip">running · 2</button>
-        <button className="chip">building · 1</button>
-        <button className="chip">failed · 0</button>
-        <span style={{ width: 1, background: 'var(--border)', alignSelf: 'stretch', margin: '0 6px' }} />
-        <button className="chip">prod · 2</button>
-        <button className="chip">staging · 1</button>
-        <span style={{ marginLeft: 'auto' }}>
-          <PromptPill label="deploy this app" />
-        </span>
-      </div>
-
       <div className="table">
         <div className="table-row head" style={{ gridTemplateColumns: '1.5fr 1fr 100px 80px 100px 80px 28px' }}>
           <span>name</span>
@@ -55,6 +42,27 @@ export function DeploymentsPage() {
         {loading && (
           <div className="table-row" style={{ gridTemplateColumns: '1fr', textAlign: 'center', padding: 32 }}>
             <span className="skel" style={{ width: '60%', height: 18, margin: '0 auto' }} />
+          </div>
+        )}
+        {!loading && items.length === 0 && (
+          <div
+            className="table-row"
+            style={{
+              gridTemplateColumns: '1fr',
+              textAlign: 'center',
+              padding: '40px 24px',
+              color: 'var(--text-dim)',
+              fontSize: 13,
+              lineHeight: 1.6,
+            }}
+          >
+            <div>
+              <strong style={{ color: 'var(--text)', fontWeight: 500 }}>No deployments yet.</strong>
+              <div style={{ marginTop: 6 }}>
+                Deployment lands in Phase 1 — see roadmap. For now, use kubectl on your own
+                cluster or contact <a href="mailto:support@instanode.dev">support</a>.
+              </div>
+            </div>
           </div>
         )}
         {items.map((d) => (

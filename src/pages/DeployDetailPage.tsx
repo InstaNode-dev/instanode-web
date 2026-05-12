@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import {
-  ROBanner, ContractBanner, EnvPill, StatusPill, TierPill, ResourceIcon, PromptPill, PromptCard
+  ROBanner, ContractBanner, EnvPill, StatusPill, TierPill, ResourceIcon, PromptCard
 } from '../components/Common'
 import { CustomDomainPanel } from '../components/CustomDomainPanel'
 import { useDashboardCtx } from '../hooks/useDashboardCtx'
@@ -14,6 +14,20 @@ import { streamSSE } from '../lib/sseStream'
 // /api/v1/stacks/:slug/domains endpoint returns 402 upgrade_required
 // for anything outside this set.
 const CUSTOM_DOMAIN_TIERS: ReadonlySet<Tier> = new Set(['pro', 'team', 'growth'])
+
+// Tiers that have access to multi-env workflows (stack promotion + vault
+// copy). Matches the API-side allowlist in handlers/stack.go:
+// multiEnvTierAllowed — anything outside this set gets 402 + agent_action
+// from POST /api/v1/stacks/:slug/promote and POST /api/v1/vault/copy.
+//
+// Hobby is intentionally excluded: multi-env is the differentiator that
+// justifies the Pro tier (RETRO-2026-05-12 §4 / §10.17).
+const MULTI_ENV_TIERS: ReadonlySet<Tier> = new Set(['pro', 'team', 'growth'])
+
+// Target env the "Promote staging → production" PromptCard defaults to.
+// Matches the convention in the vault env-allowlist and the API-side
+// `validatePromoteEnv` helper.
+const PROMOTE_DEFAULT_TARGET = 'production'
 
 // In-app billing route. Mirrors the path used elsewhere in the dashboard
 // for the upgrade journey.
@@ -77,7 +91,6 @@ export function DeployDetailPage() {
             </a>
           )}
         </div>
-        <PromptPill label="ask agent" />
       </div>
 
       <ROBanner>
@@ -93,13 +106,12 @@ export function DeployDetailPage() {
           <button key={t} className={`tab ${tab === t ? 'active' : ''}`} onClick={() => setTab(t)}>
             {t}
             {(t === 'Logs') && <span className="tag">live</span>}
-            {(t === 'Resources') && <span className="tag">3</span>}
             {(t === 'Metrics' || t === 'Audit') && <span className="tag">blocked</span>}
           </button>
         ))}
       </div>
 
-      {tab === 'Overview' && <Overview d={d} />}
+      {tab === 'Overview' && <Overview d={d} tier={tier} />}
       {tab === 'Logs' && <LiveBuild d={d} />}
       {tab === 'Env vars' && <EnvVars />}
       {tab === 'Resources' && <BoundResources />}
@@ -136,32 +148,169 @@ function CustomDomainUpsell() {
   )
 }
 
-function Overview({ d }: { d: DashboardStack }) {
+function Overview({ d, tier }: { d: DashboardStack; tier: Tier }) {
+  // Pro+ unlocks multi-env workflows. Hobby / anonymous see the upsell card
+  // — the API enforces the same gate with a 402 + agent_action, so the UI
+  // tier check stays in sync with server policy by design.
+  const canPromote = MULTI_ENV_TIERS.has(tier)
+  // Determine sensible from/to defaults for the Promote prompt. If the
+  // current stack is already production, suggest promoting INTO it from
+  // staging; otherwise suggest promoting the current env → production.
+  const fromEnv = d.env === PROMOTE_DEFAULT_TARGET ? 'staging' : (d.env || 'staging')
+  const toEnv  = d.env === PROMOTE_DEFAULT_TARGET ? d.env : PROMOTE_DEFAULT_TARGET
   return (
     <>
       <LiveBuild d={d} />
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, margin: '24px 0' }}>
         <PromptCard
           title="Redeploy"
-          prompt={<>Redeploy <em>{d.name}</em> from the latest commit</>}
+          prompt={
+            <>
+              Redeploy <em>{d.name}</em> (stack <code>{d.slug}</code>) from the latest commit on
+              the configured branch.
+            </>
+          }
+          promptText={
+            `Redeploy my instanode stack "${d.name}" from the latest commit.\n` +
+            `\n` +
+            `- Stack slug: ${d.slug}\n` +
+            `- Endpoint: POST https://api.instanode.dev/api/v1/stacks/${d.slug}/redeploy\n` +
+            `- Auth: use my INSTANODE_TOKEN env var as Bearer\n` +
+            `\n` +
+            `The build pulls HEAD of the configured branch, rebuilds the container, and rolls out with zero downtime. Stream build logs from GET /api/v1/stacks/${d.slug}/logs/:svc if you want to watch it.`
+          }
           method="POST"
-          endpoint={`/stacks/${d.slug}/redeploy`}
+          endpoint={`/api/v1/stacks/${d.slug}/redeploy`}
         />
         <PromptCard
           title="Rollback"
-          prompt={<>Roll <em>{d.name}</em> back to the last healthy build</>}
+          prompt={
+            <>
+              Roll <em>{d.name}</em> back to the last healthy build. Existing
+              connections drain over ~10 seconds.
+            </>
+          }
+          promptText={
+            `Roll my instanode stack "${d.name}" back to the last healthy build.\n` +
+            `\n` +
+            `- Stack slug: ${d.slug}\n` +
+            `- Endpoint: POST https://api.instanode.dev/api/v1/stacks/${d.slug}/rollback\n` +
+            `- Auth: use my INSTANODE_TOKEN env var as Bearer\n` +
+            `\n` +
+            `Rollback switches the active deployment back to the previous successful build. Existing in-flight requests drain over ~10 seconds before the old container is stopped. No data loss — only the application binary changes.`
+          }
           method="POST"
-          endpoint={`/stacks/${d.slug}/rollback`}
+          endpoint={`/api/v1/stacks/${d.slug}/rollback`}
         />
         <PromptCard
           danger
           title="Stop"
-          prompt={<>Stop the <em>{d.name}</em> deployment</>}
+          prompt={
+            <>
+              Stop the <em>{d.name}</em> deployment. Resources (db, cache, storage) stay claimed —
+              only the app container is removed.
+            </>
+          }
+          promptText={
+            `Stop my instanode deployment "${d.name}".\n` +
+            `\n` +
+            `- Stack slug: ${d.slug}\n` +
+            `- Endpoint: POST https://api.instanode.dev/api/v1/stacks/${d.slug}/stop\n` +
+            `- Auth: use my INSTANODE_TOKEN env var as Bearer\n` +
+            `\n` +
+            `This terminates the app container. The attached resources (Postgres, Redis, Mongo, storage, webhooks) remain claimed and reachable via their connection_urls — only the running app goes away. To bring it back up, redeploy from the latest commit.`
+          }
           method="POST"
-          endpoint={`/stacks/${d.slug}/stop`}
+          endpoint={`/api/v1/stacks/${d.slug}/stop`}
         />
       </div>
+
+      {/* Environments section — Pro+ feature. Promote one env to another.
+          For non-Pro tiers, render an inline upsell that mirrors the
+          custom-domains pattern. */}
+      <section style={{ marginTop: 32 }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, marginBottom: 12 }}>
+          <h3 style={{ fontSize: 14, fontWeight: 500, color: 'var(--text)', margin: 0 }}>
+            Environments
+          </h3>
+          <span style={{ fontSize: 11.5, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>
+            production · staging · dev
+          </span>
+          {canPromote && (
+            <span className="tag" style={{ marginLeft: 'auto' }}>pro</span>
+          )}
+        </div>
+
+        {canPromote ? (
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <PromptCard
+              title={`Promote ${fromEnv} → ${toEnv}`}
+              prompt={
+                <>
+                  Promote the <em>{d.name}</em> stack from <code>{fromEnv}</code> to{' '}
+                  <code>{toEnv}</code>. Config (image, env-var bindings, resource
+                  bindings) is copied to the target env.
+                </>
+              }
+              promptText={
+                `Promote my instanode stack "${d.name}" from ${fromEnv} to ${toEnv}.\n` +
+                `\n` +
+                `- Source stack slug: ${d.slug}\n` +
+                `- Endpoint: POST https://api.instanode.dev/api/v1/stacks/${d.slug}/promote\n` +
+                `- Auth: use my INSTANODE_TOKEN env var as Bearer\n` +
+                `- Body: {"from":"${fromEnv}","to":"${toEnv}"}\n` +
+                `\n` +
+                `The promote endpoint copies the stack's config (image binding, resource bindings, name) to a sibling stack in the target env. If the target env already has a sibling, its status is reset to "building" (in-place re-promote); otherwise a new stack row is created with parent_stack_id pointing at the source. Poll GET /stacks/<new-slug> for status. Returns 402 with agent_action on free / hobby tiers.`
+              }
+              method="POST"
+              endpoint={`/api/v1/stacks/${d.slug}/promote`}
+            />
+            <PromptCard
+              title={`Copy vault secrets ${fromEnv} → ${toEnv}`}
+              prompt={
+                <>
+                  Bulk-copy vault entries from <code>{fromEnv}</code> to{' '}
+                  <code>{toEnv}</code>. Default: skip existing keys. Use{' '}
+                  <code>dry_run:true</code> to preview the plan first.
+                </>
+              }
+              promptText={
+                `Copy my instanode vault secrets from ${fromEnv} to ${toEnv}.\n` +
+                `\n` +
+                `- Endpoint: POST https://api.instanode.dev/api/v1/vault/copy\n` +
+                `- Auth: use my INSTANODE_TOKEN env var as Bearer\n` +
+                `- Body: {"from":"${fromEnv}","to":"${toEnv}","dry_run":true}\n` +
+                `\n` +
+                `Set dry_run=true to preview the per-key plan (copy / overwrite / skip / missing / quota_exceeded). Drop it to actually persist. Use {"overwrite": true} to bump existing target-env keys to a new version. Pro / Team only — returns 402 with agent_action otherwise.`
+              }
+              method="POST"
+              endpoint={`/api/v1/vault/copy`}
+            />
+          </div>
+        ) : (
+          <PromoteUpsell />
+        )}
+      </section>
     </>
+  )
+}
+
+// Tier-gated upsell shown to hobby / anonymous users on the Environments
+// section. Mirrors CustomDomainUpsell so the visual style stays consistent.
+function PromoteUpsell() {
+  return (
+    <section className="card" style={{ padding: '14px 18px', display: 'flex', alignItems: 'center', gap: 12 }}>
+      <div style={{ flex: 1 }}>
+        <div style={{ fontSize: 13, color: 'var(--text)' }}>
+          <strong style={{ fontWeight: 500 }}>Multi-env workflows</strong>{' '}
+          <span style={{ color: 'var(--text-dim)' }}>
+            (promote staging → production · bulk-copy vault secrets between envs)
+            ship with Pro. Hobby is single-env (production only).
+          </span>
+        </div>
+      </div>
+      <a href={BILLING_PATH} className="btn btn-primary btn-sm">Upgrade to Pro →</a>
+    </section>
   )
 }
 
@@ -220,7 +369,7 @@ function LiveBuild({ d }: { d: DashboardStack }) {
           <span className={`phase ${d.status === 'running' ? 'done' : 'next'}`}>rolling</span>
           {d.status === 'running' && (
             <span style={{ marginLeft: 'auto', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--accent)' }}>
-              ✓ live · {d.build_duration_s ?? 38}s
+              ✓ live{d.build_duration_s != null ? ` · ${d.build_duration_s}s` : ''}
             </span>
           )}
         </div>
@@ -252,23 +401,20 @@ function LiveBuild({ d }: { d: DashboardStack }) {
         </div>
       </div>
       <aside className="build-side">
-        <SideKv title="build" rows={[
-          ['started', '14:42:01'], ['duration', d.status === 'running' ? `${d.build_duration_s ?? 38}s` : 'in progress'],
-          ['image', '142 MB'], ['exit', d.status === 'running' ? '0' : '—']
-        ]} />
-        <SideKv title="runtime" rows={[
-          ['replicas', '2'], ['memory', '512 MB'], ['cpu', '2 vCPU'], ['port', '3000'], ['region', 'iad-1']
-        ]} />
-        <div>
-          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>commit</div>
-          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11.5, color: 'var(--text)', lineHeight: 1.7 }}>
-            <div style={{ color: 'var(--text-dim)' }}>a31fc8de</div>
-            <div style={{ fontFamily: 'var(--font-display)', fontSize: 12, color: 'var(--text-dim)', marginTop: 4, lineHeight: 1.45 }}>
-              "add staging env support &amp; tags column"
-            </div>
-            <div style={{ marginTop: 6, color: 'var(--text-faint)' }}>marcus · 12m ago</div>
-          </div>
-        </div>
+        <SideKv
+          title="build"
+          rows={[
+            [
+              'duration',
+              d.build_duration_s != null
+                ? `${d.build_duration_s}s`
+                : d.status === 'building'
+                ? 'in progress'
+                : '—',
+            ],
+            ['status', d.status],
+          ]}
+        />
       </aside>
     </div>
   )
@@ -294,50 +440,25 @@ function SideKv({ title, rows }: { title: string; rows: [string, string][] }) {
 
 function EnvVars() {
   return (
-    <>
-      <h3 style={{ fontSize: 14, margin: '16px 0 12px', color: 'var(--text)', fontWeight: 500 }}>
-        Env vars · 4 · last edit triggered redeploy 12m ago
-      </h3>
-      <div style={{ border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden', background: 'var(--ink)' }}>
-        <div className="env-row head">
-          <span>key</span>
-          <span>value</span>
-          <span>source</span>
-          <span></span>
-        </div>
-        <div className="env-row">
-          <span className="key">DATABASE_URL</span>
-          <span className="val">postgres://usr_xY9z2…@db.instanode.dev:5432/d_xY9z2k7m</span>
-          <span className="src-pill inline">inline</span>
-          <button className="res-action">⋯</button>
-        </div>
-        <div className="env-row from-vault">
-          <span className="key">STRIPE_SECRET_KEY</span>
-          <span className="val vault">⚷ vault://prod/STRIPE_SECRET_KEY</span>
-          <span className="src-pill vault">vault</span>
-          <button className="res-action">⋯</button>
-        </div>
-        <div className="env-row from-vault">
-          <span className="key">OPENAI_API_KEY</span>
-          <span className="val vault">⚷ vault://prod/OPENAI_API_KEY</span>
-          <span className="src-pill vault">vault</span>
-          <button className="res-action">⋯</button>
-        </div>
-        <div className="env-row">
-          <span className="key">NODE_ENV</span>
-          <span className="val">production</span>
-          <span className="src-pill inline">inline</span>
-          <button className="res-action">⋯</button>
-        </div>
+    <div style={{ padding: 24, color: 'var(--text-dim)', fontSize: 13, lineHeight: 1.6 }}>
+      <strong style={{ color: 'var(--text)', fontWeight: 500 }}>No env vars to show yet.</strong>
+      <div style={{ marginTop: 8 }}>
+        Env vars come from your Dockerfile + the vault. View them with{' '}
+        <code>kubectl get deploy &lt;name&gt; -o yaml</code>. A per-deploy{' '}
+        <code>/env</code> endpoint ships in Phase 1.
       </div>
-    </>
+    </div>
   )
 }
 
 function BoundResources() {
   return (
-    <div style={{ padding: 24, color: 'var(--text-dim)', fontSize: 13 }}>
-      Resources bound to this deployment — flashcards-db, cache-sessions, render-queue. (mocked)
+    <div style={{ padding: 24, color: 'var(--text-dim)', fontSize: 13, lineHeight: 1.6 }}>
+      <strong style={{ color: 'var(--text)', fontWeight: 500 }}>No bound resources to show yet.</strong>
+      <div style={{ marginTop: 8 }}>
+        Resources are bound at deploy time. List them via{' '}
+        <code>GET /api/v1/stacks/:slug</code> once the endpoint is live.
+      </div>
     </div>
   )
 }

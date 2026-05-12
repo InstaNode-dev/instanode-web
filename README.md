@@ -20,9 +20,11 @@ npm install
 npm run dev      # Vite dev server at http://localhost:5173
 ```
 
-To point the dev proxy at a local k8s cluster:
+To point the dev proxy at a local k8s cluster (the Service is ClusterIP — NodePort
+retired 2026-05-11 — so port-forward `svc/instant-api` first):
 ```bash
-AGENT_API_URL=http://localhost:30080 npm run dev
+kubectl port-forward -n instant svc/instant-api 8080:8080 &
+AGENT_API_URL=http://localhost:8080 npm run dev
 ```
 
 To run unit tests:
@@ -87,8 +89,10 @@ http://localhost:5173/claim?t=<jwt>
 107 tests covering auth guards, the upgrade journey, and resource interactions.
 
 ```bash
-# Requires: Vite dev server running (npm run dev) + agent API at localhost:30080
-E2E_API_URL=http://localhost:30080 npx playwright test --project=chromium
+# Requires: Vite dev server running (npm run dev) + agent API port-forwarded
+# (Service is ClusterIP; NodePort retired):
+#   kubectl port-forward -n instant svc/instant-api 8080:8080
+E2E_API_URL=http://localhost:8080 npx playwright test --project=chromium
 
 # Run a single spec
 npx playwright test e2e/auth-guards.spec.ts --project=chromium
@@ -108,7 +112,7 @@ npx playwright test --headed --project=chromium
 | `AGENT_API_URL` | Upstream the Vite dev proxy points at | `http://api.instanode.dev` |
 | `VITE_API_URL` | Build-time override for the production bundle | `https://api.instanode.dev` |
 | `VITE_NO_PROXY` | Disables Vite proxy (set to `1` in E2E) | unset |
-| `E2E_API_URL` | Agent API base URL used by Playwright tests | `http://localhost:30080` |
+| `E2E_API_URL` | Agent API base URL used by Playwright tests (port-forward `svc/instant-api` first) | `http://localhost:8080` |
 
 ---
 

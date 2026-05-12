@@ -1,8 +1,14 @@
 import { FormEvent, useEffect, useState } from 'react'
+import { PromptCard, copyToClipboard } from '../components/Common'
 import * as api from '../api'
 import type { APIKey, APIKeyCreated } from '../api'
 import { useDashboardCtx } from '../hooks/useDashboardCtx'
 
+// PAT creation stays clickable here because it's the bootstrap surface:
+// the user's FIRST token has to come from the dashboard session — the
+// agent can't mint its own credentials before having any credentials.
+// Revocation, on the other hand, goes through the agent like every
+// other mutation.
 export function SettingsPage() {
   const ctx = useDashboardCtx()
   const [keys, setKeys] = useState<APIKey[]>([])
@@ -25,16 +31,6 @@ export function SettingsPage() {
   }
 
   useEffect(() => { refresh() }, [])
-
-  async function revoke(id: string) {
-    if (!window.confirm('Revoke this token? Any agent or CI using it will start failing.')) return
-    try {
-      await api.revokeAPIKey(id)
-      await refresh()
-    } catch (e: any) {
-      setErr(e?.message ?? 'revoke failed')
-    }
-  }
 
   return (
     <>
@@ -76,7 +72,10 @@ export function SettingsPage() {
           </div>
           <code data-testid="created-token-value" style={{ display: 'block', background: 'var(--ink)', padding: 10, borderRadius: 4, fontSize: 12, wordBreak: 'break-all', color: 'var(--accent)' }}>{created.key}</code>
           <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-            <button className="btn btn-sm btn-secondary" onClick={() => navigator.clipboard.writeText(created.key)}>copy</button>
+            <button className="btn btn-sm btn-secondary" onClick={async () => {
+              const ok = await copyToClipboard(created.key)
+              if (!ok) console.warn('[SettingsPage] copy failed — clipboard unavailable')
+            }}>copy</button>
             <button className="btn btn-sm btn-ghost" onClick={() => setCreated(null)}>dismiss</button>
           </div>
         </div>
@@ -131,20 +130,42 @@ export function SettingsPage() {
                   ) : null}
                 </div>
                 <div>
-                  {!k.revoked && (
-                    <button
-                      className="btn btn-sm btn-ghost"
-                      style={{ color: 'var(--rose)' }}
-                      onClick={() => revoke(k.id)}
-                    >
-                      revoke
-                    </button>
+                  {k.revoked ? null : (
+                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10.5, color: 'var(--text-faint)' }}>
+                      revoke via agent ↓
+                    </span>
                   )}
                 </div>
               </div>
             ))}
           </div>
         )}
+      </div>
+
+      <div style={{ marginTop: 16 }}>
+        <PromptCard
+          danger
+          title="Revoke a token"
+          hint="via agent"
+          prompt={
+            <>
+              Revoke a personal access token. Any agent, CI workflow, or script using it
+              starts failing within seconds — make sure nothing live depends on the token
+              before sending.
+            </>
+          }
+          promptText={
+            `Revoke a personal access token on my instanode account.\n` +
+            `\n` +
+            `- Token id (copy from the list on dashboard /settings): <token-id>\n` +
+            `- Endpoint: DELETE https://api.instanode.dev/api/v1/api-keys/<token-id>\n` +
+            `- Auth: use my INSTANODE_TOKEN env var as Bearer (a DIFFERENT token — you cannot revoke the token you're authenticating with)\n` +
+            `\n` +
+            `Before revoking: check that nothing live depends on this token. Common places to look: my agent's INSTANODE_TOKEN env var, .github/workflows/*.yml, any CI secret called INSTANODE_*, any deployed service env. After revoke, any caller using it will get 401 within seconds.`
+          }
+          method="DELETE"
+          endpoint={`/api/v1/api-keys/<token-id>`}
+        />
       </div>
     </>
   )

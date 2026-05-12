@@ -3,7 +3,7 @@
 // Source of truth: /InstaNode/api/internal/handlers/*
 // ------------------------------------------------------------------
 
-export type Tier = 'anonymous' | 'hobby' | 'pro' | 'team' | 'growth'
+export type Tier = 'anonymous' | 'free' | 'hobby' | 'pro' | 'team' | 'growth'
 export type Role = 'owner' | 'admin' | 'developer' | 'viewer'
 export type Env = 'production' | 'staging' | 'development' | string
 
@@ -133,7 +133,8 @@ export interface VaultEntry {
   env: Env
   team_id: string
   created_at: string
-  rotated_at: string
+  /** Backend doesn't expose rotated_at on the list endpoint yet — undefined until it does. */
+  rotated_at?: string | null
   last_read_at?: string
   read_count: number
   deploys_using: number
