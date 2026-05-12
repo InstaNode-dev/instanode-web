@@ -320,11 +320,12 @@ export async function rotateResource(id: string): Promise<{ ok: true; connection
 }
 
 // ─── Stacks / deployments ───
-// GET /api/v1/stacks exists on the agent API but returns a thinner shape than
-// the dashboard's DashboardStack (no env, no url, no last_deploy_at, no
-// build_duration_s yet). We adapt what's available and leave optional fields
-// undefined — the UI handles missing fields gracefully. Until POST /deploy/new
-// ships in Phase 1, expect this to return an empty list for most teams.
+// GET /api/v1/stacks returns one row per stack including the real env
+// (production / staging / dev / ...) and parent_stack_id linkage. We adapt
+// the shape into DashboardStack and leave still-missing fields (url,
+// last_deploy_at, build_duration_s) undefined — the UI handles missing
+// fields gracefully. Until POST /deploy/new ships in Phase 1, expect this
+// to return an empty list for most teams.
 type StacksListResp = {
   ok: boolean
   items?: Array<{
@@ -333,6 +334,8 @@ type StacksListResp = {
     status?: string
     tier?: string
     namespace?: string
+    env?: string
+    parent_stack_id?: string
     created_at?: string
   }>
   total?: number
@@ -349,7 +352,11 @@ export async function listStacks(): Promise<{ ok: true; items: DashboardStack[];
       url: null,
       created_at: s.created_at ?? '',
       team_id: '',
-      env: 'production',
+      // env defaults to 'production' for legacy stacks pre-dating migration
+      // 015. The API never returns null for env (the column has NOT NULL
+      // DEFAULT 'production'), so the ?? branch is only exercised when the
+      // backend predates env-aware deployments entirely.
+      env: (s.env as DashboardStack['env']) ?? 'production',
       tier: (s.tier as DashboardStack['tier']) ?? 'free',
     }))
     return { ok: true, items, total: r.total ?? items.length }
@@ -357,6 +364,90 @@ export async function listStacks(): Promise<{ ok: true; items: DashboardStack[];
     // Auth missing, endpoint unavailable, or other transient — show honest
     // empty state rather than fixture data.
     return { ok: true, items: [], total: 0 }
+  }
+}
+
+// ─── Stack family — env-sibling grid ─────────────────────────────────────
+// GET /api/v1/stacks/:slug/family returns root + every direct child as a
+// flat list (root first) so the dashboard can render "production · staging
+// · dev" cards side-by-side without doing N round-trips. Pro+ only — the
+// agent API returns 402 with agent_action for hobby/free teams; we surface
+// that with a tagged failure so the UI shows the existing PromoteUpsell
+// instead of trying to render an empty grid.
+
+export type StackFamilyMember = {
+  slug: string
+  name: string
+  env: string
+  status: DashboardStack['status']
+  tier: DashboardStack['tier']
+  url: string
+  is_root: boolean
+  parent_stack_id: string
+  last_deploy_at: string
+  created_at: string
+}
+
+type StackFamilyResp = {
+  ok: boolean
+  slug?: string
+  family?: Array<{
+    slug?: string
+    name?: string
+    env?: string
+    status?: string
+    tier?: string
+    url?: string
+    is_root?: boolean
+    parent_stack_id?: string
+    last_deploy_at?: string
+    created_at?: string
+  }>
+  total?: number
+}
+
+/**
+ * Fetch the env-sibling family for a stack. Returns:
+ *   { ok: true, family, slug }     — Pro+ team, family fetched
+ *   { ok: false, reason: 'upgrade_required' } — hobby/free, 402 from API
+ *   { ok: false, reason: 'not_found' }        — slug missing or another team's
+ *   { ok: false, reason: 'unknown' }          — transient failure
+ *
+ * The discriminated-union return shape lets the calling UI choose between
+ * rendering the env grid, the PromoteUpsell card, or an error state without
+ * leaking APIError into the page component.
+ */
+export async function fetchStackFamily(
+  slug: string,
+): Promise<
+  | { ok: true; slug: string; family: StackFamilyMember[]; total: number }
+  | { ok: false; reason: 'upgrade_required' | 'not_found' | 'unknown' }
+> {
+  try {
+    const r = await call<StackFamilyResp>(`/api/v1/stacks/${encodeURIComponent(slug)}/family`)
+    const family: StackFamilyMember[] = (r.family ?? []).map((m) => ({
+      slug: m.slug ?? '',
+      name: m.name ?? '',
+      env: m.env ?? 'production',
+      status: (m.status as DashboardStack['status']) ?? 'building',
+      tier: (m.tier as DashboardStack['tier']) ?? 'free',
+      url: m.url ?? '',
+      is_root: m.is_root ?? false,
+      parent_stack_id: m.parent_stack_id ?? '',
+      last_deploy_at: m.last_deploy_at ?? '',
+      created_at: m.created_at ?? '',
+    }))
+    return { ok: true, slug: r.slug ?? slug, family, total: r.total ?? family.length }
+  } catch (err) {
+    // APIError exposes status; treat 402 as the explicit upgrade signal and
+    // 404 as not-yet-promoted (the slug exists but the team can't see it),
+    // and lump everything else into 'unknown' so the UI keeps showing the
+    // single-env fallback. Inspect status defensively because non-APIError
+    // throwables (network failures, jsdom) reach here too.
+    const status = (err as { status?: number })?.status
+    if (status === 402) return { ok: false as const, reason: 'upgrade_required' }
+    if (status === 404) return { ok: false as const, reason: 'not_found' }
+    return { ok: false as const, reason: 'unknown' }
   }
 }
 
