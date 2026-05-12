@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { ROBanner, ContractBanner, TierPill } from '../components/Common'
 import * as api from '../api'
-import type { BillingDetails, BillingUsage, Invoice } from '../api'
+import type { BillingDetails, BillingUsage, Invoice, Promotion } from '../api'
 import { useDashboardCtx } from '../hooks/useDashboardCtx'
 
 // Typed per-service limits used by the Usage panel. `Infinity` means "no
@@ -173,6 +173,17 @@ export function BillingPage() {
   const [checkoutErr, setCheckoutErr] = useState<string | null>(null)
   const [checkoutLoading, setCheckoutLoading] = useState(false)
 
+  // ── Discount code state (P3) ───────────────────────────────────────────
+  // The input lives behind a "Have a discount code?" toggle so the upgrade
+  // CTA isn't crowded for the 95% of users who don't have a code. Once a
+  // code validates green it persists into the checkout call via
+  // applied.code; users can clear it to type a different one.
+  const [promoOpen, setPromoOpen] = useState(false)
+  const [promoCode, setPromoCode] = useState('')
+  const [promoErr, setPromoErr] = useState<string | null>(null)
+  const [promoValidating, setPromoValidating] = useState(false)
+  const [appliedPromo, setAppliedPromo] = useState<Promotion | null>(null)
+
   useEffect(() => {
     // Independent reads — each guarded individually so a failure on one
     // doesn't blank the whole page. Billing error → banner. Invoices
@@ -255,7 +266,14 @@ export function BillingPage() {
     setCheckoutErr(null)
     setCheckoutLoading(true)
     try {
-      const r = await api.createCheckout(plan.nextTier!)
+      // Pass promotion_code only when a code has actually been validated
+      // green — never the raw input string. If no code is applied, the
+      // createCheckout call is invoked with a single arg (matches the
+      // pre-P3 signature so existing tests' strict-arg matchers still
+      // pass). Otherwise the second-arg opts carry the promo code.
+      const r = appliedPromo
+        ? await api.createCheckout(plan.nextTier!, { promotion_code: appliedPromo.code })
+        : await api.createCheckout(plan.nextTier!)
       if (r.short_url) {
         window.location.href = r.short_url
         return
@@ -266,6 +284,42 @@ export function BillingPage() {
     } finally {
       setCheckoutLoading(false)
     }
+  }
+
+  async function handleApplyPromo() {
+    if (!plan.nextTier) return
+    const code = promoCode.trim()
+    if (!code) {
+      setPromoErr('Enter a code.')
+      return
+    }
+    setPromoErr(null)
+    setPromoValidating(true)
+    try {
+      const r = await api.validatePromotion(code, plan.nextTier)
+      setAppliedPromo(r.promotion)
+    } catch (e: any) {
+      // Network errors (no status, no message): show the friendly fallback.
+      // API errors carrying a server message (404/409/410): surface it.
+      if (e?.status === undefined && (e?.name === 'TypeError' || /network|fetch/i.test(e?.message ?? ''))) {
+        setPromoErr("couldn't reach the server, try again")
+      } else {
+        setPromoErr(e?.message ?? 'Code not valid.')
+      }
+      setAppliedPromo(null)
+    } finally {
+      setPromoValidating(false)
+    }
+  }
+
+  function handleClearPromo() {
+    setAppliedPromo(null)
+    setPromoCode('')
+    setPromoErr(null)
+    // Collapse back to the discreet toggle — auto-reopening the input
+    // would steal focus and surprise the user. They can click "Have a
+    // discount code?" again if they want to try a different one.
+    setPromoOpen(false)
   }
 
   return (
@@ -302,6 +356,24 @@ export function BillingPage() {
               </li>
             ))}
           </ul>
+          {/* ── Discount code (P3) ───────────────────────────────────────
+              Sits below the price + feature list, above the upgrade CTA.
+              Only rendered when an upgrade target exists (no point applying
+              a discount on team-tier — there's nothing left to upgrade to).
+              Collapsed by default; one-line link expands a small input. */}
+          {plan.nextTier && (
+            <PromoCodePanel
+              open={promoOpen}
+              code={promoCode}
+              validating={promoValidating}
+              err={promoErr}
+              applied={appliedPromo}
+              onOpen={() => setPromoOpen(true)}
+              onChangeCode={setPromoCode}
+              onApply={handleApplyPromo}
+              onClear={handleClearPromo}
+            />
+          )}
           <div style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center' }}>
             <button
               className="btn btn-secondary btn-sm"
@@ -461,6 +533,188 @@ export function BillingPage() {
       </div>
     </>
   )
+}
+
+// ─── PromoCodePanel (P3) ───────────────────────────────────────────────
+// Collapsed state: a small "Have a discount code?" link button.
+// Open + unapplied state: input + Apply button + (optional) error msg.
+// Open + applied state: green checkmark + applied description + Remove.
+//
+// Keeping this as a sub-component keeps BillingPage scannable — the
+// upgrade flow is the headline; this is a side rail. State lives in the
+// parent so the applied code can be passed into createCheckout.
+function PromoCodePanel({
+  open,
+  code,
+  validating,
+  err,
+  applied,
+  onOpen,
+  onChangeCode,
+  onApply,
+  onClear,
+}: {
+  open: boolean
+  code: string
+  validating: boolean
+  err: string | null
+  applied: Promotion | null
+  onOpen: () => void
+  onChangeCode: (s: string) => void
+  onApply: () => void
+  onClear: () => void
+}) {
+  // Applied state — small green chip with the discount description and a
+  // Remove action. Sits where the input was so the layout doesn't jump.
+  if (applied) {
+    return (
+      <div
+        data-testid="promo-applied"
+        style={{
+          marginBottom: 12,
+          padding: '8px 12px',
+          background: 'rgba(46, 160, 67, 0.08)',
+          border: '1px solid rgba(46, 160, 67, 0.3)',
+          borderLeft: '3px solid var(--green, #2ea043)',
+          borderRadius: 6,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          fontSize: 12.5,
+        }}
+      >
+        <span aria-hidden="true" style={{ color: 'var(--green, #2ea043)', fontSize: 14, lineHeight: 1 }}>✓</span>
+        <span data-testid="promo-applied-text">
+          <code style={{ fontFamily: 'var(--font-mono)', fontSize: 11.5, color: 'var(--text)' }}>{applied.code}</code>
+          {' '}applied: {formatDiscount(applied)}
+        </span>
+        <button
+          type="button"
+          data-testid="promo-clear"
+          onClick={onClear}
+          className="btn btn-ghost btn-sm"
+          style={{ marginLeft: 'auto', fontSize: 11 }}
+        >
+          Remove
+        </button>
+      </div>
+    )
+  }
+
+  // Collapsed state — single discreet link. Click expands the input.
+  if (!open) {
+    return (
+      <div style={{ marginBottom: 12 }}>
+        <button
+          type="button"
+          data-testid="promo-toggle"
+          onClick={onOpen}
+          className="btn btn-ghost btn-sm"
+          style={{
+            padding: '2px 0',
+            fontSize: 12,
+            color: 'var(--text-dim)',
+            background: 'transparent',
+            border: 'none',
+            textDecoration: 'underline',
+            textDecorationStyle: 'dotted',
+            textUnderlineOffset: 3,
+            cursor: 'pointer',
+          }}
+        >
+          Have a discount code?
+        </button>
+      </div>
+    )
+  }
+
+  // Open + unapplied state — input + Apply.
+  return (
+    <div data-testid="promo-input-row" style={{ marginBottom: 12 }}>
+      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+        <input
+          type="text"
+          data-testid="promo-input"
+          aria-label="Discount code"
+          placeholder="DISCOUNT CODE"
+          value={code}
+          onChange={(e) => onChangeCode(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              if (!validating) onApply()
+            }
+          }}
+          autoFocus
+          disabled={validating}
+          style={{
+            flex: '1 1 auto',
+            maxWidth: 220,
+            padding: '6px 10px',
+            fontSize: 12,
+            fontFamily: 'var(--font-mono)',
+            textTransform: 'uppercase',
+            letterSpacing: '0.04em',
+            background: 'var(--surface)',
+            color: 'var(--text)',
+            border: '1px solid var(--border)',
+            borderRadius: 4,
+          }}
+        />
+        <button
+          type="button"
+          data-testid="promo-apply"
+          onClick={onApply}
+          disabled={validating || !code.trim()}
+          className="btn btn-secondary btn-sm"
+          style={{ fontSize: 12 }}
+        >
+          {validating ? 'Checking…' : 'Apply'}
+        </button>
+      </div>
+      {err && (
+        <div
+          data-testid="promo-error"
+          role="alert"
+          style={{
+            marginTop: 6,
+            fontSize: 11.5,
+            color: 'var(--danger, #c33)',
+            fontFamily: 'var(--font-mono)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+          }}
+        >
+          <span aria-hidden="true">✗</span>
+          <span>{err}</span>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// formatDiscount — turns a Promotion.discount object into a human-friendly
+// chip. Falls back to a generic "discount applied" for unknown kinds so the
+// UI is forward-compatible if the api ships a new discount shape.
+function formatDiscount(p: Promotion): string {
+  const d = p.discount
+  if (d.kind === 'percent_off') {
+    const span = d.applies_to && d.unit
+      ? ` first ${d.applies_to} ${d.unit}`
+      : d.applies_to === 1
+        ? ' first month'
+        : ''
+    return `${d.value}% off${span}`
+  }
+  if (d.kind === 'amount_off') {
+    return `$${(d.value / 100).toFixed(2)} off`
+  }
+  if (d.kind === 'free_period') {
+    const unit = d.unit ?? 'months'
+    return `${d.value} ${unit} free`
+  }
+  return 'discount applied'
 }
 
 function UsageRow({ k, used, limit, pct, warn = false }: { k: string; used: string; limit: string; pct: number; warn?: boolean }) {
