@@ -762,11 +762,20 @@ export async function listInvoices(): Promise<{ ok: true; invoices: Invoice[] }>
   return { ok: true, invoices: r.invoices ?? [] }
 }
 
+// PlanFrequency selects between the monthly and yearly Razorpay plan_id at
+// checkout. The agent API rejects anything other than 'monthly' | 'yearly'
+// with 400 invalid_frequency, and returns 503 billing_not_configured when
+// the yearly plan_id env var isn't set on the server (operator action
+// pending). Defaulting to 'monthly' on omission keeps the upgrade path
+// behaving as it did before the toggle shipped.
+export type PlanFrequency = 'monthly' | 'yearly'
+
 export async function createCheckout(
   plan: string,
+  planFrequency: PlanFrequency = 'monthly',
   opts?: { promotion_code?: string },
 ): Promise<{ ok: true; short_url: string; subscription_id?: string }> {
-  const body: Record<string, unknown> = { plan }
+  const body: Record<string, unknown> = { plan, plan_frequency: planFrequency }
   // Only include the promotion_code field when the caller actually passed
   // one — sending an empty string would cause the api to treat it as an
   // invalid promo and reject the checkout. Trimming guards against UI

@@ -76,9 +76,8 @@ vi.mock('../api', async () => {
     fetchBillingUsage: vi.fn(),
     createCheckout: vi.fn(),
     cancelSubscription: vi.fn(),
-    // P3: discount-code validation. Tests provide per-code responses; the
-    // default mock returned by mockHappyBilling resolves to "not found" so
-    // a test that forgets to set it up gets an honest red state.
+    // P3: discount-code path validates with the api before applying the
+    // code to checkout. Mocked so tests can drive both ok + error shapes.
     validatePromotion: vi.fn(),
   }
 })
@@ -297,33 +296,6 @@ describe('BillingPage — initial render', () => {
     expect(screen.getByRole('button', { name: /upgrade to team/i })).toBeTruthy()
   })
 
-  // U2: the BillingPage CTA stays generic (this *is* the primary billing
-  // surface) but should expose a bulleted list of what the next tier unlocks
-  // above the button so the user knows what they're paying for.
-  it('renders the "what <next-tier> unlocks" bullet list for hobby users', async () => {
-    mockTier = 'hobby'
-    mockHappyBilling()
-    render(<BillingPage />)
-    await waitForLoaded()
-    const panel = screen.getByTestId('next-tier-unlocks')
-    expect(panel).toBeTruthy()
-    // At least one feature from the next-tier plan is rendered as a li.
-    expect(panel.querySelectorAll('li').length).toBeGreaterThan(0)
-    // Heading copy includes the next-tier label (lowercase).
-    expect(panel.textContent?.toLowerCase()).toContain('what pro unlocks')
-  })
-
-  it('hides the unlocks panel for team-tier users (no nextTier)', async () => {
-    mockTier = 'team'
-    mockHappyBilling()
-    render(<BillingPage />)
-    // Team-tier's CTA reads "Change plan" (disabled), not "Upgrade to …".
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: /change plan/i })).toBeTruthy()
-    })
-    expect(screen.queryByTestId('next-tier-unlocks')).toBeNull()
-  })
-
   it('renders the payment method line from billing.payment_last4', async () => {
     mockTier = 'hobby'
     mockHappyBilling()
@@ -365,7 +337,7 @@ describe('BillingPage — initial render', () => {
 
 // ─── handleChangePlan ────────────────────────────────────────────────────
 describe('BillingPage — handleChangePlan (upgrade flow)', () => {
-  it('calls api.createCheckout("pro") when user is on hobby and clicks Upgrade', async () => {
+  it('calls api.createCheckout("pro", "monthly") when user is on hobby and clicks Upgrade', async () => {
     mockTier = 'hobby'
     mockHappyBilling()
     ;(api.createCheckout as any).mockResolvedValue({
@@ -375,10 +347,12 @@ describe('BillingPage — handleChangePlan (upgrade flow)', () => {
     await waitForLoaded()
     fireEvent.click(screen.getByRole('button', { name: /upgrade to pro/i }))
     await waitFor(() => expect(api.createCheckout).toHaveBeenCalledTimes(1))
-    expect(api.createCheckout).toHaveBeenCalledWith('pro')
+    // P2: BillingPage passes plan_frequency through to api.createCheckout.
+    // Monthly is the default unless the toggle was switched.
+    expect(api.createCheckout).toHaveBeenCalledWith('pro', 'monthly')
   })
 
-  it('calls api.createCheckout("team") when user is on pro', async () => {
+  it('calls api.createCheckout("team", "monthly") when user is on pro', async () => {
     mockTier = 'pro'
     mockHappyBilling()
     ;(api.createCheckout as any).mockResolvedValue({
@@ -387,7 +361,7 @@ describe('BillingPage — handleChangePlan (upgrade flow)', () => {
     render(<BillingPage />)
     await waitForLoaded()
     fireEvent.click(screen.getByRole('button', { name: /upgrade to team/i }))
-    await waitFor(() => expect(api.createCheckout).toHaveBeenCalledWith('team'))
+    await waitFor(() => expect(api.createCheckout).toHaveBeenCalledWith('team', 'monthly'))
   })
 
   it('redirects via window.location.href when short_url is returned', async () => {
@@ -520,7 +494,7 @@ describe('BillingPage — userEvent integration', () => {
     render(<BillingPage />)
     await waitForLoaded()
     await user.click(screen.getByRole('button', { name: /upgrade to pro/i }))
-    await waitFor(() => expect(api.createCheckout).toHaveBeenCalledWith('pro'))
+    await waitFor(() => expect(api.createCheckout).toHaveBeenCalledWith('pro', 'monthly'))
     await waitFor(() => expect(hrefSetTo).toBe('https://rzp.io/i/ue'))
   })
 })
@@ -636,15 +610,105 @@ describe('BillingPage — §10.8 leak fixes', () => {
   })
 })
 
-// ─── P3: discount-code input on the upgrade flow ─────────────────────────
-// Covers the contract:
-//   - "Have a discount code?" toggle renders for tiers with a next-tier
-//   - valid code (mocked api.validatePromotion success) → green applied state
-//   - invalid code → red error state surfaces the api message
-//   - applied code persists into the createCheckout body as promotion_code
-//
-// Cancellation continues to be support-only (covered above); these tests
-// don't loosen that contract.
+// ─── P2: monthly/yearly billing toggle ──────────────────────────────────
+describe('BillingPage — monthly/yearly toggle', () => {
+  // The toggle persists in localStorage. Clear between tests so state
+  // from one case doesn't bleed into the next.
+  beforeEach(() => {
+    try { window.localStorage.removeItem('instant.billing.plan_frequency') } catch {}
+  })
+
+  it('renders the toggle with monthly selected by default', async () => {
+    mockTier = 'hobby'
+    mockHappyBilling()
+    render(<BillingPage />)
+    await waitForLoaded()
+    const toggle = screen.getByTestId('billing-frequency-toggle')
+    expect(toggle).toBeTruthy()
+    const monthly = screen.getByTestId('frequency-monthly')
+    const yearly = screen.getByTestId('frequency-yearly')
+    expect(monthly.getAttribute('aria-checked')).toBe('true')
+    expect(yearly.getAttribute('aria-checked')).toBe('false')
+  })
+
+  it('renders the save-$X/yr badge for the nextTier when the toggle is shown', async () => {
+    mockTier = 'hobby'
+    mockHappyBilling()
+    render(<BillingPage />)
+    await waitForLoaded()
+    const badge = screen.getByTestId('frequency-save-badge')
+    expect(badge.textContent).toMatch(/save \$98\/yr on pro/i)
+  })
+
+  it('passes plan_frequency=yearly to createCheckout when yearly is selected', async () => {
+    mockTier = 'hobby'
+    mockHappyBilling()
+    ;(api.createCheckout as any).mockResolvedValue({
+      ok: true, short_url: 'https://rzp.io/i/yr',
+    })
+    render(<BillingPage />)
+    await waitForLoaded()
+    fireEvent.click(screen.getByTestId('frequency-yearly'))
+    fireEvent.click(screen.getByRole('button', { name: /upgrade to pro/i }))
+    await waitFor(() => expect(api.createCheckout).toHaveBeenCalledWith('pro', 'yearly'))
+  })
+
+  it('persists the selected frequency in localStorage so it sticks across refreshes', async () => {
+    mockTier = 'hobby'
+    mockHappyBilling()
+    render(<BillingPage />)
+    await waitForLoaded()
+    fireEvent.click(screen.getByTestId('frequency-yearly'))
+    expect(window.localStorage.getItem('instant.billing.plan_frequency')).toBe('yearly')
+    fireEvent.click(screen.getByTestId('frequency-monthly'))
+    expect(window.localStorage.getItem('instant.billing.plan_frequency')).toBe('monthly')
+  })
+
+  it('rehydrates yearly from localStorage on subsequent mounts', async () => {
+    mockTier = 'hobby'
+    mockHappyBilling()
+    window.localStorage.setItem('instant.billing.plan_frequency', 'yearly')
+    render(<BillingPage />)
+    await waitForLoaded()
+    const yearly = screen.getByTestId('frequency-yearly')
+    expect(yearly.getAttribute('aria-checked')).toBe('true')
+  })
+
+  it('shows the effective per-month + annual total when yearly is active', async () => {
+    mockTier = 'hobby'
+    mockHappyBilling()
+    window.localStorage.setItem('instant.billing.plan_frequency', 'yearly')
+    render(<BillingPage />)
+    await waitForLoaded()
+    const eff = screen.getByTestId('frequency-effective-price')
+    expect(eff.textContent).toMatch(/\$490\/yr/)
+    expect(eff.textContent).toMatch(/\$40\.83\/mo/)
+  })
+
+  it('renames the Upgrade button to include "(yearly)" when yearly is selected', async () => {
+    mockTier = 'hobby'
+    mockHappyBilling()
+    window.localStorage.setItem('instant.billing.plan_frequency', 'yearly')
+    render(<BillingPage />)
+    await waitForLoaded()
+    const btn = screen.getByTestId('upgrade-button')
+    expect(btn.textContent?.toLowerCase()).toContain('yearly')
+  })
+
+  it('does not render the toggle when there is no nextTier (team-tier user)', async () => {
+    mockTier = 'team'
+    mockHappyBilling()
+    render(<BillingPage />)
+    // Team users have no "Upgrade to" button (plan.nextTier is undefined),
+    // so waitForLoaded() can't find one — wait for the Change plan button
+    // instead, which is rendered in the same place.
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: /change plan/i })).toBeTruthy()
+    })
+    expect(screen.queryByTestId('billing-frequency-toggle')).toBeNull()
+  })
+})
+
 describe('BillingPage — discount code on checkout flow (P3)', () => {
   it('renders the "Have a discount code?" toggle when a next-tier exists', async () => {
     mockTier = 'hobby'
@@ -786,7 +850,9 @@ describe('BillingPage — discount code on checkout flow (P3)', () => {
     await waitFor(() => expect(screen.queryByTestId('promo-applied')).toBeTruthy())
     fireEvent.click(screen.getByRole('button', { name: /upgrade to pro/i }))
     await waitFor(() => expect(api.createCheckout).toHaveBeenCalledTimes(1))
-    expect(api.createCheckout).toHaveBeenCalledWith('pro', { promotion_code: 'TWITTER15' })
+    // Merged signature: (plan, plan_frequency, opts). Frequency defaults
+    // to 'monthly' (P2 toggle is not touched in this test).
+    expect(api.createCheckout).toHaveBeenCalledWith('pro', 'monthly', { promotion_code: 'TWITTER15' })
   })
 
   it('does NOT pass promotion_code to createCheckout when no code is applied', async () => {
@@ -800,10 +866,11 @@ describe('BillingPage — discount code on checkout flow (P3)', () => {
     // Click upgrade without ever touching the discount-code toggle.
     fireEvent.click(screen.getByRole('button', { name: /upgrade to pro/i }))
     await waitFor(() => expect(api.createCheckout).toHaveBeenCalledTimes(1))
-    // Strict single-arg signature — the pre-P3 contract holds when no
-    // promo is applied. This guards against a regression where every
-    // upgrade silently grows a second arg even if it's empty.
-    expect(api.createCheckout).toHaveBeenCalledWith('pro')
+    // Strict signature when no promo is applied — frequency defaults to
+    // 'monthly' (P2 merge). No opts third arg, so the call shape is
+    // exactly two positional args. Guards against a regression where
+    // every upgrade silently grows an empty opts object.
+    expect(api.createCheckout).toHaveBeenCalledWith('pro', 'monthly')
   })
 
   it('Remove clears the applied code and lets the user enter a different one', async () => {

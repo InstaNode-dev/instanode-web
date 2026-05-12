@@ -2,8 +2,47 @@ import { useEffect, useState } from 'react'
 import { ROBanner, ContractBanner, TierPill } from '../components/Common'
 import { UpgradeButton } from '../components/UpgradeButton'
 import * as api from '../api'
-import type { BillingDetails, BillingUsage, Invoice, Promotion } from '../api'
+import type { BillingDetails, BillingUsage, Invoice, PlanFrequency, Promotion } from '../api'
 import { useDashboardCtx } from '../hooks/useDashboardCtx'
+
+// P2: monthly/yearly preference is persisted in localStorage so the
+// toggle "sticks" across refreshes. Wrapped in a try/catch so SSR
+// (no window) and Safari-private-mode (writes throw QuotaExceeded)
+// stay non-fatal — the default 'monthly' is the safe fallback.
+const FREQ_STORAGE_KEY = 'instant.billing.plan_frequency'
+
+function readStoredFrequency(): PlanFrequency {
+  try {
+    if (typeof window === 'undefined') return 'monthly'
+    const v = window.localStorage.getItem(FREQ_STORAGE_KEY)
+    if (v === 'yearly') return 'yearly'
+    return 'monthly'
+  } catch {
+    return 'monthly'
+  }
+}
+
+function writeStoredFrequency(f: PlanFrequency): void {
+  try {
+    if (typeof window === 'undefined') return
+    window.localStorage.setItem(FREQ_STORAGE_KEY, f)
+  } catch {
+    // Safari private mode / quota errors are non-fatal — the toggle
+    // still works for the lifetime of the page, just doesn't persist.
+  }
+}
+
+// P2: yearly pricing (annual amount → effective per-month, savings vs 12 x monthly).
+// All values in USD. Source of truth is api/plans.yaml (price_monthly_cents on the
+// {tier}_yearly entry). Keep in sync if those numbers change.
+const YEARLY_PRICING: Record<string, { yearlyTotal: number; effectiveMonthly: number; saveVsMonthly: number }> = {
+  // hobby_yearly = $90/yr → ~$7.50/mo, save $18/yr vs $9 x 12 = $108.
+  hobby: { yearlyTotal: 90, effectiveMonthly: 7.5, saveVsMonthly: 18 },
+  // pro_yearly = $490/yr → ~$40.83/mo, save $98/yr vs $49 x 12 = $588.
+  pro:   { yearlyTotal: 490, effectiveMonthly: 40.83, saveVsMonthly: 98 },
+  // team_yearly = $1990/yr → ~$165.83/mo, save $398/yr vs $199 x 12 = $2388.
+  team:  { yearlyTotal: 1990, effectiveMonthly: 165.83, saveVsMonthly: 398 },
+}
 
 // Typed per-service limits used by the Usage panel. `Infinity` means "no
 // dashboard-side cap shown" (team-tier headroom). Postgres / Redis / MongoDB
@@ -174,6 +213,15 @@ export function BillingPage() {
   const [checkoutErr, setCheckoutErr] = useState<string | null>(null)
   const [checkoutLoading, setCheckoutLoading] = useState(false)
 
+  // P2: monthly/yearly billing toggle. Drives the price preview, the
+  // "save $X/yr" badge, and the plan_frequency field sent on checkout.
+  // Persisted in localStorage so the choice sticks across refreshes.
+  const [frequency, setFrequencyState] = useState<PlanFrequency>(() => readStoredFrequency())
+  const setFrequency = (f: PlanFrequency) => {
+    setFrequencyState(f)
+    writeStoredFrequency(f)
+  }
+
   // ── Discount code state (P3) ───────────────────────────────────────────
   // The input lives behind a "Have a discount code?" toggle so the upgrade
   // CTA isn't crowded for the 95% of users who don't have a code. Once a
@@ -267,14 +315,18 @@ export function BillingPage() {
     setCheckoutErr(null)
     setCheckoutLoading(true)
     try {
-      // Pass promotion_code only when a code has actually been validated
-      // green — never the raw input string. If no code is applied, the
-      // createCheckout call is invoked with a single arg (matches the
-      // pre-P3 signature so existing tests' strict-arg matchers still
-      // pass). Otherwise the second-arg opts carry the promo code.
+      // P2: pass the toggle's frequency through to the agent API. The
+      // server returns 503 billing_not_configured when frequency=yearly
+      // and the operator hasn't created the yearly Razorpay plan yet —
+      // that surfaces in checkoutErr below so users see a real reason
+      // rather than a silent failure.
+      // P3: pass promotion_code only when a code has actually been
+      // validated green — never the raw input string. The third-arg opts
+      // carry the promo code when applied; otherwise omitted so the
+      // request body matches the pre-P3 shape.
       const r = appliedPromo
-        ? await api.createCheckout(plan.nextTier!, { promotion_code: appliedPromo.code })
-        : await api.createCheckout(plan.nextTier!)
+        ? await api.createCheckout(plan.nextTier!, frequency, { promotion_code: appliedPromo.code })
+        : await api.createCheckout(plan.nextTier!, frequency)
       if (r.short_url) {
         window.location.href = r.short_url
         return
@@ -332,6 +384,16 @@ export function BillingPage() {
         we don't expose a self-serve path on purpose.
       </ROBanner>
 
+      {/* P2: monthly/yearly toggle. Only relevant for tiers where the next
+          tier has a yearly variant defined — anonymous → hobby, hobby → pro,
+          pro → team. Hidden when there's nothing to upgrade to. */}
+      {plan.nextTier && YEARLY_PRICING[plan.nextTier] && (
+        <BillingFrequencyToggle
+          frequency={frequency}
+          onChange={setFrequency}
+          nextTier={plan.nextTier}
+        />
+      )}
 
       <div className="plan-card">
         <div className="plan-summary">
@@ -433,12 +495,21 @@ export function BillingPage() {
               // button fires POST /api/v1/experiments/converted before
               // navigating, capped at 500ms so a slow analytics
               // endpoint never delays the checkout flow.
+              // P2 merge: when the yearly toggle is active and the next
+              // tier has yearly pricing, override the variant's default
+              // label to suffix "(yearly)" so the user sees what cadence
+              // they're about to commit to.
               <UpgradeButton
                 variant={me?.experiments?.upgrade_button}
                 onClick={handleChangePlan}
                 disabled={checkoutLoading}
                 title="Upgrade to Pro"
                 testId="upgrade-button"
+                label={
+                  YEARLY_PRICING[plan.nextTier] && frequency === 'yearly'
+                    ? `Upgrade to Pro (yearly)`
+                    : undefined
+                }
               />
             ) : (
               <button
@@ -446,8 +517,13 @@ export function BillingPage() {
                 onClick={handleChangePlan}
                 disabled={!plan.nextTier || checkoutLoading}
                 title={plan.nextTier ? `Upgrade to ${PLANS[plan.nextTier]?.label ?? plan.nextTier}` : 'You are on the highest plan'}
+                data-testid="upgrade-button"
               >
-                {plan.nextTier ? `Upgrade to ${PLANS[plan.nextTier]?.label ?? plan.nextTier}` : 'Change plan'}
+                {plan.nextTier
+                  ? `Upgrade to ${PLANS[plan.nextTier]?.label ?? plan.nextTier}${
+                      YEARLY_PRICING[plan.nextTier] && frequency === 'yearly' ? ' (yearly)' : ''
+                    }`
+                  : 'Change plan'}
               </button>
             )}
             <a
@@ -599,6 +675,134 @@ export function BillingPage() {
         </div>
       </div>
     </>
+  )
+}
+
+/**
+ * BillingFrequencyToggle — Monthly | Yearly chooser shown above the
+ * plan card. Yearly shows the effective per-month price and a
+ * "Save $X/yr" badge for the *next* tier the user can upgrade to.
+ * Pure visual + state — the actual checkout call reads the same
+ * `frequency` state via handleChangePlan.
+ */
+function BillingFrequencyToggle({
+  frequency,
+  onChange,
+  nextTier,
+}: {
+  frequency: PlanFrequency
+  onChange: (f: PlanFrequency) => void
+  nextTier: string
+}) {
+  const yearly = YEARLY_PRICING[nextTier]
+  const planLabel = PLANS[nextTier]?.label ?? nextTier
+  return (
+    <div
+      data-testid="billing-frequency-toggle"
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 12,
+        margin: '18px 0 14px',
+        padding: '10px 14px',
+        border: '1px solid var(--border)',
+        borderRadius: 8,
+        background: 'var(--surface)',
+        flexWrap: 'wrap',
+      }}
+    >
+      <span
+        style={{
+          fontFamily: 'var(--font-mono)',
+          fontSize: 10.5,
+          letterSpacing: '0.06em',
+          textTransform: 'uppercase',
+          color: 'var(--text-faint)',
+        }}
+      >
+        billing cycle
+      </span>
+      <div
+        role="radiogroup"
+        aria-label="Billing cycle"
+        style={{
+          display: 'inline-flex',
+          border: '1px solid var(--border-hi, var(--border))',
+          borderRadius: 999,
+          padding: 2,
+          background: 'var(--elevated, var(--surface))',
+        }}
+      >
+        <button
+          type="button"
+          role="radio"
+          aria-checked={frequency === 'monthly'}
+          data-testid="frequency-monthly"
+          onClick={() => onChange('monthly')}
+          className={frequency === 'monthly' ? 'btn btn-primary btn-sm' : 'btn btn-ghost btn-sm'}
+          style={{
+            borderRadius: 999,
+            padding: '4px 14px',
+            fontSize: 12,
+            background: frequency === 'monthly' ? 'var(--accent)' : 'transparent',
+            color: frequency === 'monthly' ? 'var(--ink)' : 'var(--text)',
+            border: 'none',
+            cursor: 'pointer',
+          }}
+        >
+          Monthly
+        </button>
+        <button
+          type="button"
+          role="radio"
+          aria-checked={frequency === 'yearly'}
+          data-testid="frequency-yearly"
+          onClick={() => onChange('yearly')}
+          className={frequency === 'yearly' ? 'btn btn-primary btn-sm' : 'btn btn-ghost btn-sm'}
+          style={{
+            borderRadius: 999,
+            padding: '4px 14px',
+            fontSize: 12,
+            background: frequency === 'yearly' ? 'var(--accent)' : 'transparent',
+            color: frequency === 'yearly' ? 'var(--ink)' : 'var(--text)',
+            border: 'none',
+            cursor: 'pointer',
+          }}
+        >
+          Yearly
+        </button>
+      </div>
+      {yearly && (
+        <span
+          data-testid="frequency-save-badge"
+          style={{
+            fontFamily: 'var(--font-mono)',
+            fontSize: 11,
+            padding: '2px 8px',
+            borderRadius: 4,
+            border: '1px solid rgba(0,228,142,0.35)',
+            color: 'var(--accent)',
+            background: 'rgba(0,228,142,0.07)',
+            letterSpacing: '0.04em',
+          }}
+        >
+          save ${yearly.saveVsMonthly}/yr on {planLabel}
+        </span>
+      )}
+      {yearly && frequency === 'yearly' && (
+        <span
+          data-testid="frequency-effective-price"
+          style={{
+            marginLeft: 'auto',
+            fontFamily: 'var(--font-mono)',
+            fontSize: 11,
+            color: 'var(--text-dim)',
+          }}
+        >
+          {planLabel}: ${yearly.yearlyTotal}/yr · ~${yearly.effectiveMonthly.toFixed(2)}/mo
+        </span>
+      )}
+    </div>
   )
 }
 

@@ -2,21 +2,72 @@
    All numbers/prices come from the spec; nothing invented.
    Wrapped in PublicShell for the glassmorphic top nav + footer. */
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { PublicShell } from '../layout/PublicShell'
 import { copyToClipboard } from '../components/Common'
 
 type TierKey = 'anonymous' | 'hobby' | 'pro' | 'team'
 
-const TIERS: { key: TierKey; name: string; price: string; priceSub: string; cta: string; ctaHref: string; highlighted?: boolean; comingSoon?: boolean }[] = [
-  { key: 'anonymous', name: 'Anonymous', price: 'free',  priceSub: '24h ttl',  cta: 'Try the curl',   ctaHref: '#try-curl' },
-  { key: 'hobby',     name: 'Hobby',     price: '$9',    priceSub: '/ mo',     cta: 'Start hobby →',  ctaHref: '/checkout?plan=hobby' },
-  { key: 'pro',       name: 'Pro',       price: '$49',   priceSub: '/ mo',     cta: 'Start pro →',    ctaHref: '/checkout?plan=pro', highlighted: true },
+// P2: monthly vs yearly pricing. The toggle on this page is purely
+// presentational — the CTA passes the chosen cycle through as
+// `?frequency=yearly` so the in-product checkout flow can read it.
+// Numbers come from api/plans.yaml; the effective monthly is the annual
+// total divided by 12, rounded to two decimals for display.
+type PricingFrequency = 'monthly' | 'yearly'
+
+const FREQ_STORAGE_KEY = 'instant.billing.plan_frequency'
+
+const TIERS: {
+  key: TierKey
+  name: string
+  // price + sub render the headline figure for the selected frequency.
+  monthly: { price: string; sub: string }
+  yearly?: { price: string; sub: string; saveLabel: string }
+  cta: string
+  ctaHrefMonthly: string
+  ctaHrefYearly?: string
+  highlighted?: boolean
+  comingSoon?: boolean
+}[] = [
+  {
+    key: 'anonymous',
+    name: 'Anonymous',
+    monthly: { price: 'free', sub: '24h ttl' },
+    cta: 'Try the curl',
+    ctaHrefMonthly: '#try-curl',
+  },
+  {
+    key: 'hobby',
+    name: 'Hobby',
+    monthly: { price: '$9', sub: '/ mo' },
+    yearly: { price: '$7.50', sub: '/ mo billed yearly', saveLabel: 'save $18/yr' },
+    cta: 'Start hobby →',
+    ctaHrefMonthly: '/checkout?plan=hobby&frequency=monthly',
+    ctaHrefYearly: '/checkout?plan=hobby&frequency=yearly',
+  },
+  {
+    key: 'pro',
+    name: 'Pro',
+    monthly: { price: '$49', sub: '/ mo' },
+    yearly: { price: '$40.83', sub: '/ mo billed yearly', saveLabel: 'save $98/yr' },
+    cta: 'Start pro →',
+    ctaHrefMonthly: '/checkout?plan=pro&frequency=monthly',
+    ctaHrefYearly: '/checkout?plan=pro&frequency=yearly',
+    highlighted: true,
+  },
   // Team tier is under active development — visible so customers can see the
   // roadmap but disabled (no checkout, no signup). Backend k8s plumbing for
   // team-scale dedicated infra is already in place; what's pending is the
   // multi-seat + RBAC + SSO surface.
-  { key: 'team',      name: 'Team',      price: '$199',  priceSub: '/ mo',     cta: 'Coming soon',    ctaHref: '#',                  comingSoon: true }
+  {
+    key: 'team',
+    name: 'Team',
+    monthly: { price: '$199', sub: '/ mo' },
+    yearly: { price: '$165.83', sub: '/ mo billed yearly', saveLabel: 'save $398/yr' },
+    cta: 'Coming soon',
+    ctaHrefMonthly: '#',
+    comingSoon: true,
+  },
 ]
 
 type Cell =
@@ -75,6 +126,24 @@ const FAQ: { q: string; a: string }[] = [
 const TRY_CURL = 'curl -X POST https://api.instanode.dev/db/new'
 
 export function PricingPage() {
+  // P2: monthly/yearly toggle, persisted in localStorage. Default monthly.
+  // Hydrates from storage on mount (after first paint) so SSR output is
+  // stable and search engines see the canonical monthly view.
+  const [frequency, setFrequencyState] = useState<PricingFrequency>('monthly')
+  useEffect(() => {
+    try {
+      if (typeof window === 'undefined') return
+      const v = window.localStorage.getItem(FREQ_STORAGE_KEY)
+      if (v === 'yearly') setFrequencyState('yearly')
+    } catch { /* private mode / disabled storage — keep default */ }
+  }, [])
+  const setFrequency = (f: PricingFrequency) => {
+    setFrequencyState(f)
+    try {
+      if (typeof window !== 'undefined') window.localStorage.setItem(FREQ_STORAGE_KEY, f)
+    } catch { /* non-fatal */ }
+  }
+
   return (
     <PublicShell>
       <PricingStyles />
@@ -97,26 +166,59 @@ export function PricingPage() {
           All prices in USD. Limits enforced per team. Numbers come from <code className="pr-inline">plans.yaml</code>.
         </p>
 
+        {/* P2: monthly / yearly toggle. Pure-presentational on the
+            marketing page — clicking a CTA passes ?frequency=… along to
+            the in-product checkout flow. */}
+        <PricingFrequencyToggle frequency={frequency} onChange={setFrequency} />
+
         <div className="pricing-table" role="table" aria-label="Pricing comparison">
           {/* tier header row */}
           <div className="pricing-row pricing-row--head" role="row">
             <div className="pricing-cell pricing-cell--feature" role="columnheader">Feature</div>
-            {TIERS.map((t) => (
-              <div
-                key={t.key}
-                className={`pricing-cell pricing-cell--tier${t.highlighted ? ' is-highlighted' : ''}`}
-                role="columnheader"
-              >
-                <div className="pricing-tier-name">
-                  {t.name}
-                  {t.comingSoon && <span className="pricing-tier-soon">soon</span>}
+            {TIERS.map((t) => {
+              // Pick the price block for the selected frequency, falling
+              // back to monthly when the tier has no yearly variant (free
+              // anonymous tier has no annual deal).
+              const showYearly = frequency === 'yearly' && !!t.yearly
+              const price = showYearly ? t.yearly! : t.monthly
+              return (
+                <div
+                  key={t.key}
+                  className={`pricing-cell pricing-cell--tier${t.highlighted ? ' is-highlighted' : ''}`}
+                  role="columnheader"
+                  data-tier={t.key}
+                  data-frequency={showYearly ? 'yearly' : 'monthly'}
+                >
+                  <div className="pricing-tier-name">
+                    {t.name}
+                    {t.comingSoon && <span className="pricing-tier-soon">soon</span>}
+                  </div>
+                  <div className="pricing-tier-price">
+                    <span className="pricing-tier-num">{price.price}</span>
+                    <span className="pricing-tier-sub">{price.sub}</span>
+                  </div>
+                  {showYearly && t.yearly?.saveLabel && (
+                    <span
+                      data-testid={`pricing-save-${t.key}`}
+                      style={{
+                        marginTop: 4,
+                        padding: '1px 6px',
+                        borderRadius: 4,
+                        fontFamily: 'var(--font-mono)',
+                        fontSize: 10.5,
+                        color: 'var(--accent)',
+                        border: '1px solid rgba(0,228,142,0.35)',
+                        background: 'rgba(0,228,142,0.07)',
+                        letterSpacing: '0.04em',
+                        alignSelf: 'flex-start',
+                      }}
+                    >
+                      {t.yearly.saveLabel}
+                    </span>
+                  )}
                 </div>
-                <div className="pricing-tier-price">
-                  <span className="pricing-tier-num">{t.price}</span>
-                  <span className="pricing-tier-sub">{t.priceSub}</span>
-                </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
 
           {/* feature rows */}
@@ -142,23 +244,35 @@ export function PricingPage() {
           {/* CTA row */}
           <div className="pricing-row pricing-row--cta" role="row">
             <div className="pricing-cell pricing-cell--feature" />
-            {TIERS.map((t) => (
-              <div
-                key={t.key}
-                className={`pricing-cell${t.highlighted ? ' is-highlighted' : ''}`}
-                role="cell"
-              >
-                {t.comingSoon ? (
-                  <span className="pricing-cta pricing-cta--disabled" aria-disabled="true">
-                    {t.cta}
-                  </span>
-                ) : (
-                  <a href={t.ctaHref} className={`pricing-cta${t.highlighted ? ' pricing-cta--primary' : ''}`}>
-                    {t.cta}
-                  </a>
-                )}
-              </div>
-            ))}
+            {TIERS.map((t) => {
+              // Pick the matching CTA href for the frequency. When yearly
+              // is selected but a tier has no yearly variant (anonymous,
+              // or a not-yet-launched tier), fall back to the monthly href
+              // so the link doesn't 404.
+              const useYearly = frequency === 'yearly' && !!t.ctaHrefYearly
+              const ctaHref = useYearly ? t.ctaHrefYearly! : t.ctaHrefMonthly
+              return (
+                <div
+                  key={t.key}
+                  className={`pricing-cell${t.highlighted ? ' is-highlighted' : ''}`}
+                  role="cell"
+                >
+                  {t.comingSoon ? (
+                    <span className="pricing-cta pricing-cta--disabled" aria-disabled="true">
+                      {t.cta}
+                    </span>
+                  ) : (
+                    <a
+                      href={ctaHref}
+                      className={`pricing-cta${t.highlighted ? ' pricing-cta--primary' : ''}`}
+                      data-testid={`pricing-cta-${t.key}`}
+                    >
+                      {t.cta}
+                    </a>
+                  )}
+                </div>
+              )
+            })}
           </div>
         </div>
       </section>
@@ -184,6 +298,94 @@ export function PricingPage() {
       {/* ---------- CTA strip ---------- */}
       <CtaStrip command={TRY_CURL} />
     </PublicShell>
+  )
+}
+
+/**
+ * PricingFrequencyToggle — Monthly | Yearly chooser shown above the
+ * pricing table. Mirrors the BillingPage toggle visually so the
+ * marketing → checkout experience feels continuous. Pure presentation;
+ * persistence happens in the parent.
+ */
+function PricingFrequencyToggle({
+  frequency,
+  onChange,
+}: {
+  frequency: PricingFrequency
+  onChange: (f: PricingFrequency) => void
+}) {
+  return (
+    <div
+      data-testid="pricing-frequency-toggle"
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 12,
+        margin: '0 0 18px',
+        flexWrap: 'wrap',
+      }}
+    >
+      <div
+        role="radiogroup"
+        aria-label="Billing cycle"
+        style={{
+          display: 'inline-flex',
+          border: '1px solid var(--border-hi, var(--border))',
+          borderRadius: 999,
+          padding: 2,
+          background: 'var(--elevated, var(--surface))',
+        }}
+      >
+        <button
+          type="button"
+          role="radio"
+          aria-checked={frequency === 'monthly'}
+          data-testid="pricing-frequency-monthly"
+          onClick={() => onChange('monthly')}
+          style={{
+            borderRadius: 999,
+            padding: '6px 16px',
+            fontSize: 12,
+            background: frequency === 'monthly' ? 'var(--accent)' : 'transparent',
+            color: frequency === 'monthly' ? 'var(--ink)' : 'var(--text)',
+            border: 'none',
+            cursor: 'pointer',
+            fontFamily: 'var(--font-display, inherit)',
+          }}
+        >
+          Monthly
+        </button>
+        <button
+          type="button"
+          role="radio"
+          aria-checked={frequency === 'yearly'}
+          data-testid="pricing-frequency-yearly"
+          onClick={() => onChange('yearly')}
+          style={{
+            borderRadius: 999,
+            padding: '6px 16px',
+            fontSize: 12,
+            background: frequency === 'yearly' ? 'var(--accent)' : 'transparent',
+            color: frequency === 'yearly' ? 'var(--ink)' : 'var(--text)',
+            border: 'none',
+            cursor: 'pointer',
+            fontFamily: 'var(--font-display, inherit)',
+          }}
+        >
+          Yearly
+        </button>
+      </div>
+      <span
+        style={{
+          fontFamily: 'var(--font-mono)',
+          fontSize: 11,
+          color: 'var(--text-dim)',
+          letterSpacing: '0.04em',
+        }}
+      >
+        Yearly saves ~17% across Hobby, Pro, and Team.
+      </span>
+    </div>
   )
 }
 

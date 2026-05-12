@@ -311,15 +311,23 @@ describe('createCheckout()', () => {
     expect(r).toEqual({ ok: true, short_url: 'https://rzp.io/i/abc', subscription_id: 'sub_123' })
   })
 
-  it('POSTs to /api/v1/billing/checkout with the plan in the body', async () => {
+  it('POSTs to /api/v1/billing/checkout with the plan and default monthly frequency', async () => {
     const m = installFetch()
     m.mockResolvedValueOnce(jsonResponse({ ok: true, short_url: 'https://rzp.io/i/abc' }))
     await createCheckout('pro')
     const [url, init] = m.mock.calls[0]
     expect(String(url)).toContain('/api/v1/billing/checkout')
     expect(init.method).toBe('POST')
-    expect(init.body).toBe(JSON.stringify({ plan: 'pro' }))
+    expect(init.body).toBe(JSON.stringify({ plan: 'pro', plan_frequency: 'monthly' }))
     expect((init.headers as Headers).get('Content-Type')).toBe('application/json')
+  })
+
+  it('sends plan_frequency: yearly when the caller opts into annual billing', async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse({ ok: true, short_url: 'https://rzp.io/i/year' }))
+    await createCheckout('pro', 'yearly')
+    const init = m.mock.calls[0][1]
+    expect(init.body).toBe(JSON.stringify({ plan: 'pro', plan_frequency: 'yearly' }))
   })
 
   it('omits subscription_id when the API does not return one', async () => {
@@ -347,17 +355,19 @@ describe('createCheckout()', () => {
     m.mockResolvedValueOnce(jsonResponse({ ok: true, short_url: 'https://rzp.io/i/xyz' }))
     await createCheckout('team')
     const init = m.mock.calls[0][1]
-    expect(init.body).toBe(JSON.stringify({ plan: 'team' }))
+    expect(init.body).toBe(JSON.stringify({ plan: 'team', plan_frequency: 'monthly' }))
   })
 
   // P3: opts.promotion_code only appears in the body when actually passed.
+  // Merged signature is (plan, planFrequency, opts) — frequency defaults
+  // to 'monthly' so plan_frequency always appears in the body.
   it('includes promotion_code in the body when supplied (P3)', async () => {
     const m = installFetch()
     m.mockResolvedValueOnce(jsonResponse({ ok: true, short_url: 'https://rzp.io/i/p3' }))
-    await createCheckout('pro', { promotion_code: 'TWITTER15' })
+    await createCheckout('pro', 'monthly', { promotion_code: 'TWITTER15' })
     const init = m.mock.calls[0][1]
     expect(JSON.parse(init.body as string)).toEqual({
-      plan: 'pro', promotion_code: 'TWITTER15',
+      plan: 'pro', plan_frequency: 'monthly', promotion_code: 'TWITTER15',
     })
   })
 
@@ -367,14 +377,14 @@ describe('createCheckout()', () => {
     await createCheckout('pro')
     const init = m.mock.calls[0][1]
     const body = JSON.parse(init.body as string)
-    expect(body).toEqual({ plan: 'pro' })
+    expect(body).toEqual({ plan: 'pro', plan_frequency: 'monthly' })
     expect('promotion_code' in body).toBe(false)
   })
 
   it('drops an empty / whitespace-only promotion_code (P3)', async () => {
     const m = installFetch()
     m.mockResolvedValueOnce(jsonResponse({ ok: true, short_url: 'https://rzp.io/i/p3' }))
-    await createCheckout('pro', { promotion_code: '   ' })
+    await createCheckout('pro', 'monthly', { promotion_code: '   ' })
     const init = m.mock.calls[0][1]
     const body = JSON.parse(init.body as string)
     expect('promotion_code' in body).toBe(false)
