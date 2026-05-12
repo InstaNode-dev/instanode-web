@@ -4,6 +4,7 @@ import {
   ROBanner, EnvPill, TierPill, ResourceIcon, RelTime, UsageBar, Card, Sparkline,
   copyToClipboard
 } from '../components/Common'
+import { QuotaWallBanner } from '../components/QuotaWallBanner'
 import * as api from '../api'
 import type { Resource, ActivityItem } from '../api'
 import { useDashboardCtx } from '../hooks/useDashboardCtx'
@@ -109,6 +110,11 @@ export function OverviewPage() {
 
   return (
     <>
+      {/* QuotaWallBanner — Track U1. Renders only when the worker has
+          flagged this team as approaching a tier limit (>=80% on any
+          axis) within the last 24h. Dismissible per-team. */}
+      <QuotaWallBanner teamId={ctx.me?.team?.id} />
+
       <ROBanner>
         The whole dashboard is a <strong>mirror.</strong> Resources, deploys, vault keys, audit trails — everything you see came from your agent calling the API. To <em>do</em> something, prompt your agent. <strong>Billing is the only exception.</strong>
       </ROBanner>

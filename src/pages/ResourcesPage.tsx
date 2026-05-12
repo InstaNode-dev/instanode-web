@@ -4,6 +4,7 @@ import {
   ContractBanner, EnvPill, ExpiryBadge, TierPill, ResourceIcon, RelTime, UsageBar, PromptCard,
   useExpiryTick
 } from '../components/Common'
+import { QuotaWallBanner } from '../components/QuotaWallBanner'
 import * as api from '../api'
 import type { Resource, ResourceType } from '../api'
 import { useDashboardCtx } from '../hooks/useDashboardCtx'
@@ -47,6 +48,10 @@ export function ResourcesPage() {
 
   return (
     <>
+      {/* QuotaWallBanner — Track U1. Most actionable here: this is the
+          page where a user looking at their resources sees the wall
+          approaching and can act on it. */}
+      <QuotaWallBanner teamId={ctx.me?.team?.id} />
 
       <div className="filters">
         {TYPES.map((t) => (
