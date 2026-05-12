@@ -24,9 +24,19 @@ jobs:
           node-version: '20'
           cache: 'npm'
       - run: npm ci
+      # Compute the short SHA of HEAD here so vite.config.ts can splice it
+      # into the bundle (define: VITE_COMMIT_ID). Mirrors what the Go services
+      # do via -ldflags so every frontend error reported to New Relic carries
+      # the same build identifier the api/worker/provisioner logs use.
+      - name: Export GIT_SHA
+        run: echo "GIT_SHA=$(git rev-parse --short HEAD)" >> "$GITHUB_ENV"
       - run: npm run build
         env:
           VITE_API_URL: https://api.instanode.dev
+          # New Relic browser-agent keys. Missing or empty → main.tsx skips
+          # init (fail-open), so PR forks / unconfigured envs still build cleanly.
+          VITE_NEWRELIC_LICENSE_KEY: ${{ secrets.VITE_NEWRELIC_LICENSE_KEY }}
+          VITE_NEWRELIC_APP_ID: ${{ secrets.VITE_NEWRELIC_APP_ID }}
       - run: cp dist/index.html dist/404.html
       - uses: actions/upload-pages-artifact@v3
         with:
