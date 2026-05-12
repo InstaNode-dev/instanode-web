@@ -356,11 +356,62 @@ export function BillingPage() {
               </li>
             ))}
           </ul>
+          {/* U2: "what unlocks" bulleted list above the primary CTA. Driven
+              by the next-tier definition in PLANS so we never duplicate the
+              feature copy. Only renders when the user has a higher tier to
+              move to. */}
+          {plan.nextTier && PLANS[plan.nextTier] && (
+            <div
+              data-testid="next-tier-unlocks"
+              style={{
+                marginBottom: 10,
+                padding: '10px 12px',
+                border: '1px solid var(--border)',
+                borderRadius: 6,
+                background: 'var(--surface)',
+              }}
+            >
+              <div
+                style={{
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: 10.5,
+                  color: 'var(--text-faint)',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.05em',
+                  marginBottom: 6,
+                }}
+              >
+                what {PLANS[plan.nextTier]!.label.toLowerCase()} unlocks
+              </div>
+              <ul style={{ listStyle: 'disc', paddingLeft: 18, margin: 0 }}>
+                {PLANS[plan.nextTier]!.features.map((f, i) => (
+                  <li
+                    key={i}
+                    style={{
+                      fontSize: 12.5,
+                      color: 'var(--text-dim)',
+                      opacity: f.comingSoon ? 0.6 : 1,
+                      lineHeight: 1.55,
+                    }}
+                  >
+                    {f.text}
+                    {f.comingSoon && (
+                      <span style={{
+                        marginLeft: 6, padding: '1px 6px', fontSize: 10,
+                        fontFamily: 'var(--font-mono)', color: 'var(--violet)',
+                        border: '1px solid rgba(183,148,246,0.3)', borderRadius: 4,
+                        textTransform: 'uppercase', letterSpacing: 0.06,
+                      }}>soon</span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           {/* ── Discount code (P3) ───────────────────────────────────────
-              Sits below the price + feature list, above the upgrade CTA.
-              Only rendered when an upgrade target exists (no point applying
-              a discount on team-tier — there's nothing left to upgrade to).
-              Collapsed by default; one-line link expands a small input. */}
+              Sits below the unlocks list, above the upgrade CTA. Only
+              rendered when an upgrade target exists (no point applying
+              a discount on team-tier — there's nothing left to upgrade to). */}
           {plan.nextTier && (
             <PromoCodePanel
               open={promoOpen}
