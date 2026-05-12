@@ -19,15 +19,7 @@ export function DeploymentsPage() {
 
   return (
     <>
-      <ContractBanner kind="warning" badge="naming gap">
-        <strong>"Deployments" in the brief = "Stacks" in the code.</strong> The agent API exposes <code>GET /api/v1/stacks</code>{' '}
-        (returns <code>DashboardStack</code>). UI keeps <code>/deployments</code> (user language); API stays <code>/stacks</code> (existing).
-      </ContractBanner>
 
-      <ContractBanner kind="locked" badge="locked">
-        <strong>GET /api/v1/stacks</strong> · returns <code>{`{"ok": true, "items": DashboardStack[], "total": number}`}</code>.
-        Status enum: <code>building | running | failed | stopped</code>.
-      </ContractBanner>
 
       <div className="table">
         <div className="table-row head" style={{ gridTemplateColumns: '1.5fr 1fr 100px 80px 100px 80px 28px' }}>

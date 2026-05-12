@@ -187,50 +187,29 @@ describe('fetchBilling()', () => {
     expect(r.billing.status).toBe('none')
   })
 
-  it('falls back to FIXTURE_BILLING on a 503 from /api/v1/billing', async () => {
+  it('propagates 503 errors honestly (no FIXTURE_BILLING fallback) — §10.21.1', async () => {
+    // Previously a 503 from /api/v1/billing returned FIXTURE_BILLING — a fake
+    // "active Razorpay subscription, ****4242 visa, renews in 9 days" that
+    // didn't correspond to any real billing state. Removed. BillingPage now
+    // catches the APIError and renders a real error banner.
     const m = installFetch()
-    // First call (fetchBilling) → 503
     m.mockResolvedValueOnce(jsonResponse(
       { error: 'billing_not_configured', message: 'Razorpay is not configured' },
       { status: 503, statusText: 'Service Unavailable' },
     ))
-    // Second call (fetchMe inside the fallback) → ok
-    m.mockResolvedValueOnce(jsonResponse({
-      ok: true,
-      user_id: 'u_test',
-      team_id: 't_test',
-      email: 'me@test.dev',
-      tier: 'hobby',
-      trial_ends_at: null,
-    }))
-    const r = await fetchBilling()
-    expect(r.billing).toEqual(FIXTURE_BILLING)
-    expect(r.plan).toBe('hobby')
+    await expect(fetchBilling()).rejects.toMatchObject({ status: 503 })
   })
 
-  it("falls back to plan='hobby' when fetchMe also fails inside the 503 path", async () => {
-    // Navigate to /login so the 401 redirect side-effect inside call()
-    // is suppressed (auth-skip prefix). Without this, jsdom logs a noisy
-    // navigation error even though the test still passes.
+  it('propagates auth errors (no FIXTURE_USER fallback chain)', async () => {
+    // The old chain was: 503 → fall back to FIXTURE_BILLING via fetchMe. Both
+    // fallbacks are gone — the call propagates the 503 directly.
     window.history.pushState({}, '', '/login')
     const m = installFetch()
     m.mockResolvedValueOnce(jsonResponse(
       { error: 'billing_not_configured' },
       { status: 503 },
     ))
-    // fetchMe rejects but fetchMe itself has its own fallback to FIXTURE_USER —
-    // so the inner try/catch here actually hits the fallback path via fetchMe's
-    // internal recovery. To force the outer catch we make fetchMe reject AND
-    // its inner fallback reject — but fetchMe always returns fake() on
-    // non-401 errors, so the inner try will succeed. Use a 401 from fetchMe
-    // so fetchMe re-throws, which trips the outer catch.
-    m.mockResolvedValueOnce(jsonResponse(
-      { error: 'unauthorized' },
-      { status: 401, statusText: 'Unauthorized' },
-    ))
-    const r = await fetchBilling()
-    expect(r.plan).toBe('hobby')
-    expect(r.billing).toEqual(FIXTURE_BILLING)
+    await expect(fetchBilling()).rejects.toMatchObject({ status: 503 })
     window.history.pushState({}, '', '/')
   })
 
@@ -290,14 +269,15 @@ describe('listInvoices()', () => {
     expect(r.invoices).toEqual([])
   })
 
-  it('falls back to FIXTURE_INVOICES on a 503', async () => {
+  it('propagates 503 errors honestly (no FIXTURE_INVOICES fallback) — §10.21.1', async () => {
+    // Previously a 503 returned 3 mock "paid" invoices that didn't correspond
+    // to any real payment. Removed. BillingPage now surfaces the failure.
     const m = installFetch()
     m.mockResolvedValueOnce(jsonResponse(
       { error: 'billing_not_configured' },
       { status: 503, statusText: 'Service Unavailable' },
     ))
-    const r = await listInvoices()
-    expect(r.invoices).toEqual(FIXTURE_INVOICES)
+    await expect(listInvoices()).rejects.toMatchObject({ status: 503 })
   })
 
   it('propagates non-503 errors', async () => {

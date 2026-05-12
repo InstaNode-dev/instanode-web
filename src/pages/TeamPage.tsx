@@ -39,15 +39,7 @@ export function TeamPage() {
 
   return (
     <>
-      <ContractBanner kind="locked" badge="locked">
-        <strong>7 endpoints live.</strong> <code>GET /api/v1/team/members</code> · <code>POST .../invite</code> ·{' '}
-        <code>DELETE .../:user_id</code> · <code>POST .../leave</code> · <code>GET /invitations</code> ·{' '}
-        <code>DELETE /invitations/:id</code> · <code>POST /invitations/:id/accept</code>.
-      </ContractBanner>
 
-      <ContractBanner kind="warning" badge="role gap">
-        <strong><code>PATCH /api/v1/team/members/:user_id</code> for role changes is missing.</strong> Brief §5.8 requires Owner / Admin / Developer / Viewer with promotion/demotion.
-      </ContractBanner>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr', gap: 16 }}>
         <div>

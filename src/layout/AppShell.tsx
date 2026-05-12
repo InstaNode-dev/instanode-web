@@ -14,12 +14,13 @@ const m = (title: string, scope: Scope): PageMeta => ({ title, scope })
 export const PAGE_META: Record<string, PageMeta> = {
   '/':                m('Overview',      'read'),
   '/resources':       m('Resources',     'read'),
-  '/resources/:id':   m('flashcards-db', 'read'),
+  // '/resources/:id' is intentionally omitted from PAGE_META — the H1 is
+  // resolved dynamically from ctx.resources by computeMeta() below so it
+  // reflects the loaded resource's real name. The page itself also renders
+  // its own header. (§10.21.)
   '/deployments':     m('Deployments',   'read'),
-  '/deployments/:id': m('flashcards',    'read'),
-  '/stacks':          m('Stacks',        'read'),
+  '/deployments/:id': m('Deployment',    'read'),
   '/vault':           m('Vault',         'read'),
-  '/team':            m('Team',          'read'),
   '/billing':         m('Billing',       'write'),
   '/settings':        m('Settings',      'read'),
   '/contracts':       m('API contracts', 'read')
@@ -27,6 +28,18 @@ export const PAGE_META: Record<string, PageMeta> = {
 
 function getMeta(path: string): PageMeta {
   return PAGE_META[path] ?? m('', 'read')
+}
+
+// computeMeta — resolves PageMeta with route-specific dynamic overrides.
+// Today it covers '/resources/:id' so the H1 shows the resource's real
+// name instead of a hardcoded label.
+function computeMeta(routeKey: string, pathname: string, ctx: DashboardCtx): PageMeta {
+  if (routeKey === '/resources/:id') {
+    const id = pathname.split('/').filter(Boolean).pop() ?? ''
+    const found = ctx.resources?.find((r) => r.id === id)
+    return { title: found?.name ?? '', scope: 'read' }
+  }
+  return getMeta(routeKey)
 }
 
 // computeCrumb — derive the breadcrumb tail from the live dashboard ctx and
@@ -51,15 +64,8 @@ function computeCrumb(routeKey: string, pathname: string, ctx: DashboardCtx): st
       return `${ctx.env} · ${ctx.counts.deployments} active`
     case '/deployments/:id':
       return 'deployments / live'
-    case '/stacks':
-      return ctx.env
     case '/vault':
       return `${ctx.env} · ${ctx.counts.vault} entries`
-    case '/team': {
-      const slug = ctx.me?.team?.slug ?? ctx.me?.team?.id?.slice(0, 8) ?? 'workspace'
-      const n = ctx.counts.team
-      return `${slug} · ${n} member${n !== 1 ? 's' : ''}`
-    }
     case '/billing':
       return ctx.me?.team?.tier ?? '—'
     case '/settings':
@@ -156,7 +162,7 @@ export function AppShell() {
   //  whenever the user navigates or interacts).
   const now = useExpiryTick(60_000)
   const routeKey = routeIdToKey(location.pathname, location.pathname)
-  const meta = getMeta(routeKey)
+  const meta = computeMeta(routeKey, location.pathname, ctx)
   const crumb = computeCrumb(routeKey, location.pathname, ctx)
 
   // Org / team display — real values from /auth/me, fall back to placeholders
@@ -200,25 +206,17 @@ export function AppShell() {
             <NavRow to="/app" icon={icons.overview}>Overview</NavRow>
             <NavRow to="/app/resources" icon={icons.resources} badge={String(ctx.counts.resources)}>Resources</NavRow>
             <NavRow to="/app/deployments" icon={icons.deploy} badge={ctx.counts.deployments > 0 ? String(ctx.counts.deployments) : undefined}>Deployments</NavRow>
-            <NavRow to="/app/stacks" icon={icons.stacks}>Stacks</NavRow>
 
             <div className="nav-section">platform</div>
             <NavRow to="/app/vault" icon={icons.vault} badge={String(ctx.counts.vault)}>Vault</NavRow>
-            <NavRow to="/app/team" icon={icons.team} badge={String(ctx.counts.team)}>Team</NavRow>
             <NavRow to="/app/billing" icon={icons.billing}>Billing</NavRow>
             <NavRow to="/app/settings" icon={icons.settings}>Settings</NavRow>
 
             <div className="nav-section">design ref</div>
-            <NavRow
-              to="/app/contracts"
-              icon={icons.contracts}
-              badge="11 gaps"
-              badgeStyle={{
-                background: 'rgba(255,122,138,0.08)',
-                color: 'var(--rose)',
-                border: '1px solid rgba(255,122,138,0.2)'
-              }}
-            >
+            {/* §10.21: removed the "11 gaps" badge — the contracts page is a
+                design-ref artifact and the badge promised a gap-tracker that
+                doesn't exist. */}
+            <NavRow to="/app/contracts" icon={icons.contracts}>
               API contracts
             </NavRow>
 
@@ -237,7 +235,7 @@ export function AppShell() {
               </div>
               <div className="topbar-tools">
                 <ScopePill scope={meta.scope} />
-                <div className="avatar" title="aanya@acme.dev">A</div>
+                <div className="avatar" title={ctx.me?.user?.email ?? ''}>A</div>
               </div>
             </header>
 
