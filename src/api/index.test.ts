@@ -497,15 +497,14 @@ describe('fetchMe()', () => {
     window.history.pushState({}, '', '/')
   })
 
-  it('falls back to FIXTURE shapes on a 500', async () => {
+  it('propagates errors on 5xx instead of silently serving a fixture identity (§10.21.1)', async () => {
+    // Previously fetchMe() fell back to FIXTURE_USER on 500 so the chrome
+    // silently rendered "acme-corp / aanya@acme.dev" mock data when the
+    // backend was down. Removed — errors propagate; useDashboardCtx
+    // records meErr and chrome shows the workspace placeholder.
     const m = installFetch()
-    m.mockResolvedValueOnce(jsonResponse(
-      { error: 'boom' },
-      { status: 500 },
-    ))
-    const r = await fetchMe()
-    // fixture user id is u_aanya — proves we hit the fallback.
-    expect(r.user.id).toBe('u_aanya')
+    m.mockResolvedValueOnce(jsonResponse({ error: 'boom' }, { status: 500 }))
+    await expect(fetchMe()).rejects.toBeDefined()
   })
 })
 

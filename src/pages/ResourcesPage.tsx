@@ -1,22 +1,28 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
-  ContractBanner, EnvPill, TierPill, ResourceIcon, RelTime, UsageBar, PromptPill
+  ContractBanner, EnvPill, ExpiryBadge, TierPill, ResourceIcon, RelTime, UsageBar, PromptCard,
+  useExpiryTick
 } from '../components/Common'
 import * as api from '../api'
-import type { Env, Resource, ResourceType } from '../api'
+import type { Resource, ResourceType } from '../api'
 import { useDashboardCtx } from '../hooks/useDashboardCtx'
 
 const TYPES: (ResourceType | 'all')[] = ['all', 'postgres', 'redis', 'mongodb', 'queue', 'storage', 'webhook']
 
 export function ResourcesPage() {
+  // We still read team tier from ctx for the prompt cards — env, however,
+  // is intentionally NOT consumed here. The backend doesn't honor a multi-env
+  // filter (no GET /api/v1/resources?env=…), so surfacing chips would be a lie.
+  // Env stays scoped to VaultPage where it's genuinely backed by per-env rows.
   const ctx = useDashboardCtx()
-  const ENVS: (Env | 'all')[] = ['all', ...ctx.envs] as (Env | 'all')[]
   const [items, setItems] = useState<Resource[]>([])
   const [loading, setLoading] = useState(true)
-  const [env, setEnv] = useState<Env | 'all'>(ctx.env as Env)
   const [type, setType] = useState<ResourceType | 'all'>('all')
   const [err, setErr] = useState<string | null>(null)
+  // Render-time clock for countdown badges. Drives 60s refresh — every
+  // resource row's ExpiryBadge re-renders against `now`.
+  const now = useExpiryTick(60_000)
 
   useEffect(() => {
     let alive = true
@@ -34,27 +40,12 @@ export function ResourcesPage() {
         setLoading(false)
       })
     return () => { alive = false }
-  }, [ctx.env])
-
-  // Sync local filter to global env when ctx changes.
-  useEffect(() => { setEnv(ctx.env as Env) }, [ctx.env])
+  }, [])
 
   const filtered = useMemo(
-    () =>
-      items.filter(
-        (r) => (env === 'all' || r.env === env) && (type === 'all' || r.resource_type === type)
-      ),
-    [items, env, type]
+    () => items.filter((r) => type === 'all' || r.resource_type === type),
+    [items, type]
   )
-
-  // counts per env (for filter chips)
-  const envCounts = useMemo(() => {
-    const m: Record<string, number> = { all: items.length }
-    items.forEach((r) => {
-      m[r.env] = (m[r.env] ?? 0) + 1
-    })
-    return m
-  }, [items])
 
   const totalGB = items.reduce((s, r) => s + r.storage_bytes, 0) / 1_000_000_000
 
@@ -66,29 +57,65 @@ export function ResourcesPage() {
         is intentionally omitted from list responses — only <code>GET /:id</code> and <code>/rotate</code> include it.
       </ContractBanner>
 
-      <ContractBanner kind="warning" badge="needs lock">
-        <strong>Multi-env filtering</strong> isn't yet supported by the backend. Currently filtered client-side. <strong>Decision:</strong>{' '}
-        add server-side <code>?env=production</code> param OR keep client-side. (For now: client-side.)
-      </ContractBanner>
-
       <div className="filters">
-        {ENVS.map((e) => (
-          <button key={e} className={`chip ${env === e ? 'on' : ''}`} onClick={() => setEnv(e)}>
-            {e === 'all' ? 'all envs' : e}
-            {envCounts[e] !== undefined && envCounts[e] > 0 && env !== e && (
-              <span style={{ opacity: 0.6 }}>· {envCounts[e]}</span>
-            )}
-          </button>
-        ))}
-        <span style={{ width: 1, background: 'var(--border)', alignSelf: 'stretch', margin: '0 6px' }} />
         {TYPES.map((t) => (
           <button key={t} className={`chip ${type === t ? 'on' : ''}`} onClick={() => setType(t)}>
             {t}
           </button>
         ))}
-        <span style={{ marginLeft: 'auto' }}>
-          <PromptPill label="deploy this app" />
-        </span>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, margin: '16px 0' }}>
+        <PromptCard
+          title="Provision a new resource"
+          hint="postgres · redis · mongodb · queue · storage · webhook"
+          prompt={
+            <>
+              Provision a new resource on my instanode account. Pick the type and tier in
+              the prompt — limits come from my current plan (<code>{ctx.me?.team?.tier ?? 'unknown'}</code>).
+            </>
+          }
+          promptText={
+            `Provision a new resource on my instanode account.\n` +
+            `\n` +
+            `- Type: <postgres | redis | mongodb | queue | storage | webhook>\n` +
+            `- Env: <production | staging | development> (default production)\n` +
+            `- Name (optional): <my-app-db>\n` +
+            `- My plan tier: ${ctx.me?.team?.tier ?? 'unknown'} — limits per resource come from this\n` +
+            `\n` +
+            `Endpoint: POST https://api.instanode.dev/<type>/new  (e.g. /db/new for postgres, /cache/new for redis, /nosql/new for mongodb, /queue/new, /storage/new, /webhook/new)\n` +
+            `Auth: use my INSTANODE_TOKEN env var as Bearer\n` +
+            `\n` +
+            `The response contains a connection_url and a token. Wire connection_url into my app's env (e.g. DATABASE_URL=<url>) and commit. The token is how this resource is referenced in later operations.`
+          }
+          method="POST"
+          endpoint={`/<type>/new`}
+        />
+        <PromptCard
+          title="Deploy an app on these resources"
+          hint="zero-click container deploy"
+          prompt={
+            <>
+              Deploy my current project as a container on instanode, wired to all the
+              resources above. The platform pulls my repo, builds, and exposes a public URL.
+            </>
+          }
+          promptText={
+            `Deploy my project as a container on instanode, wired to my existing claimed resources.\n` +
+            `\n` +
+            `- Dockerfile path: <path to Dockerfile in my repo, default ./Dockerfile>\n` +
+            `- Resources to wire in: <list resource tokens — they appear in dashboard /resources>\n` +
+            `- Env: <production | staging | development>\n` +
+            `- My plan tier: ${ctx.me?.team?.tier ?? 'unknown'}\n` +
+            `\n` +
+            `Endpoint: POST https://api.instanode.dev/deploy/new\n` +
+            `Auth: use my INSTANODE_TOKEN env var as Bearer\n` +
+            `\n` +
+            `The response contains a deploy id, a public *.deployment.instanode.dev URL, and a streaming logs URL. Use GET /api/v1/stacks/<slug>/logs/<svc> to watch the build live.`
+          }
+          method="POST"
+          endpoint={`/deploy/new`}
+        />
       </div>
 
       <div className="section-h">
@@ -130,7 +157,10 @@ export function ResourcesPage() {
                 <div className="res-name">
                   <ResourceIcon type={r.resource_type} />
                   <div className="info">
-                    <span className="n">{r.name ?? r.id}</span>
+                    <span className="n" style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                      {r.name ?? r.id}
+                      <ExpiryBadge expiresAt={r.expires_at} now={now} />
+                    </span>
                     <span className="id">{r.token}</span>
                   </div>
                 </div>
@@ -145,7 +175,7 @@ export function ResourcesPage() {
                   {r.connections_in_use ?? '—'} / {r.connections_limit ?? '—'}
                 </span>
                 <RelTime at={r.created_at} />
-                <button className="res-action" onClick={(e) => e.preventDefault()} aria-label="actions">⋯</button>
+                <span />
               </Link>
             ))}
       </div>

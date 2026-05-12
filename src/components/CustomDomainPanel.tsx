@@ -13,6 +13,7 @@
 import { useEffect, useState } from 'react'
 import * as api from '../api'
 import type { CustomDomain, CustomDomainRecord, CustomDomainStatus } from '../api'
+import { copyToClipboard } from './Common'
 
 // Endpoint hint shown beneath the section header. The exact path is
 // /api/v1/stacks/:slug/domains — keeping it as a constant so the heading
@@ -375,13 +376,13 @@ function DnsRow({
 }) {
   const [copied, setCopied] = useState(false)
   async function copy() {
-    try {
-      await navigator.clipboard.writeText(value)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1600)
-    } catch {
-      /* clipboard unavailable — fail silent */
+    const ok = await copyToClipboard(value)
+    if (!ok) {
+      console.warn('[CustomDomainPanel] copy failed — clipboard unavailable')
+      return
     }
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1600)
   }
   return (
     <div style={{

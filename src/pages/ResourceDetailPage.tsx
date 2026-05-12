@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
-import { useParams, useNavigate, Link } from 'react-router-dom'
+import { useParams, Link } from 'react-router-dom'
 import {
-  ROBanner, ContractBanner, EnvPill, TierPill, ResourceIcon,
-  Card, ContractLine, PromptCard, PromptPill
+  ROBanner, ContractBanner, EnvPill, ExpiryBadge, TierPill, ResourceIcon,
+  Card, ContractLine, PromptCard,
+  expiryLevel, formatTimeUntil, useExpiryTick, copyToClipboard
 } from '../components/Common'
 import * as api from '../api'
 import type { Resource } from '../api'
@@ -12,13 +13,12 @@ type Tab = (typeof TABS)[number]
 
 export function ResourceDetailPage() {
   const { id = '' } = useParams()
-  const nav = useNavigate()
   const [r, setR] = useState<Resource | null>(null)
   const [tab, setTab] = useState<Tab>('Overview')
   const [revealed, setRevealed] = useState(false)
-  const [busy, setBusy] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
+  const now = useExpiryTick(60_000)
 
   useEffect(() => {
     api.getResource(id)
@@ -26,36 +26,13 @@ export function ResourceDetailPage() {
       .catch((e) => setErr(e?.message ?? 'load failed'))
   }, [id])
 
-  async function rotate() {
-    if (!r) return
-    if (!window.confirm('Rotate credentials? Existing connections using the old URL will need to reconnect.')) return
-    setBusy('rotate'); setErr(null)
-    try {
-      const { resource } = await api.rotateResource(r.id)
-      setR(resource); setRevealed(true)
-    } catch (e: any) {
-      setErr(e?.message ?? 'rotate failed')
-    } finally {
-      setBusy(null)
-    }
-  }
-
-  async function destroy() {
-    if (!r) return
-    if (!window.confirm(`Delete ${r.name ?? r.id}? The data is gone for good.`)) return
-    setBusy('delete'); setErr(null)
-    try {
-      await api.deleteResource(r.id)
-      nav('/resources')
-    } catch (e: any) {
-      setErr(e?.message ?? 'delete failed')
-      setBusy(null)
-    }
-  }
-
-  function copyURL() {
+  async function copyURL() {
     if (!r?.connection_url) return
-    navigator.clipboard.writeText(r.connection_url)
+    const ok = await copyToClipboard(r.connection_url)
+    if (!ok) {
+      console.warn('[ResourceDetailPage] copy failed — clipboard unavailable')
+      return
+    }
     setCopied(true)
     setTimeout(() => setCopied(false), 1500)
   }
@@ -70,20 +47,18 @@ export function ResourceDetailPage() {
       <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 24 }}>
         <ResourceIcon type={r.resource_type} size={44} />
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
             <h2 style={{ fontSize: 22, fontWeight: 500, letterSpacing: '-0.02em' }}>
               {r.name ?? r.id}
             </h2>
             <EnvPill env={r.env} />
             <TierPill tier={r.tier} />
+            <ExpiryBadge expiresAt={r.expires_at} now={now} />
           </div>
           <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11.5, color: 'var(--text-faint)' }}>
             {r.token} · {r.resource_type} · {r.cloud_vendor ?? 'aws'} · {r.country_code ?? 'IN'} · created{' '}
             {new Date(r.created_at).toLocaleDateString()}
           </div>
-        </div>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <PromptPill label="ask agent" />
         </div>
       </div>
 
@@ -95,6 +70,40 @@ export function ResourceDetailPage() {
         <strong>GET /api/v1/resources/:id</strong> · returns the full <code>Resource</code> shape including <code>connection_url</code>.
         The connection URL is single-use safe — frontend keeps it in memory only, masks by default, reveals on click.
       </ContractBanner>
+
+      {/* Time-remaining card — only when this resource has a TTL (claimed,
+          not yet on an active subscription). Loud, near the top, with a
+          direct link to /billing where the Upgrade button lives. */}
+      {r.expires_at && (
+        <Card
+          title="Time remaining"
+          right={<ExpiryBadge expiresAt={r.expires_at} now={now} />}
+          style={{
+            borderColor: 'rgba(255,122,138,0.28)',
+            background: 'linear-gradient(180deg, rgba(255,122,138,0.04), transparent)',
+            marginBottom: 16,
+          }}
+          className="expiry-card"
+        >
+          <div data-testid="expiry-card" style={{ display: 'flex', alignItems: 'baseline', gap: 16, flexWrap: 'wrap' }}>
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 24, color: 'var(--rose)', fontWeight: 500 }}>
+              {expiryLevel(r.expires_at, now) === 'expired'
+                ? 'expired'
+                : formatTimeUntil(r.expires_at, now)}
+            </div>
+            <div style={{ color: 'var(--text-dim)', fontSize: 13, lineHeight: 1.55, flex: '1 1 320px' }}>
+              This resource is on the 24h claim TTL. It will be deleted on{' '}
+              <strong style={{ color: 'var(--text)' }}>
+                {new Date(r.expires_at).toLocaleString()}
+              </strong>{' '}
+              unless you start a subscription.{' '}
+              <Link to="/app/billing" style={{ color: 'var(--rose)', textDecoration: 'underline', textUnderlineOffset: 3 }}>
+                Pay now to keep it →
+              </Link>
+            </div>
+          </div>
+        </Card>
+      )}
 
       {/* tabs */}
       <div className="tabs">
@@ -122,12 +131,6 @@ export function ResourceDetailPage() {
                 </button>
                 <button className="btn btn-sm btn-secondary" onClick={copyURL} disabled={!r.connection_url}>
                   {copied ? 'copied ✓' : 'copy'}
-                </button>
-                <button className="btn btn-sm btn-secondary" onClick={rotate} disabled={busy === 'rotate'} data-testid="rotate">
-                  {busy === 'rotate' ? 'rotating…' : 'rotate'}
-                </button>
-                <button className="btn btn-sm btn-ghost" style={{ color: 'var(--rose)' }} onClick={destroy} disabled={busy === 'delete'} data-testid="delete">
-                  {busy === 'delete' ? 'deleting…' : 'delete'}
                 </button>
               </div>
               {err && (
@@ -181,12 +184,53 @@ export function ResourceDetailPage() {
             </Card>
 
             <PromptCard
-              danger
-              title="Mutate this resource"
+              title="Rotate credentials"
               hint="via agent"
-              prompt={<>Rotate the password for <em>{r.name ?? r.id}</em></>}
+              prompt={
+                <>
+                  Rotate the password for my <strong>{r.resource_type}</strong> resource{' '}
+                  <em>{r.name ?? r.id}</em> (token <code>{r.token}</code>) and update the
+                  connection string anywhere I've used it (.env, deployment env, secrets).
+                  Existing connections on the old URL keep working for 5 minutes.
+                </>
+              }
+              promptText={
+                `Rotate the password for my ${r.resource_type} resource "${r.name ?? r.id}" on instanode.\n` +
+                `\n` +
+                `- Resource token: ${r.token}\n` +
+                `- Resource id: ${r.id}\n` +
+                `- Endpoint: POST https://api.instanode.dev/api/v1/resources/${r.token}/rotate\n` +
+                `- Auth: use my INSTANODE_TOKEN env var as Bearer\n` +
+                `\n` +
+                `After rotation, the response contains a new connection_url. Update it everywhere it appears in my project (.env, deployment manifests, secrets) and redeploy. The old URL keeps working for 5 minutes as a grace period.`
+              }
               method="POST"
               endpoint={`/api/v1/resources/${r.token}/rotate`}
+            />
+
+            <PromptCard
+              danger
+              title="Decommission this resource"
+              hint="data loss"
+              prompt={
+                <>
+                  Permanently delete <em>{r.name ?? r.id}</em> and remove all references to its
+                  connection string in my code. <strong>Data is gone for good.</strong>
+                </>
+              }
+              promptText={
+                `Permanently decommission my ${r.resource_type} resource "${r.name ?? r.id}" on instanode.\n` +
+                `\n` +
+                `- Resource token: ${r.token}\n` +
+                `- Resource id: ${r.id}\n` +
+                `- Storage: ${(r.storage_bytes / 1_000_000).toFixed(1)} MB will be destroyed\n` +
+                `- Endpoint: DELETE https://api.instanode.dev/api/v1/resources/${r.token}\n` +
+                `- Auth: use my INSTANODE_TOKEN env var as Bearer\n` +
+                `\n` +
+                `Before deleting: confirm I have a backup elsewhere, then remove every reference to this resource's connection_url in my codebase (.env files, deployment manifests, code) so nothing tries to reconnect after the DELETE.`
+              }
+              method="DELETE"
+              endpoint={`/api/v1/resources/${r.token}`}
             />
           </div>
         </div>

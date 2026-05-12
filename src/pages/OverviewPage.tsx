@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
-  ROBanner, PromptPill, EnvPill, TierPill, ResourceIcon, RelTime, UsageBar, Card, Sparkline
+  ROBanner, EnvPill, TierPill, ResourceIcon, RelTime, UsageBar, Card, Sparkline,
+  copyToClipboard
 } from '../components/Common'
 import * as api from '../api'
 import type { Resource, ActivityItem } from '../api'
@@ -14,10 +15,63 @@ export function OverviewPage() {
   const [resources, setResources] = useState<Resource[]>([])
   const [activity, setActivity] = useState<ActivityItem[]>([])
   const [loading, setLoading] = useState(true)
+  const [copiedPrompt, setCopiedPrompt] = useState<string | null>(null)
   const ctx = useDashboardCtx()
   const tier = ctx.me?.team.tier ?? 'hobby'
   const env = ctx.env
   const vaultCount = ctx.counts.vault
+
+  // Tier-aware quick prompts. Each one is a real, copyable instruction the
+  // user pastes into their agent — interpolating the live tier so the agent
+  // knows the relevant limits up front (no "what tier am I?" round-trip).
+  const QUICK_PROMPTS: Array<{ id: string; label: string; endpoint: string; text: string }> = [
+    {
+      id: 'provision-postgres',
+      label: 'Provision a Postgres for development',
+      endpoint: 'POST /db/new',
+      text:
+        `Provision a Postgres database for development on instanode.\n` +
+        `\n` +
+        `- My current plan tier is "${tier}" — respect that tier's storage + connection limits.\n` +
+        `- Endpoint: POST https://api.instanode.dev/db/new\n` +
+        `- Auth: use my INSTANODE_TOKEN env var as Bearer.\n` +
+        `- Return the connection_url and the resource id so I can write data immediately.`,
+    },
+    {
+      id: 'deploy-app',
+      label: 'Deploy my project',
+      endpoint: 'POST /deploy/new',
+      text:
+        `Deploy my project to instanode.\n` +
+        `\n` +
+        `- My current plan tier is "${tier}" — respect that tier's CPU/memory/disk limits.\n` +
+        `- Endpoint: POST https://api.instanode.dev/deploy/new\n` +
+        `- Auth: use my INSTANODE_TOKEN env var as Bearer.\n` +
+        `- Build from the Dockerfile at the repo root and return the live app URL.`,
+    },
+    {
+      id: 'invite-teammate',
+      label: 'Invite a teammate',
+      endpoint: 'POST /api/v1/team/members/invite',
+      text:
+        `Invite a teammate to my instanode team.\n` +
+        `\n` +
+        `- My current plan tier is "${tier}" — respect that tier's seat limit.\n` +
+        `- Endpoint: POST https://api.instanode.dev/api/v1/team/members/invite\n` +
+        `- Auth: use my INSTANODE_TOKEN env var as Bearer.\n` +
+        `- Body: {"email":"<their-email>","role":"developer"}.`,
+    },
+  ]
+
+  async function copyPrompt(id: string, text: string) {
+    const ok = await copyToClipboard(text)
+    if (!ok) {
+      console.warn('[OverviewPage] copy failed — clipboard unavailable')
+      return
+    }
+    setCopiedPrompt(id)
+    window.setTimeout(() => setCopiedPrompt((cur) => (cur === id ? null : cur)), 1500)
+  }
 
   useEffect(() => {
     let alive = true
@@ -104,28 +158,34 @@ export function OverviewPage() {
           <div className="prompt-card">
             <div className="head">
               <strong>Quick prompts</strong>
-              <span className="right">⌘K to send</span>
+              <span className="right">copy → paste in agent</span>
             </div>
-            <div className="prompt" style={{ fontSize: 14, padding: '11px 14px' }}>
-              <em>Spin up a Postgres for staging</em>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {QUICK_PROMPTS.map((p) => {
+                const isCopied = copiedPrompt === p.id
+                return (
+                  <button
+                    key={p.id}
+                    type="button"
+                    aria-label={`Copy prompt: ${p.label}`}
+                    data-testid={`quick-prompt-${p.id}`}
+                    onClick={() => copyPrompt(p.id, p.text)}
+                    className="prompt-pill"
+                    style={{
+                      justifyContent: 'space-between',
+                      padding: '6px 10px',
+                      background: 'transparent',
+                      textAlign: 'left',
+                      width: '100%',
+                      font: 'inherit',
+                    }}
+                  >
+                    <span><span className="label">{p.label}</span></span>
+                    <span style={{ opacity: 0.6 }}>{isCopied ? 'copied ✓' : p.endpoint}</span>
+                  </button>
+                )
+              })}
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 12 }}>
-              <a className="prompt-pill" style={{ justifyContent: 'space-between', padding: '6px 10px' }}>
-                <span><span className="label">Deploy this app</span></span>
-                <span style={{ opacity: 0.6 }}>POST /deploy/new</span>
-              </a>
-              <a className="prompt-pill" style={{ justifyContent: 'space-between', padding: '6px 10px' }}>
-                <span><span className="label">Add an OpenAI key to vault</span></span>
-                <span style={{ opacity: 0.6 }}>PUT /vault/:env/:key</span>
-              </a>
-              <a className="prompt-pill" style={{ justifyContent: 'space-between', padding: '6px 10px' }}>
-                <span><span className="label">Invite a teammate</span></span>
-                <span style={{ opacity: 0.6 }}>POST /team/.../invite</span>
-              </a>
-            </div>
-            <Link to="/agent" style={{ display: 'flex', gap: 4, alignItems: 'center', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--violet)' }}>
-              Browse the prompt library →
-            </Link>
           </div>
 
           <Card title="Recent activity" right="last 1h" className="" style={{ padding: 0 }}>

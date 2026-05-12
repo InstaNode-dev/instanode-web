@@ -1,8 +1,22 @@
-import { useEffect, useState } from 'react'
-import { ROBanner, ContractBanner, TierPill, StatusPill, RelTime } from '../components/Common'
+import { useEffect, useMemo, useState } from 'react'
+import { ROBanner, ContractBanner, TierPill } from '../components/Common'
 import * as api from '../api'
-import type { BillingDetails, Invoice } from '../api'
+import type { BillingDetails, Invoice, Resource } from '../api'
 import { useDashboardCtx } from '../hooks/useDashboardCtx'
+
+// Typed per-service limits used by the Usage panel. `Infinity` means "no
+// dashboard-side cap shown" (team-tier headroom). Postgres / Redis / MongoDB
+// values are in MB to match how UsageRow renders them; deployments / webhooks
+// / seats are integer counts. Source of truth is api/plans.yaml — keep in
+// sync if those numbers change.
+type PlanLimits = {
+  postgres_mb: number
+  redis_mb: number
+  mongodb_mb: number
+  deployments: number
+  webhooks: number
+  team_seats: number
+}
 
 const PLANS: Record<string, {
   label: string
@@ -10,9 +24,10 @@ const PLANS: Record<string, {
   features: Array<{ text: string; comingSoon?: boolean }>
   nextTier?: string
   highlight?: boolean
+  limits: PlanLimits
 }> = {
   anonymous: {
-    label: 'Anonymous (free)',
+    label: 'Anonymous',
     price: '$0',
     features: [
       { text: '10 MB Postgres · 2 conn · 24h TTL' },
@@ -21,9 +36,43 @@ const PLANS: Record<string, {
       { text: '100 stored webhooks' },
       { text: '0 deployments' },
       { text: 'no vault — claim resources first' },
-      { text: 'agent-only access' },
+      { text: 'agent-only access · no dashboard account' },
     ],
     nextTier: 'hobby',
+    limits: {
+      postgres_mb: 10,
+      redis_mb: 5,
+      mongodb_mb: 5,
+      deployments: 0,
+      webhooks: 100,
+      team_seats: 1,
+    },
+  },
+  // `free` shares anonymous's limits exactly — the only differences are
+  // (a) the user has claimed (team_id is set, dashboard is reachable) and
+  // (b) the user-facing label, which reads as "you have an account, you
+  // just haven't paid yet". Same 24h TTL — pay from day one.
+  free: {
+    label: 'Free',
+    price: '$0',
+    features: [
+      { text: '10 MB Postgres · 2 conn · 24h TTL' },
+      { text: '5 MB Redis · 24h TTL' },
+      { text: '5 MB MongoDB · 24h TTL' },
+      { text: '100 stored webhooks' },
+      { text: '0 deployments' },
+      { text: 'no vault — upgrade to Hobby to unlock' },
+      { text: 'dashboard access · upgrade to keep resources past 24h' },
+    ],
+    nextTier: 'hobby',
+    limits: {
+      postgres_mb: 10,
+      redis_mb: 5,
+      mongodb_mb: 5,
+      deployments: 0,
+      webhooks: 100,
+      team_seats: 1,
+    },
   },
   hobby: {
     label: 'Hobby',
@@ -38,6 +87,14 @@ const PLANS: Record<string, {
       { text: '1000 stored webhooks' },
     ],
     nextTier: 'pro',
+    limits: {
+      postgres_mb: 1024,
+      redis_mb: 50,
+      mongodb_mb: 100,
+      deployments: 1,
+      webhooks: 1000,
+      team_seats: 1,
+    },
   },
   pro: {
     label: 'Pro',
@@ -53,6 +110,14 @@ const PLANS: Record<string, {
     ],
     nextTier: 'team',
     highlight: true,
+    limits: {
+      postgres_mb: 5120,
+      redis_mb: 256,
+      mongodb_mb: 2048,
+      deployments: 10,
+      webhooks: 10000,
+      team_seats: 5,
+    },
   },
   team: {
     label: 'Team',
@@ -68,6 +133,17 @@ const PLANS: Record<string, {
       { text: 'Dedicated node pools', comingSoon: true },
       { text: 'Audit log export (CSV/JSONL)', comingSoon: true },
     ],
+    // Team-tier capacity is "unlimited" relative to dashboard math — represent
+    // as Infinity so usage stays at 0% even for very large totals. UsageRow's
+    // formatter renders Infinity as "∞".
+    limits: {
+      postgres_mb: Infinity,
+      redis_mb: Infinity,
+      mongodb_mb: Infinity,
+      deployments: Infinity,
+      webhooks: Infinity,
+      team_seats: Infinity,
+    },
   },
 }
 
@@ -86,15 +162,46 @@ export function BillingPage() {
 
   const [billing, setBilling] = useState<BillingDetails | null>(null)
   const [invoices, setInvoices] = useState<Invoice[]>([])
+  const [resources, setResources] = useState<Resource[]>([])
   const [checkoutErr, setCheckoutErr] = useState<string | null>(null)
   const [checkoutLoading, setCheckoutLoading] = useState(false)
 
   useEffect(() => {
-    Promise.all([api.fetchBilling(), api.listInvoices()]).then(([b, i]) => {
+    // Three independent reads — billing, invoices, and resources (for the
+    // Usage panel). A failure on one shouldn't blank the whole page, so each
+    // is guarded individually and fed into its own state slot.
+    Promise.all([
+      api.fetchBilling(),
+      api.listInvoices(),
+      api.listResources().catch(() => ({ items: [] as Resource[] })),
+    ]).then(([b, i, r]) => {
       setBilling(b.billing)
       setInvoices(i.invoices)
+      setResources((r as { items?: Resource[] }).items ?? [])
     })
   }, [])
+
+  // Aggregate live resource usage per type so the Usage panel reflects the
+  // user's actual footprint instead of the old hand-rolled fixture numbers.
+  // Storage figures sum `storage_bytes` from postgres/redis/mongodb resources;
+  // deployments / webhooks are simple counts.
+  const usage = useMemo(() => {
+    const sumBytes = (t: string) =>
+      resources
+        .filter((r) => r.resource_type === t)
+        .reduce((s, r) => s + (r.storage_bytes ?? 0), 0)
+    return {
+      postgres_mb: sumBytes('postgres') / (1024 * 1024),
+      redis_mb: sumBytes('redis') / (1024 * 1024),
+      mongodb_mb: sumBytes('mongodb') / (1024 * 1024),
+      deployments: resources.filter((r) => r.resource_type === 'deploy').length,
+      webhooks: resources.filter((r) => r.resource_type === 'webhook').length,
+      // We don't have a team-members list endpoint on the dashboard yet, so
+      // seats stays at 1 here. Sidebar `counts.team` shares the same gap —
+      // tracked in §10.7.
+      team_seats: 1,
+    }
+  }, [resources])
 
   if (!billing) return <div className="skel" style={{ width: '100%', height: 320 }} />
 
@@ -118,28 +225,13 @@ export function BillingPage() {
     }
   }
 
-  async function handleCancel() {
-    if (!window.confirm('Cancel your subscription? You will keep access until the end of the current period.')) return
-    setCheckoutErr(null)
-    try {
-      await api.cancelSubscription()
-      // Razorpay processes the cancellation asynchronously and emits a
-      // subscription.cancelled webhook that downgrades the team. The new
-      // tier won't appear until the next page reload picks up the
-      // updated whoami, so re-read the billing card and tell the user
-      // that the downgrade is in flight.
-      const b = await api.fetchBilling()
-      setBilling(b.billing)
-      window.alert('Cancellation requested. Your tier downgrades when Razorpay finalises (usually within seconds). Refresh the page in a moment.')
-    } catch (e: any) {
-      setCheckoutErr(e?.message ?? 'cancel failed')
-    }
-  }
-
   return (
     <>
       <ROBanner variant="write" showAsk={false}>
-        <strong>This is the only page where you click to act.</strong> Cards belong to humans, not agents. Plan changes, cancellations, and card updates all stay clickable — and the agent never has the credentials to call <code>POST /billing/checkout</code> on your behalf.
+        <strong>Upgrades and card updates stay clickable on this page</strong> — the
+        agent doesn't have payment credentials, so the human has to drive the
+        Razorpay flow. <strong>To cancel or downgrade, contact support</strong> —
+        we don't expose a self-serve path on purpose.
       </ROBanner>
 
       <ContractBanner kind="locked" badge="locked">
@@ -179,7 +271,13 @@ export function BillingPage() {
             >
               {plan.nextTier ? `Upgrade to ${PLANS[plan.nextTier]?.label ?? plan.nextTier}` : 'Change plan'}
             </button>
-            <button className="btn btn-ghost btn-sm" onClick={handleCancel}>Cancel subscription</button>
+            <a
+              className="btn btn-ghost btn-sm"
+              href="mailto:support@instanode.dev?subject=Cancel%20subscription"
+              data-testid="contact-support-cancel"
+            >
+              Cancel? Contact support
+            </a>
           </div>
           {checkoutErr && (
             <div style={{ marginBottom: 12, fontSize: 12, color: 'var(--danger, #c33)', fontFamily: 'var(--font-mono)' }}>
@@ -196,23 +294,70 @@ export function BillingPage() {
               </span>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              {/* The agent API never returns payment_exp_* — render only the
+                  auto-renew date, which we do have. (§10.8 — kill the leak.) */}
               <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-dim)' }}>
-                expires {billing.payment_exp_month}/{billing.payment_exp_year} · auto-renews{' '}
+                auto-renews{' '}
                 {billing.current_period_end && new Date(billing.current_period_end).toLocaleDateString()}
               </span>
-              <button className="btn btn-sm btn-ghost" style={{ marginLeft: 'auto' }}>Update</button>
+              {/* No self-serve "update payment method" endpoint exists. Route
+                  the click through support, matching the cancel pattern. */}
+              <a
+                className="btn btn-sm btn-ghost"
+                style={{ marginLeft: 'auto' }}
+                href="mailto:support@instanode.dev?subject=Update%20payment%20method"
+                data-testid="contact-support-update-payment"
+              >
+                Update
+              </a>
             </div>
           </div>
         </div>
 
         <div className="plan-usage">
           <h4>Usage · this period</h4>
-          <UsageRow k="postgres"     used="47"   limit="500" pct={9} />
-          <UsageRow k="redis"        used="163"  limit="256" pct={64} warn />
-          <UsageRow k="mongo"        used="1.64" limit="2 GB" pct={82} warn />
-          <UsageRow k="deployments"  used="3"    limit="5"   pct={60} />
-          <UsageRow k="webhooks"     used="1.4k" limit="10k" pct={14} />
-          <UsageRow k="team seats"   used="5"    limit="5"   pct={100} />
+          <UsageRow
+            k="postgres"
+            used={formatMB(usage.postgres_mb)}
+            limit={formatLimitMB(plan.limits.postgres_mb)}
+            pct={pctOf(usage.postgres_mb, plan.limits.postgres_mb)}
+            warn={isWarn(usage.postgres_mb, plan.limits.postgres_mb)}
+          />
+          <UsageRow
+            k="redis"
+            used={formatMB(usage.redis_mb)}
+            limit={formatLimitMB(plan.limits.redis_mb)}
+            pct={pctOf(usage.redis_mb, plan.limits.redis_mb)}
+            warn={isWarn(usage.redis_mb, plan.limits.redis_mb)}
+          />
+          <UsageRow
+            k="mongo"
+            used={formatMB(usage.mongodb_mb)}
+            limit={formatLimitMB(plan.limits.mongodb_mb)}
+            pct={pctOf(usage.mongodb_mb, plan.limits.mongodb_mb)}
+            warn={isWarn(usage.mongodb_mb, plan.limits.mongodb_mb)}
+          />
+          <UsageRow
+            k="deployments"
+            used={String(usage.deployments)}
+            limit={formatLimitCount(plan.limits.deployments)}
+            pct={pctOf(usage.deployments, plan.limits.deployments)}
+            warn={isWarn(usage.deployments, plan.limits.deployments)}
+          />
+          <UsageRow
+            k="webhooks"
+            used={String(usage.webhooks)}
+            limit={formatLimitCount(plan.limits.webhooks)}
+            pct={pctOf(usage.webhooks, plan.limits.webhooks)}
+            warn={isWarn(usage.webhooks, plan.limits.webhooks)}
+          />
+          <UsageRow
+            k="team seats"
+            used={String(usage.team_seats)}
+            limit={formatLimitCount(plan.limits.team_seats)}
+            pct={pctOf(usage.team_seats, plan.limits.team_seats)}
+            warn={isWarn(usage.team_seats, plan.limits.team_seats)}
+          />
         </div>
       </div>
 
@@ -236,9 +381,19 @@ export function BillingPage() {
                 {new Date(i.period_start).toLocaleDateString()} → {new Date(i.period_end).toLocaleDateString()}
               </span>
               <TierPill tier={i.plan} />
-              <StatusPill status="running" />
+              {/* Show the real invoice status (paid/pending/failed), not a
+                  hardcoded "running" pill. StatusPill doesn't style these
+                  three, so render a plain mono span. (§10.8.) */}
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-dim)' }}>
+                {i.status}
+              </span>
               <span className="amt">
-                ${(i.amount_cents / 100).toFixed(2)} <a href="#" className="dl">↓ pdf</a>
+                ${(i.amount_cents / 100).toFixed(2)}
+                {/* Only render the pdf link when the API actually has one.
+                    A live `href="#"` is a dead-end click. (§10.8.) */}
+                {i.pdf_url && (
+                  <a href={i.pdf_url} className="dl" target="_blank" rel="noopener noreferrer">↓ pdf</a>
+                )}
               </span>
             </div>
           ))}
@@ -262,4 +417,35 @@ function UsageRow({ k, used, limit, pct, warn = false }: { k: string; used: stri
       </span>
     </div>
   )
+}
+
+// ─── Usage formatters ─────────────────────────────────────────────────────
+// MB values render as a single decimal under 100 MB, no-decimal above, and
+// switch to GB once the figure clears 1024 MB. Keeps the column narrow.
+function formatMB(mb: number): string {
+  if (!Number.isFinite(mb) || mb <= 0) return '0'
+  if (mb >= 1024) return (mb / 1024).toFixed(2).replace(/\.?0+$/, '') + ' GB'
+  if (mb >= 100) return Math.round(mb).toString()
+  return mb.toFixed(1).replace(/\.0$/, '')
+}
+
+function formatLimitMB(mb: number): string {
+  if (!Number.isFinite(mb)) return '∞'
+  if (mb >= 1024) return (mb / 1024).toFixed(0) + ' GB'
+  return mb.toString()
+}
+
+function formatLimitCount(n: number): string {
+  if (!Number.isFinite(n)) return '∞'
+  return n.toString()
+}
+
+function pctOf(used: number, limit: number): number {
+  if (!Number.isFinite(limit) || limit <= 0) return 0
+  return Math.min(100, Math.round((used / limit) * 100))
+}
+
+function isWarn(used: number, limit: number): boolean {
+  if (!Number.isFinite(limit) || limit <= 0) return false
+  return used / limit >= 0.8
 }

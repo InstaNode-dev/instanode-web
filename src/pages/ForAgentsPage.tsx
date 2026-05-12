@@ -4,6 +4,7 @@
 
 import { useState, type ReactNode } from 'react'
 import { PublicShell } from '../layout/PublicShell'
+import { copyToClipboard } from '../components/Common'
 
 const MCP_PACKAGE = '@instanode/mcp'
 
@@ -173,13 +174,13 @@ function IntegrationCard({
 }) {
   const [copied, setCopied] = useState(false)
   const onCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(command)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1600)
-    } catch {
-      /* clipboard not available — fail silent */
+    const ok = await copyToClipboard(command)
+    if (!ok) {
+      console.warn('[ForAgentsPage] copy failed — clipboard unavailable')
+      return
     }
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1600)
   }
   return (
     <article className="fa-card">

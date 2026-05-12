@@ -2,12 +2,21 @@
 // state": the signed-in user, their team, the active env, and the live
 // resource/vault counts shown in the sidebar.
 //
-// Pages and chrome both read from this so the active env actually drives
-// every API call (see api/index.ts — listResources(env) etc.).
+// Env scope — IMPORTANT:
+//   The backend does NOT yet honor a multi-env filter on resources/stacks.
+//   The only surface where `env` is genuinely backed by per-env data is
+//   VaultPage (vault_secrets.env is real). Everywhere else, `env` is a
+//   cosmetic display value snapshotted at provision time and surfacing
+//   filter chips would imply a backend capability that doesn't exist yet
+//   (env promotion is the §10.17 Pro-tier feature still in development).
+//
+//   Keep `env` / `envs` / `setEnv` / `addEnv` here for VaultPage and for
+//   the sidebar's vault subtitle. Do NOT add new env-filter call sites
+//   without also wiring a real server-side filter behind them.
 
 import { useEffect, useSyncExternalStore } from 'react'
 import * as api from '../api'
-import type { AuthMeResponse } from '../api'
+import type { AuthMeResponse, BillingDetails, Resource } from '../api'
 
 const ENV_KEY = 'instanode.env'
 
@@ -18,6 +27,15 @@ export type DashboardCtx = {
   env: string
   envs: string[]                // dynamically populated from resource list
   counts: { resources: number; deployments: number; vault: number; team: number }
+  /** All resources across envs — minimal shape used for layout-level
+   *  signals like the expiry-warning banner. Filtered views still
+   *  re-fetch on the page itself. */
+  resources: Resource[]
+  /** Billing snapshot for the sidebar upgrade card. `null` while loading or
+   *  if `/billing` is unreachable — chrome must render a skeleton, not
+   *  fabricate numbers. */
+  billing: BillingDetails | null
+  billingLoading: boolean
 }
 
 let state: DashboardCtx = {
@@ -27,6 +45,9 @@ let state: DashboardCtx = {
   env: typeof window !== 'undefined' ? (localStorage.getItem(ENV_KEY) ?? 'production') : 'production',
   envs: ['production', 'staging', 'development'],
   counts: { resources: 0, deployments: 0, vault: 0, team: 1 },
+  resources: [],
+  billing: null,
+  billingLoading: true,
 }
 
 const listeners = new Set<() => void>()
@@ -90,11 +111,12 @@ async function refreshCounts() {
     for (const it of (r as any).items ?? []) if (it.env) fromAPI.add(it.env)
     const envs = Array.from(fromAPI)
 
-    const items = (r as any).items as { env?: string; resource_type: string }[]
+    const items = ((r as any).items ?? []) as Resource[]
     const filtered = items.filter((x) => (x.env ?? 'production') === state.env)
     state = {
       ...state,
       envs,
+      resources: items,
       counts: {
         resources: filtered.length,
         deployments: filtered.filter((x) => x.resource_type === 'deploy').length,
@@ -108,11 +130,32 @@ async function refreshCounts() {
   }
 }
 
+async function refreshBilling() {
+  // Billing fetch failures are non-fatal — the sidebar upgrade card renders
+  // a skeleton or hides itself rather than spilling fake numbers. Keep the
+  // loading flag so consumers can distinguish "still fetching" from "fetch
+  // returned null".
+  state = { ...state, billingLoading: true }
+  emit()
+  try {
+    const r = await api.fetchBilling()
+    state = { ...state, billing: r.billing, billingLoading: false }
+    emit()
+  } catch {
+    state = { ...state, billing: null, billingLoading: false }
+    emit()
+  }
+}
+
 let bootstrapped = false
 export function ensureBootstrap() {
   if (bootstrapped) return
   bootstrapped = true
-  void refreshMe().then(() => refreshCounts())
+  void refreshMe().then(() => {
+    // Counts and billing are independent — fire in parallel once auth resolves.
+    void refreshCounts()
+    void refreshBilling()
+  })
 }
 
 export function useDashboardCtx(): DashboardCtx {

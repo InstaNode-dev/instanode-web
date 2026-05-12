@@ -1,8 +1,9 @@
 /* Reusable atoms & molecules used across pages.
    Kept in one file to keep imports flat — split later if it grows. */
 
-import type { ReactNode } from 'react'
-import type { ResourceType, StackStatus, Tier, Env, Role } from '../api/types'
+import { useEffect, useState, type ReactNode } from 'react'
+import { Link } from 'react-router-dom'
+import type { Resource, ResourceType, StackStatus, Tier, Env, Role } from '../api/types'
 
 // ------------- branding -------------
 // The mark uses the canonical instanode.dev favicon (cube + braces). Loaded
@@ -53,8 +54,23 @@ export function StatusPill({ status }: { status: StackStatus | 'healthy' }) {
   return <span className={cls}>{display}</span>
 }
 
+// TIER_LABELS maps internal tier keys to user-facing names. The two
+// equal-limit tiers ("anonymous" vs "free") render with different labels so
+// the dashboard can show "Free" to claimed-but-unpaid users while keeping
+// "Anonymous" for pre-claim agent flows.
+const TIER_LABELS: Record<Tier, string> = {
+  anonymous: 'anonymous',
+  free: 'free',
+  hobby: 'hobby',
+  pro: 'pro',
+  team: 'team',
+  growth: 'growth',
+}
+
 export function TierPill({ tier }: { tier: Tier }) {
-  return <span className="res-tier">{tier}</span>
+  // Same color family as anonymous (both are zero-cost pre-paid tiers) but a
+  // distinct modifier class lets us nudge the visual without divergence.
+  return <span className={`res-tier tier-${tier}`}>{TIER_LABELS[tier] ?? tier}</span>
 }
 
 export function RolePill({ role }: { role: Role }) {
@@ -111,10 +127,11 @@ export function ContractBanner({
 export function ROBanner({
   variant = 'read',
   children,
-  showAsk = true
 }: {
   variant?: 'read' | 'write'
   children: ReactNode
+  /** Deprecated — removed when the decorative ⌘K "ask agent" link was retired.
+   * Accepted as an ignored prop for transitional callsites. */
   showAsk?: boolean
 }) {
   const badge = variant === 'write' ? 'human · only' : 'read-only'
@@ -122,49 +139,86 @@ export function ROBanner({
     <div className={`ro-banner ${variant === 'write' ? 'write' : ''}`}>
       <span className="badge">{badge}</span>
       <div className="body">{children}</div>
-      {showAsk && variant === 'read' && (
-        <a className="ask">✦ ⌘K · ask agent</a>
-      )}
     </div>
   )
 }
 
-// ------------- prompt pattern -------------
-export function PromptPill({
-  label,
-  shortcut = '⌘K'
-}: {
-  label: string
-  shortcut?: string
-}) {
-  return (
-    <a className="prompt-pill" role="button">
-      <span className="label">{label}</span>
-      <span style={{ opacity: 0.6 }}>{shortcut}</span>
-    </a>
-  )
+// ------------- clipboard helper -------------
+//
+// Single source of truth for "copy text to clipboard" across the dashboard.
+// Tries the async Clipboard API first (modern Safari/Chrome/Firefox on
+// https origins), then falls back to the legacy `document.execCommand`
+// path so HTTP origins, older Safari, and locked-down sandboxes still
+// work. Returns `false` only when both paths fail — callers should
+// surface a small failure indicator (v1: console.warn at the call site,
+// full toast library is a separate workstream).
+export async function copyToClipboard(text: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text)
+      return true
+    }
+  } catch {
+    // fall through to execCommand path
+  }
+  try {
+    const ta = document.createElement('textarea')
+    ta.value = text
+    ta.style.position = 'fixed'
+    ta.style.opacity = '0'
+    document.body.appendChild(ta)
+    ta.select()
+    const ok = document.execCommand('copy')
+    document.body.removeChild(ta)
+    return ok
+  } catch {
+    return false
+  }
 }
 
+// ------------- prompt pattern -------------
 export function PromptCard({
   title,
   prompt,
+  promptText,
   method,
   endpoint,
   hint,
-  danger = false
+  danger = false,
+  baseURL = 'https://api.instanode.dev'
 }: {
   title: string
   prompt: ReactNode
+  promptText?: string
   method: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE'
   endpoint: string
   hint?: string
   danger?: boolean
+  baseURL?: string
 }) {
   const verbCls =
     method === 'GET' ? 'get' :
     method === 'DELETE' ? 'del' :
     method === 'PATCH' ? 'patch' :
     method === 'PUT' ? 'put' : ''
+  const [copied, setCopied] = useState<null | 'prompt' | 'curl'>(null)
+  const curlText =
+    `curl -X ${method} ${baseURL}${endpoint} \\\n` +
+    `  -H "Authorization: Bearer $INSTANODE_TOKEN"` +
+    (method === 'GET' || method === 'DELETE' ? '' : ` \\\n  -H "Content-Type: application/json"`)
+  // Fallback when a caller hasn't supplied a richer promptText yet: still gives the
+  // agent enough to act. Pages should provide promptText with full context for best UX.
+  const fallbackPrompt = `${title}\n\nCall: ${method} ${baseURL}${endpoint}\nAuth: use my INSTANODE_TOKEN env var as Bearer.`
+  async function copy(kind: 'prompt' | 'curl') {
+    const text = kind === 'prompt' ? (promptText ?? fallbackPrompt) : curlText
+    const ok = await copyToClipboard(text)
+    if (!ok) {
+      console.warn('[PromptCard] copy failed — clipboard unavailable')
+      return
+    }
+    setCopied(kind)
+    window.setTimeout(() => setCopied(null), 1500)
+  }
   return (
     <div
       className="prompt-card"
@@ -187,8 +241,12 @@ export function PromptCard({
         <span>{endpoint}</span>
       </div>
       <div className="actions">
-        <button className="cp">copy prompt</button>
-        <button className="cp">copy curl</button>
+        <button className="cp" onClick={() => copy('prompt')} data-testid="copy-prompt">
+          {copied === 'prompt' ? 'copied ✓' : 'copy prompt'}
+        </button>
+        <button className="cp" onClick={() => copy('curl')} data-testid="copy-curl">
+          {copied === 'curl' ? 'copied ✓' : 'copy curl'}
+        </button>
       </div>
     </div>
   )
@@ -301,6 +359,141 @@ export function ContractLine({
       <span className={`m ${m}`}>{method}</span>
       <span className="path">{path}</span>
       <span className={cls}>{status}</span>
+    </div>
+  )
+}
+
+// ------------- expiry (claimed-but-unpaid 24h TTL) -------------
+//
+// Until the Razorpay subscription.charged webhook fires, every claimed
+// resource has an `expires_at` set to ~24h from claim. The dashboard
+// surfaces this in three places (row badge, top banner, detail card) so
+// the user can't close the tab and lose everything they just provisioned.
+//
+// All countdown math is render-time. Pages can opt into a 60s tick by
+// using useExpiryTick() at the layout root — no sub-second timers.
+
+/** Window in which the top-of-dashboard warning banner shows. */
+export const EXPIRY_BANNER_THRESHOLD_MS = 6 * 60 * 60 * 1000 // 6 hours
+/** Window in which the badge pulses to draw the eye. */
+export const EXPIRY_URGENT_THRESHOLD_MS = 60 * 60 * 1000 // 1 hour
+
+/**
+ * Format the time between `now` and `expiresAt` as a short human string.
+ * Returns 'expired' when the timestamp is in the past, otherwise one of
+ * '37m', '2h 14m', '14h 3m', '1d 3h' (single-unit days only above 24h).
+ */
+export function formatTimeUntil(expiresAt: string | null | undefined, now: number = Date.now()): string {
+  if (!expiresAt) return ''
+  const t = new Date(expiresAt).getTime()
+  if (!Number.isFinite(t)) return ''
+  const diff = t - now
+  if (diff <= 0) return 'expired'
+  const totalMin = Math.floor(diff / 60_000)
+  if (totalMin < 1) {
+    // <60s — show seconds for the last minute so it feels alive.
+    const sec = Math.max(1, Math.floor(diff / 1000))
+    return `${sec}s`
+  }
+  if (totalMin < 60) return `${totalMin}m`
+  const totalHr = Math.floor(totalMin / 60)
+  const minPart = totalMin % 60
+  if (totalHr < 24) {
+    return minPart === 0 ? `${totalHr}h` : `${totalHr}h ${minPart}m`
+  }
+  const days = Math.floor(totalHr / 24)
+  const hrPart = totalHr % 24
+  return hrPart === 0 ? `${days}d` : `${days}d ${hrPart}h`
+}
+
+/** Classifies an expiry timestamp for styling decisions. */
+export type ExpiryLevel = 'none' | 'safe' | 'soon' | 'urgent' | 'expired'
+
+export function expiryLevel(expiresAt: string | null | undefined, now: number = Date.now()): ExpiryLevel {
+  if (!expiresAt) return 'none'
+  const t = new Date(expiresAt).getTime()
+  if (!Number.isFinite(t)) return 'none'
+  const diff = t - now
+  if (diff <= 0) return 'expired'
+  if (diff <= EXPIRY_URGENT_THRESHOLD_MS) return 'urgent'
+  if (diff <= EXPIRY_BANNER_THRESHOLD_MS) return 'soon'
+  return 'safe'
+}
+
+/**
+ * Light render-time hook: re-renders the consumer every 60 seconds so
+ * countdown text stays fresh without manual interaction. One interval
+ * per mount — placed at the layout level it covers every page.
+ */
+export function useExpiryTick(intervalMs: number = 60_000): number {
+  const [tick, setTick] = useState(() => Date.now())
+  useEffect(() => {
+    const id = window.setInterval(() => setTick(Date.now()), intervalMs)
+    return () => window.clearInterval(id)
+  }, [intervalMs])
+  return tick
+}
+
+/**
+ * Resource-row countdown badge. Rose-tinted; pulses when <1h to expiry.
+ * Renders nothing when `expires_at` is null (permanent resource).
+ */
+export function ExpiryBadge({ expiresAt, now }: { expiresAt: string | null | undefined; now?: number }) {
+  const t = now ?? Date.now()
+  const level = expiryLevel(expiresAt, t)
+  if (level === 'none') return null
+  const text = level === 'expired' ? 'expired' : `expires in ${formatTimeUntil(expiresAt, t)}`
+  const cls = `expiry-badge ${level === 'urgent' || level === 'expired' ? 'urgent' : ''}`
+  return (
+    <span
+      className={cls}
+      data-testid="expiry-badge"
+      data-level={level}
+      title="Claimed resources expire 24h after creation unless a subscription is active. Pay to keep them."
+    >
+      <span className="warn-ico" aria-hidden="true">⚠</span>
+      <span>{text}</span>
+    </span>
+  )
+}
+
+/**
+ * Top-of-dashboard banner. Shows when ANY resource is <6h from expiry.
+ * Renders nothing when no resource qualifies (no FOUC for paid users).
+ */
+export function ExpiryWarningBanner({ resources, now }: { resources: Resource[]; now?: number }) {
+  const t = now ?? Date.now()
+  const atRisk = resources.filter((r) => {
+    const lvl = expiryLevel(r.expires_at, t)
+    return lvl === 'soon' || lvl === 'urgent' || lvl === 'expired'
+  })
+  if (atRisk.length === 0) return null
+  const n = atRisk.length
+  // Pick the soonest-to-expire to surface a concrete time in the banner.
+  const soonest = atRisk.reduce<Resource | null>((acc, r) => {
+    if (!r.expires_at) return acc
+    if (!acc || !acc.expires_at) return r
+    return new Date(r.expires_at).getTime() < new Date(acc.expires_at).getTime() ? r : acc
+  }, null)
+  const soonestText = soonest?.expires_at ? formatTimeUntil(soonest.expires_at, t) : ''
+  return (
+    <div
+      className="contract-banner expiry"
+      role="alert"
+      data-testid="expiry-warning-banner"
+      data-count={n}
+    >
+      <span className="badge">expires soon</span>
+      <div className="body">
+        <strong>
+          {n === 1 ? '1 resource' : `${n} resources`} expire{n === 1 ? 's' : ''} in less than 6 hours
+        </strong>
+        {soonestText && soonestText !== 'expired' ? (
+          <> · soonest in <strong>{soonestText}</strong></>
+        ) : null}
+        . Claimed resources are on a 24h TTL until you start a subscription —{' '}
+        <Link to="/app/billing" className="pay-now-link">Pay now to keep them →</Link>
+      </div>
     </div>
   )
 }

@@ -1,5 +1,5 @@
-import { FormEvent, useEffect, useState } from 'react'
-import { Card, RelTime } from '../components/Common'
+import { useEffect, useState } from 'react'
+import { Card, PromptCard, RelTime } from '../components/Common'
 import * as api from '../api'
 import type { VaultEntry } from '../api'
 import { useDashboardCtx, addEnv as addEnvCtx } from '../hooks/useDashboardCtx'
@@ -11,7 +11,6 @@ export function VaultPage() {
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState<string | null>(null)
   const [revealed, setRevealed] = useState<Record<string, string>>({})
-  const [showAdd, setShowAdd] = useState(false)
   const [err, setErr] = useState<string | null>(null)
 
   async function refresh() {
@@ -29,6 +28,9 @@ export function VaultPage() {
 
   useEffect(() => { refresh() }, [env])
 
+  // Reveal is a read (with audit), not a mutation — kept clickable so the
+  // human can inspect a secret value here. Add / delete go through the agent
+  // via PromptCard so the dashboard never writes.
   async function reveal(key: string) {
     setBusy(key)
     setErr(null)
@@ -37,19 +39,6 @@ export function VaultPage() {
       setRevealed((prev) => ({ ...prev, [key]: r.value }))
     } catch (e: any) {
       setErr(`reveal ${key}: ${e?.message ?? 'failed'}`)
-    } finally {
-      setBusy(null)
-    }
-  }
-
-  async function remove(key: string) {
-    if (!window.confirm(`Delete ${key} from ${env}? Removes every version permanently.`)) return
-    setBusy(key)
-    try {
-      await api.deleteVaultSecret(env, key)
-      await refresh()
-    } catch (e: any) {
-      setErr(`delete ${key}: ${e?.message ?? 'failed'}`)
     } finally {
       setBusy(null)
     }
@@ -86,23 +75,7 @@ export function VaultPage() {
           <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
             {env} · {entries.length} entries · aes-256-gcm
           </div>
-          <button
-            className="btn btn-sm btn-secondary"
-            style={{ marginLeft: 'auto' }}
-            onClick={() => setShowAdd(true)}
-            data-testid="add-secret"
-          >
-            + add secret
-          </button>
         </div>
-
-        {showAdd && (
-          <AddSecretRow
-            env={env}
-            onClose={() => setShowAdd(false)}
-            onSaved={() => { setShowAdd(false); refresh() }}
-          />
-        )}
 
         {loading ? (
           <div style={{ padding: 32, textAlign: 'center', color: 'var(--text-dim)' }}>loading…</div>
@@ -110,7 +83,7 @@ export function VaultPage() {
           <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-dim)' }}>
             <p style={{ marginBottom: 8 }}>no secrets in <code>{env}</code></p>
             <p style={{ fontSize: 12, color: 'var(--text-faint)' }}>
-              add one above, or run <code style={{ color: 'var(--accent)' }}>PUT /api/v1/vault/{env}/&lt;KEY&gt;</code> from your agent.
+              copy the "Add or update a secret" prompt below and paste it to your agent.
             </p>
           </div>
         ) : (
@@ -118,7 +91,9 @@ export function VaultPage() {
             <div key={e.key} className="vault-row" data-testid={`vault-row-${e.key}`}>
               <span className="ico">⚷</span>
               <span className="name">{e.key}</span>
-              <span className="meta">rotated <RelTime at={e.rotated_at} /></span>
+              <span className="meta">
+                {e.rotated_at ? <>rotated <RelTime at={e.rotated_at} /></> : null}
+              </span>
               <span className="meta" style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
                 {revealed[e.key] ? (
                   <code style={{ color: 'var(--accent)' }}>{revealed[e.key]}</code>
@@ -143,18 +118,58 @@ export function VaultPage() {
                   {busy === e.key ? '…' : 'reveal'}
                 </button>
               )}
-              <button
-                className="btn btn-sm btn-ghost"
-                style={{ color: 'var(--rose)' }}
-                disabled={busy === e.key}
-                onClick={() => remove(e.key)}
-                data-testid={`delete-${e.key}`}
-              >
-                delete
-              </button>
             </div>
           ))
         )}
+      </div>
+
+      {/* Agent-prompt cards: dashboard never writes. Add/delete flow through agent. */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 16 }}>
+        <PromptCard
+          title="Add or update a secret"
+          hint="via agent"
+          prompt={
+            <>
+              Add a vault secret to the <code>{env}</code> env. Reuse the same prompt to
+              update an existing key — versions are kept and the latest wins at deploy time.
+            </>
+          }
+          promptText={
+            `Add a secret to my instanode vault in the "${env}" env.\n` +
+            `\n` +
+            `- Key: <UPPER_SNAKE_CASE_KEY>\n` +
+            `- Value: <plaintext value — replace with the real value before sending>\n` +
+            `- Endpoint: PUT https://api.instanode.dev/api/v1/vault/${env}/<KEY>\n` +
+            `- Body: {"value":"<VALUE>"}\n` +
+            `- Auth: use my INSTANODE_TOKEN env var as Bearer\n` +
+            `\n` +
+            `The value is encrypted with AES-256-GCM before it touches Postgres. To use at runtime, reference it as vault://${env}/<KEY> in any deploy env var — the deployer resolves at deploy time so plaintext never lands in manifests or build logs.`
+          }
+          method="PUT"
+          endpoint={`/api/v1/vault/${env}/<KEY>`}
+        />
+        <PromptCard
+          danger
+          title="Delete a secret"
+          hint="data loss"
+          prompt={
+            <>
+              Remove a vault secret from <code>{env}</code>. Drops every version permanently —
+              cannot be recovered.
+            </>
+          }
+          promptText={
+            `Delete a secret from my instanode vault in the "${env}" env. All versions are removed permanently — no recovery.\n` +
+            `\n` +
+            `- Key to delete: <UPPER_SNAKE_CASE_KEY>\n` +
+            `- Endpoint: DELETE https://api.instanode.dev/api/v1/vault/${env}/<KEY>\n` +
+            `- Auth: use my INSTANODE_TOKEN env var as Bearer\n` +
+            `\n` +
+            `Before deleting: grep my codebase for vault://${env}/<KEY> references so I know which deploys will break on next rollout.`
+          }
+          method="DELETE"
+          endpoint={`/api/v1/vault/${env}/<KEY>`}
+        />
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginTop: 24 }}>
@@ -211,60 +226,3 @@ function NewEnvButton() {
   )
 }
 
-function AddSecretRow({
-  env,
-  onClose,
-  onSaved,
-}: {
-  env: string
-  onClose: () => void
-  onSaved: () => void
-}) {
-  const [k, setK] = useState('')
-  const [v, setV] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [err, setErr] = useState<string | null>(null)
-
-  async function submit(e: FormEvent) {
-    e.preventDefault()
-    setErr(null)
-    if (!/^[A-Z0-9_]{1,80}$/.test(k.trim())) {
-      setErr('Key must be UPPER_SNAKE_CASE.')
-      return
-    }
-    if (!v) { setErr('Value is required.'); return }
-    setBusy(true)
-    try {
-      await api.putVaultSecret(env, k.trim(), v)
-      onSaved()
-    } catch (e: any) {
-      setErr(e?.message ?? 'save failed')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <form onSubmit={submit} style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)', display: 'flex', gap: 8, alignItems: 'center', background: 'var(--surface)' }}>
-      <input
-        placeholder="KEY_NAME"
-        value={k}
-        onChange={(e) => setK(e.target.value.toUpperCase())}
-        autoFocus
-        data-testid="add-secret-key"
-        style={{ background: 'var(--ink)', border: '1px solid var(--border)', color: 'var(--text)', padding: '6px 10px', fontFamily: 'var(--font-mono)', fontSize: 12.5, borderRadius: 4, width: 220 }}
-      />
-      <input
-        type="password"
-        placeholder="value"
-        value={v}
-        onChange={(e) => setV(e.target.value)}
-        data-testid="add-secret-value"
-        style={{ background: 'var(--ink)', border: '1px solid var(--border)', color: 'var(--text)', padding: '6px 10px', fontFamily: 'var(--font-mono)', fontSize: 12.5, borderRadius: 4, flex: 1 }}
-      />
-      {err && <span style={{ color: 'var(--rose)', fontFamily: 'var(--font-mono)', fontSize: 11 }}>{err}</span>}
-      <button type="submit" className="btn btn-sm btn-primary" disabled={busy}>{busy ? 'saving…' : 'save'}</button>
-      <button type="button" className="btn btn-sm btn-ghost" onClick={onClose}>cancel</button>
-    </form>
-  )
-}
