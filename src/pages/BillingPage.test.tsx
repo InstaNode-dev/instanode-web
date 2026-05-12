@@ -25,6 +25,12 @@ vi.mock('../api', async () => {
     fetchBilling: vi.fn(),
     listInvoices: vi.fn(),
     listResources: vi.fn(),
+    // §10.20: BillingPage's Usage panel now reads fetchBillingUsage() (a
+    // server-side cached aggregate) instead of listResources(). The
+    // listResources mock above stays in the module-level mock for the
+    // pre-§10.20 tests that still reference it; new tests should drive
+    // fetchBillingUsage.
+    fetchBillingUsage: vi.fn(),
     createCheckout: vi.fn(),
     cancelSubscription: vi.fn(),
   }
@@ -61,13 +67,45 @@ function mockHappyBilling() {
     ok: true,
     invoices: FIXTURE_INVOICES,
   })
-  // Default: no resources → Usage panel renders zeroes. Tests that care
-  // about specific usage figures override this themselves.
+  // Pre-§10.20 tests still mock listResources; new code path doesn't
+  // call it, so this resolves to an unused empty list.
   ;(api.listResources as any).mockResolvedValue({
     ok: true,
     items: [],
     total: 0,
   })
+  // §10.20: default zero-usage server response. Tests that pin specific
+  // usage figures override this with a payload carrying real bytes/counts.
+  ;(api.fetchBillingUsage as any).mockResolvedValue(makeUsageResp({}))
+}
+
+/** §10.20 test helper — build a BillingUsage response with optional overrides
+ *  per metric. Unspecified metrics default to {bytes:0, limit_bytes:-1} or
+ *  {count:0, limit:-1} matching the server's "no row" shape. */
+function makeUsageResp(over: Partial<{
+  postgres_bytes: number
+  redis_bytes: number
+  mongodb_bytes: number
+  deployments: number
+  webhooks: number
+  vault: number
+  members: number
+}>) {
+  return {
+    ok: true,
+    freshness_seconds: 30,
+    // Pin as_of so the "as of Ns ago" footnote renders deterministically.
+    as_of: new Date(Date.now() - 5000).toISOString(),
+    usage: {
+      postgres: { bytes: over.postgres_bytes ?? 0, limit_bytes: 1024 * 1024 * 1024 },
+      redis: { bytes: over.redis_bytes ?? 0, limit_bytes: 50 * 1024 * 1024 },
+      mongodb: { bytes: over.mongodb_bytes ?? 0, limit_bytes: 100 * 1024 * 1024 },
+      deployments: { count: over.deployments ?? 0, limit: 1 },
+      webhooks: { count: over.webhooks ?? 0, limit: 1000 },
+      vault: { count: over.vault ?? 0, limit: 20 },
+      members: { count: over.members ?? 1, limit: 1 },
+    },
+  }
 }
 
 /** Wait for the page to finish its initial load (skeleton → real content). */
@@ -138,6 +176,9 @@ describe('BillingPage — initial render', () => {
     ;(api.fetchBilling as any).mockReturnValue(new Promise(() => {}))   // never resolves
     ;(api.listInvoices as any).mockReturnValue(new Promise(() => {}))
     ;(api.listResources as any).mockReturnValue(new Promise(() => {}))
+    // §10.20: BillingPage calls fetchBillingUsage now; it must return a
+    // pending promise (never resolves) so the skeleton state holds.
+    ;(api.fetchBillingUsage as any).mockReturnValue(new Promise(() => {}))
     const { container } = render(<BillingPage />)
     expect(container.querySelector('.skel')).toBeTruthy()
   })
@@ -383,41 +424,22 @@ describe('BillingPage — userEvent integration', () => {
   })
 })
 
-// ─── Usage panel — real data from listResources() (§10.1) ───────────────
-// The old Usage panel hardcoded "47 / 500", "163 / 256", "1.64 / 2 GB", etc.
-// We now aggregate ctx.resources by type. These tests pin the contract:
-//   (a) values move when listResources moves,
-//   (b) the old fixture numbers no longer appear in the DOM.
-describe('BillingPage — Usage panel reflects listResources()', () => {
-  // Minimal Resource fixture factory — keeps the test contained.
-  function makePgResource(id: string, mb: number) {
-    return {
-      id,
-      token: id,
-      resource_type: 'postgres',
-      tier: 'hobby',
-      status: 'active',
-      name: id,
-      env: 'production',
-      storage_bytes: mb * 1024 * 1024,
-      storage_limit_bytes: 1024 * 1024 * 1024,
-      storage_exceeded: false,
-      expires_at: null,
-      created_at: new Date().toISOString(),
-    }
-  }
-
-  it('aggregates two postgres resources totalling 100 MB into one UsageRow', async () => {
+// ─── Usage panel — server-side cached aggregate (§10.20) ────────────────
+// The Usage panel reads /api/v1/billing/usage (cached 30s in Redis with
+// singleflight on the server). These tests pin the contract:
+//   (a) values reflect the server response, not a client-side aggregate,
+//   (b) BillingPage does NOT call listResources() for usage data,
+//   (c) the `as_of` footnote renders so the eventual-consistency tradeoff
+//       is visible to users.
+describe('BillingPage — Usage panel reflects fetchBillingUsage() (§10.20)', () => {
+  it('renders postgres bytes (100 MB / 1 GB) from the server response', async () => {
     mockTier = 'hobby'
     mockHappyBilling()
-    ;(api.listResources as any).mockResolvedValue({
-      ok: true,
-      items: [makePgResource('p_a', 40), makePgResource('p_b', 60)],
-      total: 2,
-    })
+    ;(api.fetchBillingUsage as any).mockResolvedValue(makeUsageResp({
+      postgres_bytes: 100 * 1024 * 1024,
+    }))
     const { container } = render(<BillingPage />)
     await waitForLoaded()
-    // hobby postgres limit is 1024 MB → renders as "1 GB".
     await waitFor(() => {
       const text = container.textContent ?? ''
       expect(text).toContain('100')
@@ -425,19 +447,15 @@ describe('BillingPage — Usage panel reflects listResources()', () => {
     })
   })
 
-  it('renders 0 for the resource-driven UsageRows when the resource list is empty', async () => {
+  it('renders zeroes when the server reports no usage', async () => {
     mockTier = 'hobby'
     mockHappyBilling()
-    ;(api.listResources as any).mockResolvedValue({ ok: true, items: [], total: 0 })
     const { container } = render(<BillingPage />)
     await waitForLoaded()
     await waitFor(() => {
       const rows = container.querySelectorAll('.usage-row')
       // 6 usage rows: postgres, redis, mongo, deployments, webhooks, team seats.
       expect(rows.length).toBe(6)
-      // Resource-aggregated rows (postgres / redis / mongo / deployments /
-      // webhooks) must read "0 / …" when the list is empty. Team seats is a
-      // separate constant for now (no member-list endpoint) and is exempt.
       const resourceRowKeys = ['postgres', 'redis', 'mongo', 'deployments', 'webhooks']
       resourceRowKeys.forEach((key) => {
         const row = Array.from(rows).find((r) => r.querySelector('.k')?.textContent === key)
@@ -454,6 +472,35 @@ describe('BillingPage — Usage panel reflects listResources()', () => {
     const { container } = render(<BillingPage />)
     await waitForLoaded()
     expect(container.textContent).not.toMatch(/\b47\b/)
+  })
+
+  // §10.20 / §14: critical contract — the page must NOT round-trip to
+  // /resources for usage data anymore. Catches accidental reintroductions
+  // of the client-side aggregate.
+  it('does not call listResources() for usage data', async () => {
+    mockTier = 'hobby'
+    mockHappyBilling()
+    render(<BillingPage />)
+    await waitForLoaded()
+    // Wait a tick to make sure any in-flight effect has a chance to fire.
+    await new Promise((r) => setTimeout(r, 50))
+    expect((api.listResources as any).mock?.calls?.length ?? 0).toBe(0)
+    // The new cached aggregate, on the other hand, must be called exactly once.
+    expect((api.fetchBillingUsage as any).mock?.calls?.length ?? 0).toBe(1)
+  })
+
+  // §10.20 / §13: the eventual-consistency footnote must render so users
+  // can see when the snapshot was computed.
+  it('renders the "as of Ns ago" footnote when the cached payload arrives', async () => {
+    mockTier = 'hobby'
+    mockHappyBilling()
+    const { getByTestId } = render(<BillingPage />)
+    await waitForLoaded()
+    await waitFor(() => {
+      const footnote = getByTestId('billing-usage-as-of')
+      expect(footnote.textContent).toMatch(/as of/)
+      expect(footnote.textContent).toMatch(/cached 30s/)
+    })
   })
 })
 

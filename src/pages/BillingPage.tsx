@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { ROBanner, ContractBanner, TierPill } from '../components/Common'
 import * as api from '../api'
-import type { BillingDetails, Invoice, Resource } from '../api'
+import type { BillingDetails, BillingUsage, Invoice } from '../api'
 import { useDashboardCtx } from '../hooks/useDashboardCtx'
 
 // Typed per-service limits used by the Usage panel. `Infinity` means "no
@@ -162,46 +162,49 @@ export function BillingPage() {
 
   const [billing, setBilling] = useState<BillingDetails | null>(null)
   const [invoices, setInvoices] = useState<Invoice[]>([])
-  const [resources, setResources] = useState<Resource[]>([])
+  // §10.20: Usage panel reads from /api/v1/billing/usage (server-side cached
+  // 30s with singleflight), not from /resources. The browser no longer pulls
+  // every resource row just to compute six aggregate numbers — the server
+  // does it once per team per cache window and shares it across surfaces.
+  const [billingUsage, setBillingUsage] = useState<BillingUsage | null>(null)
   const [checkoutErr, setCheckoutErr] = useState<string | null>(null)
   const [checkoutLoading, setCheckoutLoading] = useState(false)
 
   useEffect(() => {
-    // Three independent reads — billing, invoices, and resources (for the
-    // Usage panel). A failure on one shouldn't blank the whole page, so each
-    // is guarded individually and fed into its own state slot.
+    // Three independent reads — billing state, invoices, and the cached
+    // usage aggregate. A failure on one shouldn't blank the whole page,
+    // so each is guarded individually and fed into its own state slot.
     Promise.all([
       api.fetchBilling(),
       api.listInvoices(),
-      api.listResources().catch(() => ({ items: [] as Resource[] })),
-    ]).then(([b, i, r]) => {
+      api.fetchBillingUsage().catch(() => null),
+    ]).then(([b, i, u]) => {
       setBilling(b.billing)
       setInvoices(i.invoices)
-      setResources((r as { items?: Resource[] }).items ?? [])
+      if (u) setBillingUsage(u)
     })
   }, [])
 
-  // Aggregate live resource usage per type so the Usage panel reflects the
-  // user's actual footprint instead of the old hand-rolled fixture numbers.
-  // Storage figures sum `storage_bytes` from postgres/redis/mongodb resources;
-  // deployments / webhooks are simple counts.
-  const usage = useMemo(() => {
-    const sumBytes = (t: string) =>
-      resources
-        .filter((r) => r.resource_type === t)
-        .reduce((s, r) => s + (r.storage_bytes ?? 0), 0)
-    return {
-      postgres_mb: sumBytes('postgres') / (1024 * 1024),
-      redis_mb: sumBytes('redis') / (1024 * 1024),
-      mongodb_mb: sumBytes('mongodb') / (1024 * 1024),
-      deployments: resources.filter((r) => r.resource_type === 'deploy').length,
-      webhooks: resources.filter((r) => r.resource_type === 'webhook').length,
-      // We don't have a team-members list endpoint on the dashboard yet, so
-      // seats stays at 1 here. Sidebar `counts.team` shares the same gap —
-      // tracked in §10.7.
-      team_seats: 1,
-    }
-  }, [resources])
+  // §10.20: Derive Usage panel inputs from the server-side cached payload.
+  // The server returns storage in bytes (with `limit_bytes`) — convert to
+  // MB here for the UsageRow renderer (which is MB-shaped). Zeroes while
+  // the response is in flight so the layout doesn't jump on arrival; a
+  // non-fatal fetch failure leaves the panel at zeroes rather than
+  // blocking the rest of the page.
+  const u = billingUsage?.usage
+  const bytesToMB = (n?: number) => (n && n > 0 ? n / (1024 * 1024) : 0)
+  const usage = {
+    postgres_mb: bytesToMB(u?.postgres?.bytes),
+    redis_mb: bytesToMB(u?.redis?.bytes),
+    mongodb_mb: bytesToMB(u?.mongodb?.bytes),
+    deployments: u?.deployments?.count ?? 0,
+    webhooks: u?.webhooks?.count ?? 0,
+    // Members count now comes from the same server-side aggregate —
+    // previously the dashboard had no live source (§10.7 gap). Clamp to 1
+    // when the API returns 0 so the seats row stays honest (the owner row
+    // always exists; the team_members table just hasn't populated yet).
+    team_seats: u?.members?.count && u.members.count > 0 ? u.members.count : 1,
+  }
 
   if (!billing) return <div className="skel" style={{ width: '100%', height: 320 }} />
 
@@ -358,6 +361,26 @@ export function BillingPage() {
             pct={pctOf(usage.team_seats, plan.limits.team_seats)}
             warn={isWarn(usage.team_seats, plan.limits.team_seats)}
           />
+          {/* §10.20: visible eventual-consistency footnote. The Usage panel
+              is server-cached for 30s — render the freshness so users can
+              tell whether they're looking at a fresh read or a cached one
+              (and don't expect provision/delete to update instantly).
+              Hidden until the first fetch completes so we don't render
+              "as of —". */}
+          {billingUsage?.as_of && (
+            <div
+              data-testid="billing-usage-as-of"
+              style={{
+                marginTop: 10,
+                fontFamily: 'var(--font-mono)',
+                fontSize: 10.5,
+                color: 'var(--text-faint)',
+                letterSpacing: '0.04em',
+              }}
+            >
+              as of {formatAsOf(billingUsage.as_of)} · cached {billingUsage.freshness_seconds}s
+            </div>
+          )}
         </div>
       </div>
 
@@ -448,4 +471,21 @@ function pctOf(used: number, limit: number): number {
 function isWarn(used: number, limit: number): boolean {
   if (!Number.isFinite(limit) || limit <= 0) return false
   return used / limit >= 0.8
+}
+
+// formatAsOf — renders a server-side ISO timestamp as a human-friendly
+// "Ns ago" string for the cached-usage footnote. Under a minute is in
+// seconds; older snapshots switch to minutes / hours. Clock skew (negative
+// age) clamps to "just now" so we never render a future timestamp.
+export function formatAsOf(iso: string): string {
+  const t = Date.parse(iso)
+  if (!Number.isFinite(t)) return 'unknown'
+  const ageMs = Date.now() - t
+  if (ageMs < 1000) return 'just now'
+  const secs = Math.floor(ageMs / 1000)
+  if (secs < 60) return `${secs}s ago`
+  const mins = Math.floor(secs / 60)
+  if (mins < 60) return `${mins}m ago`
+  const hours = Math.floor(mins / 60)
+  return `${hours}h ago`
 }

@@ -681,3 +681,77 @@ export type ClaimResp = {
 export async function claim(body: { jwt: string; email: string }): Promise<ClaimResp> {
   return call('/claim', { method: 'POST', body: JSON.stringify(body) })
 }
+
+// ─── §10.20 cached aggregates (LIVE) ────────────────────────────────────
+//
+// Two server-side cached endpoints replace what the dashboard previously
+// computed client-side:
+//
+//   fetchBillingUsage() → GET /api/v1/billing/usage   (Redis-cached 30s)
+//   fetchTeamSummary()  → GET /api/v1/team/summary    (Redis-cached 5m)
+//
+// Both responses carry `as_of` (ISO timestamp) + `freshness_seconds` so the
+// UI can render an "as of Ns ago" footnote that makes the eventual-
+// consistency tradeoff visible to the user (per §13).
+//
+// These are pure GETs — safe to call on render. The agent API sets
+// Cache-Control: private, max-age=N so the browser also caches the
+// response within the same window (no double-fetch on remount).
+
+/** Per-metric shape inside `usage` — bytes/limit_bytes for storage services,
+ *  count/limit for everything else. -1 means unlimited. */
+export type UsageMetric = {
+  bytes?: number
+  limit_bytes?: number
+  count?: number
+  limit?: number
+}
+
+export type BillingUsage = {
+  ok: true
+  freshness_seconds: number
+  /** ISO-8601 UTC timestamp of when the server computed this snapshot. */
+  as_of: string
+  usage: {
+    postgres: UsageMetric
+    redis: UsageMetric
+    mongodb: UsageMetric
+    deployments: UsageMetric
+    webhooks: UsageMetric
+    vault: UsageMetric
+    members: UsageMetric
+  }
+}
+
+export async function fetchBillingUsage(): Promise<BillingUsage> {
+  return call<BillingUsage>('/api/v1/billing/usage')
+}
+
+export type TeamSummaryCounts = {
+  resources: {
+    total: number
+    postgres: number
+    redis: number
+    mongodb: number
+    webhook: number
+    queue: number
+    storage: number
+    other: number
+  }
+  deployments: number
+  members: number
+  vault_keys: number
+}
+
+export type TeamSummary = {
+  ok: true
+  freshness_seconds: number
+  /** ISO-8601 UTC timestamp of when the server computed this snapshot. */
+  as_of: string
+  tier: string
+  counts: TeamSummaryCounts
+}
+
+export async function fetchTeamSummary(): Promise<TeamSummary> {
+  return call<TeamSummary>('/api/v1/team/summary')
+}

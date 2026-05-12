@@ -1,7 +1,9 @@
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
 import { Brand, ExpiryWarningBanner, ScopePill, useExpiryTick } from '../components/Common'
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { addEnv, setEnv, useDashboardCtx, type DashboardCtx } from '../hooks/useDashboardCtx'
+import * as api from '../api'
+import type { TeamSummary } from '../api'
 
 type Scope = 'read' | 'write' | 'agent'
 
@@ -268,6 +270,26 @@ function SidebarUpgradeCard({ ctx, now }: { ctx: DashboardCtx; now: number }) {
   const billing = ctx.billing
   const loading = ctx.billingLoading
 
+  // §10.20: cached team summary feeds the resource/member counts that
+  // previously didn't render (the dashboard ctx's `counts` field had no
+  // live source for `team` — see useDashboardCtx.refreshCounts which
+  // hardcodes `team: 1`). One fetch per session-load amortises against
+  // every authenticated page render thanks to the server-side 5-min
+  // Redis cache + browser Cache-Control: max-age=300.
+  const [summary, setSummary] = useState<TeamSummary | null>(null)
+  useEffect(() => {
+    // Skip the fetch on anon/free where the card never renders counts
+    // (the upgrade CTA below is the only render path). Also skip when
+    // there's no team_id yet — the request would 401 anyway.
+    if (!ctx.me?.team?.id) return
+    if (tier === 'anonymous' || tier === 'free') return
+    let alive = true
+    api.fetchTeamSummary()
+      .then((s) => { if (alive) setSummary(s) })
+      .catch(() => { /* sidebar count rendering is non-critical */ })
+    return () => { alive = false }
+  }, [ctx.me?.team?.id, tier])
+
   // Loading state — render a quiet skeleton instead of stale fixture text.
   if (loading && !billing) {
     return (
@@ -306,6 +328,14 @@ function SidebarUpgradeCard({ ctx, now }: { ctx: DashboardCtx; now: number }) {
       ? `${billing.payment_network.toLowerCase()} · ****${billing.payment_last4}`
       : null
 
+  // §10.20: live resource + member counts from the cached team summary.
+  // Hidden until the fetch resolves so we never render "0 resources · 0
+  // members" misleadingly during load.
+  const counts = summary?.counts
+  const countsLine = counts
+    ? `${counts.resources.total} resource${counts.resources.total === 1 ? '' : 's'} · ${counts.members} member${counts.members === 1 ? '' : 's'}`
+    : null
+
   return (
     <div className="upgrade-card" data-testid="sidebar-upgrade-card-paid">
       <div className="label">{tier ? `→ ${tier} · live` : ''}</div>
@@ -317,6 +347,18 @@ function SidebarUpgradeCard({ ctx, now }: { ctx: DashboardCtx; now: number }) {
           </>
         ) : null}
         {paymentHint ? <span className="dim">{paymentHint}</span> : null}
+        {countsLine ? (
+          <>
+            <br />
+            <span
+              className="dim"
+              data-testid="sidebar-team-counts"
+              style={{ fontSize: 10.5, opacity: 0.75 }}
+            >
+              {countsLine}
+            </span>
+          </>
+        ) : null}
       </div>
       <Link to="/app/billing" className="cta" data-testid="sidebar-manage-plan">
         Manage plan →
