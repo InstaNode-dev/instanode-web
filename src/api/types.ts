@@ -58,6 +58,53 @@ export interface DashboardStack {
   tier: Tier
 }
 
+// ─── Deployment (POST /deploy/new — single-container app) ───────────────
+//
+// The agent API exposes two deploy surfaces that the dashboard renders
+// through the same pages:
+//   1. multi-service stacks → POST /stacks/new, GET /api/v1/stacks
+//   2. single-container deployments → POST /deploy/new, GET /api/v1/deployments
+//
+// `DashboardDeployment` is the typed shape of (2) after adaptation. The
+// server response includes `env` as a map of env_vars (legacy alias) and
+// `environment` as the env scope name; we surface them as `env_vars` and
+// `env` here so the type matches the DashboardStack vocabulary.
+export type DeploymentStatus =
+  | 'building'
+  | 'deploying'
+  | 'healthy'
+  | 'failed'
+  | 'stopped'
+  // Mapped onto StackStatus for shared UI: 'healthy' → 'running'.
+  | 'running'
+
+export interface DashboardDeployment {
+  /** UUID of the deployment row (used in /deploy/:id paths). */
+  id: string
+  /** Public app token; doubles as the URL slug under deployment.instanode.dev. */
+  app_id: string
+  /** Human-readable name. Server doesn't expose one yet — falls back to app_id. */
+  name: string
+  /** Application URL — e.g. https://<app_id>.deployment.instanode.dev. */
+  url: string | null
+  status: DeploymentStatus
+  /** Env scope: production / staging / dev / ... — defaults to 'production'. */
+  env: Env
+  /** Listening port inside the container. */
+  port: number
+  tier: Tier
+  /** User-supplied env vars (excluding vault refs are still strings). */
+  env_vars: Record<string, string>
+  created_at: string
+  /** Updated_at from the row — used as the "last deploy" timestamp until the
+   *  API exposes a dedicated field. */
+  last_deploy_at?: string
+  /** Not exposed by the API yet; reserved for forward compatibility. */
+  build_duration_s?: number
+  /** Optional resource binding (UUID of the primary resource). */
+  resource_id?: string
+}
+
 export interface DashboardTeam {
   id: string
   name: string

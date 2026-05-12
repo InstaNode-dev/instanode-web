@@ -44,8 +44,22 @@ export function EnvPill({ env }: { env: Env }) {
   return <span className={cls}>{label}</span>
 }
 
-export function StatusPill({ status }: { status: StackStatus | 'healthy' }) {
-  const display = status === 'running' ? 'healthy' : status
+// StatusPill renders both stack statuses (building / running / failed /
+// stopped) and the deployment-level 'deploying' phase emitted by
+// /api/v1/deployments. 'deploying' renders identically to 'building'
+// because the visual semantics — "work in flight, not yet live" — are
+// the same; treating them as separate pill styles would over-fragment
+// the chrome. 'healthy' is kept as an alias of 'running' so the
+// deployment status field can land here without an extra adapter.
+export function StatusPill({
+  status,
+}: {
+  status: StackStatus | 'healthy' | 'deploying'
+}) {
+  const display =
+    status === 'running'   ? 'healthy' :
+    status === 'deploying' ? 'building' :
+                              status
   const cls =
     display === 'healthy'  ? 'status-pill healthy' :
     display === 'building' ? 'status-pill building' :

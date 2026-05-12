@@ -8,7 +8,8 @@
 // real error banner instead of lying with mock data.
 
 import type {
-  Resource, DashboardStack, DashboardTeam, BillingDetails, Invoice,
+  Resource, DashboardStack, DashboardDeployment, DeploymentStatus,
+  DashboardTeam, BillingDetails, Invoice,
   TeamMember, TeamInvitation, AuthMeResponse, VaultEntry, ActivityItem
 } from './types'
 
@@ -364,6 +365,123 @@ export async function listStacks(): Promise<{ ok: true; items: DashboardStack[];
     // Auth missing, endpoint unavailable, or other transient — show honest
     // empty state rather than fixture data.
     return { ok: true, items: [], total: 0 }
+  }
+}
+
+// ─── Deployments (LIVE — POST /deploy/new single-container apps) ────────
+//
+// `listDeployments()` hits GET /api/v1/deployments on the agent API and
+// returns the typed dashboard shape. The server response keys collide
+// with DashboardStack vocabulary in one place: it returns `env` for the
+// env-vars map and `environment` for the scope name. We swap them here
+// so the rest of the dashboard can treat env (scope) and env_vars (map)
+// the same way it does for stacks.
+//
+// Status mapping: the server emits 'healthy' for a live deploy, which the
+// dashboard's shared StatusPill renders as 'running' (matching stacks).
+// We normalise here so consumer code doesn't need to special-case it.
+type DeploymentRespItem = {
+  id?: string
+  token?: string
+  app_id?: string
+  url?: string
+  port?: number
+  tier?: string
+  status?: string
+  // Server returns env as a map of env_vars (legacy alias). New callers
+  // should also accept env_vars for forward compat with the spec.
+  env?: Record<string, string> | string
+  env_vars?: Record<string, string>
+  // Env scope (production / staging / dev / ...).
+  environment?: string
+  created_at?: string
+  updated_at?: string
+  last_deploy_at?: string
+  build_duration_s?: number
+  resource_id?: string
+  name?: string
+}
+
+type DeploymentsListResp = {
+  ok: boolean
+  items?: DeploymentRespItem[]
+  total?: number
+}
+
+type DeploymentGetResp = {
+  ok: boolean
+  item?: DeploymentRespItem
+}
+
+function normaliseDeploymentStatus(s: string | undefined): DeploymentStatus {
+  switch (s) {
+    case 'healthy':
+      return 'running' // dashboard's StatusPill speaks 'running'
+    case 'building':
+    case 'deploying':
+    case 'failed':
+    case 'stopped':
+    case 'running':
+      return s
+    default:
+      return 'building'
+  }
+}
+
+function adaptDeployment(d: DeploymentRespItem): DashboardDeployment {
+  // The server's `env` field is the env_vars map (legacy alias); the env
+  // scope name lives under `environment`. New callers may also send a
+  // dedicated `env_vars` field — accept either.
+  const envVarsRaw =
+    d.env_vars ??
+    (typeof d.env === 'object' && d.env !== null ? d.env : undefined)
+  const envScope = d.environment ?? (typeof d.env === 'string' ? d.env : undefined)
+  const id = d.id ?? d.app_id ?? d.token ?? ''
+  const appID = d.app_id ?? d.token ?? id
+  return {
+    id,
+    app_id: appID,
+    // The server doesn't ship a separate display name yet — fall back to
+    // the app_id so the UI has something stable to render. Once the API
+    // exposes a real name, this falls through automatically.
+    name: d.name ?? appID,
+    url: d.url ?? null,
+    status: normaliseDeploymentStatus(d.status),
+    env: (envScope ?? 'production') as DashboardDeployment['env'],
+    port: d.port ?? 0,
+    tier: (d.tier ?? 'free') as DashboardDeployment['tier'],
+    env_vars: envVarsRaw ?? {},
+    created_at: d.created_at ?? '',
+    last_deploy_at: d.last_deploy_at ?? d.updated_at,
+    build_duration_s: d.build_duration_s,
+    resource_id: d.resource_id,
+  }
+}
+
+export async function listDeployments(): Promise<{ ok: true; items: DashboardDeployment[]; total: number }> {
+  // No try/catch fallback to empty — errors propagate so DeploymentsPage
+  // can render a real error state instead of silently lying. The list
+  // endpoint requires auth; 401 still triggers the AuthGate redirect.
+  const r = await call<DeploymentsListResp>('/api/v1/deployments')
+  const items = (r.items ?? []).map(adaptDeployment)
+  return { ok: true, items, total: r.total ?? items.length }
+}
+
+/**
+ * Fetch a single deployment by ID. Returns `null` when the API returns
+ * 404 so the caller (DeployDetailPage) can fall back to the stack lookup
+ * without a noisy console error. Other errors still propagate.
+ */
+export async function getDeployment(
+  id: string,
+): Promise<{ ok: true; deployment: DashboardDeployment | null }> {
+  try {
+    const r = await call<DeploymentGetResp>(`/api/v1/deployments/${encodeURIComponent(id)}`)
+    if (!r.item) return { ok: true, deployment: null }
+    return { ok: true, deployment: adaptDeployment(r.item) }
+  } catch (e: any) {
+    if (e?.status === 404) return { ok: true, deployment: null }
+    throw e
   }
 }
 
