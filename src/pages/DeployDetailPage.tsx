@@ -4,6 +4,7 @@ import {
   ROBanner, ContractBanner, EnvPill, StatusPill, TierPill, ResourceIcon, PromptCard, RelTime
 } from '../components/Common'
 import { CustomDomainPanel } from '../components/CustomDomainPanel'
+import { UpgradePromptCard } from '../components/UpgradePromptCard'
 import { useDashboardCtx } from '../hooks/useDashboardCtx'
 import * as api from '../api'
 import type { DashboardStack, DashboardDeployment, Tier, StackFamilyMember } from '../api'
@@ -28,10 +29,6 @@ const MULTI_ENV_TIERS: ReadonlySet<Tier> = new Set(['pro', 'team', 'growth'])
 // Matches the convention in the vault env-allowlist and the API-side
 // `validatePromoteEnv` helper.
 const PROMOTE_DEFAULT_TARGET = 'production'
-
-// In-app billing route. Mirrors the path used elsewhere in the dashboard
-// for the upgrade journey.
-const BILLING_PATH = '/app/billing'
 
 // Service name used when streaming logs from a multi-service stack. The stacks
 // SSE endpoint is `/stacks/:slug/logs/:svc` — `web` matches the convention used
@@ -229,22 +226,14 @@ export function DeployDetailPage() {
 }
 
 // ─── Tier-gated upsell shown to hobby/anonymous users ─────────────────────
-// Pro+ tier gets the full CustomDomainPanel. Everyone else sees this small
-// card with a link into the in-app billing flow.
+// Pro+ tier gets the full CustomDomainPanel. Everyone else sees the
+// feature-specific UpgradePromptCard (Track U2). Copy lives in
+// src/components/upgradeCopy.ts.
 function CustomDomainUpsell() {
   return (
-    <section className="card" style={{ padding: '14px 18px', marginTop: 24, display: 'flex', alignItems: 'center', gap: 12 }}>
-      <div style={{ flex: 1 }}>
-        <div style={{ fontSize: 13, color: 'var(--text)' }}>
-          <strong style={{ fontWeight: 500 }}>Custom domains</strong>{' '}
-          <span style={{ color: 'var(--text-dim)' }}>
-            are a Pro feature. Bring your own hostname (e.g. <code>app.acme.com</code>) and
-            keep your free <code>*.deployment.instanode.dev</code> URL alongside it.
-          </span>
-        </div>
-      </div>
-      <a href={BILLING_PATH} className="btn btn-primary btn-sm">Upgrade →</a>
-    </section>
+    <div style={{ marginTop: 24 }}>
+      <UpgradePromptCard feature="custom_domain" />
+    </div>
   )
 }
 
@@ -571,22 +560,11 @@ function EnvironmentCard({ member, stackName }: { member: StackFamilyMember; sta
 }
 
 // Tier-gated upsell shown to hobby / anonymous users on the Environments
-// section. Mirrors CustomDomainUpsell so the visual style stays consistent.
+// section. Delegates to UpgradePromptCard so the copy lives in one place
+// (src/components/upgradeCopy.ts) and the CTA respects the P1 experiment
+// variant attached to /auth/me. Track U2 (in-context upgrade prompts).
 function PromoteUpsell() {
-  return (
-    <section className="card" style={{ padding: '14px 18px', display: 'flex', alignItems: 'center', gap: 12 }}>
-      <div style={{ flex: 1 }}>
-        <div style={{ fontSize: 13, color: 'var(--text)' }}>
-          <strong style={{ fontWeight: 500 }}>Multi-env workflows</strong>{' '}
-          <span style={{ color: 'var(--text-dim)' }}>
-            (promote staging → production · bulk-copy vault secrets between envs)
-            ship with Pro. Hobby is single-env (production only).
-          </span>
-        </div>
-      </div>
-      <a href={BILLING_PATH} className="btn btn-primary btn-sm">Upgrade to Pro →</a>
-    </section>
-  )
+  return <UpgradePromptCard feature="family_bindings" />
 }
 
 function LiveBuild({ d, view }: { d: DashboardStack; view: DeployView }) {

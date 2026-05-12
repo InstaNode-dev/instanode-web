@@ -30,6 +30,8 @@ import {
   fetchStackFamily,
   listDeployments,
   getDeployment,
+  reportExperimentConverted,
+  validatePromotion,
 } from './index'
 // §10.21: FIXTURE_BILLING / FIXTURE_INVOICES imports retired. The 503
 // fallback paths in fetchBilling() and listInvoices() were removed —
@@ -347,6 +349,120 @@ describe('createCheckout()', () => {
     const init = m.mock.calls[0][1]
     expect(init.body).toBe(JSON.stringify({ plan: 'team' }))
   })
+
+  // P3: opts.promotion_code only appears in the body when actually passed.
+  it('includes promotion_code in the body when supplied (P3)', async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse({ ok: true, short_url: 'https://rzp.io/i/p3' }))
+    await createCheckout('pro', { promotion_code: 'TWITTER15' })
+    const init = m.mock.calls[0][1]
+    expect(JSON.parse(init.body as string)).toEqual({
+      plan: 'pro', promotion_code: 'TWITTER15',
+    })
+  })
+
+  it('drops promotion_code from the body when not supplied (P3)', async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse({ ok: true, short_url: 'https://rzp.io/i/p3' }))
+    await createCheckout('pro')
+    const init = m.mock.calls[0][1]
+    const body = JSON.parse(init.body as string)
+    expect(body).toEqual({ plan: 'pro' })
+    expect('promotion_code' in body).toBe(false)
+  })
+
+  it('drops an empty / whitespace-only promotion_code (P3)', async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse({ ok: true, short_url: 'https://rzp.io/i/p3' }))
+    await createCheckout('pro', { promotion_code: '   ' })
+    const init = m.mock.calls[0][1]
+    const body = JSON.parse(init.body as string)
+    expect('promotion_code' in body).toBe(false)
+  })
+})
+
+// ─── validatePromotion() (P3) ────────────────────────────────────────────
+// Until api ships POST /api/v1/billing/promotion/validate, this helper
+// falls back to a small set of seed codes on a 404. The mock + fallback
+// path together must:
+//   - return a Promotion shape when the api responds 200
+//   - return the seed Promotion for a known seed code when the api 404s
+//   - throw promotion_not_found for an unknown code when the api 404s
+//   - propagate non-404 errors (e.g. 410 expired) untouched
+describe('validatePromotion() (P3)', () => {
+  it('returns the api Promotion on a 200 response', async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse({
+      ok: true,
+      code: 'PARTNER25',
+      discount: { kind: 'percent_off', value: 25, applies_to: 6, unit: 'months' },
+      valid_until: '2026-12-31T00:00:00Z',
+    }))
+    const r = await validatePromotion('PARTNER25', 'pro')
+    expect(r.promotion.code).toBe('PARTNER25')
+    expect(r.promotion.discount).toEqual({ kind: 'percent_off', value: 25, applies_to: 6, unit: 'months' })
+    expect(r.promotion.valid_until).toBe('2026-12-31T00:00:00Z')
+  })
+
+  it('POSTs {code, plan} to /api/v1/billing/promotion/validate (uppercased + trimmed)', async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse({
+      ok: true,
+      code: 'TWITTER15',
+      discount: { kind: 'percent_off', value: 15, applies_to: 3, unit: 'months' },
+      valid_until: '2026-09-01T00:00:00Z',
+    }))
+    await validatePromotion('  twitter15  ', 'pro')
+    const [url, init] = m.mock.calls[0]
+    expect(String(url)).toContain('/api/v1/billing/promotion/validate')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(init.body as string)).toEqual({ code: 'TWITTER15', plan: 'pro' })
+  })
+
+  it('falls back to the seed table when the api 404s on a known seed code', async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse(
+      { error: 'not_found', message: 'no such route' },
+      { status: 404, statusText: 'Not Found' },
+    ))
+    const r = await validatePromotion('TWITTER15', 'pro')
+    expect(r.promotion.code).toBe('TWITTER15')
+    expect(r.promotion.discount.kind).toBe('percent_off')
+    expect(r.promotion.discount.value).toBe(15)
+  })
+
+  it('throws promotion_not_found on 404 for an unknown code', async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse(
+      { error: 'not_found' },
+      { status: 404, statusText: 'Not Found' },
+    ))
+    await expect(validatePromotion('NONEXISTENT', 'pro')).rejects.toMatchObject({
+      status: 404,
+      code: 'promotion_not_found',
+    })
+  })
+
+  it('propagates 410 expired errors with the api message', async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse(
+      { error: 'promotion_expired', message: 'This code has expired.' },
+      { status: 410, statusText: 'Gone' },
+    ))
+    await expect(validatePromotion('OLDCODE', 'pro')).rejects.toMatchObject({
+      status: 410,
+      code: 'promotion_expired',
+    })
+  })
+
+  it('rejects with promotion_invalid for an empty input (no api call)', async () => {
+    const m = installFetch()
+    await expect(validatePromotion('   ', 'pro')).rejects.toMatchObject({
+      status: 400,
+      code: 'promotion_invalid',
+    })
+    expect(m).not.toHaveBeenCalled()
+  })
 })
 
 // ─── cancelSubscription() ────────────────────────────────────────────────
@@ -491,6 +607,41 @@ describe('fetchMe()', () => {
     const m = installFetch()
     m.mockResolvedValueOnce(jsonResponse({ error: 'boom' }, { status: 500 }))
     await expect(fetchMe()).rejects.toBeDefined()
+  })
+
+  it('passes through the experiments map from the agent API', async () => {
+    // P1 pricing experiment — /auth/me now embeds a server-bucketed
+    // experiments map. The dashboard's UpgradeButton component reads
+    // `me.experiments.upgrade_button` to decide which variant to render.
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse({
+      ok: true,
+      user_id: 'u_xyz',
+      team_id: 't_xyz',
+      email: 'agent@instanode.dev',
+      tier: 'pro',
+      trial_ends_at: null,
+      experiments: { upgrade_button: 'urgent' },
+    }))
+    const r = await fetchMe()
+    expect(r.experiments).toEqual({ upgrade_button: 'urgent' })
+  })
+
+  it('omits experiments cleanly when the agent API does not return the field', async () => {
+    // Older API builds (pre-P1) don't return an experiments field.
+    // The dashboard must handle that without throwing — UpgradeButton
+    // falls back to "control" via normalizeVariant().
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse({
+      ok: true,
+      user_id: 'u_xyz',
+      team_id: 't_xyz',
+      email: 'agent@instanode.dev',
+      tier: 'pro',
+      trial_ends_at: null,
+    }))
+    const r = await fetchMe()
+    expect(r.experiments).toBeUndefined()
   })
 })
 
@@ -882,5 +1033,50 @@ describe('fetchStackFamily()', () => {
     await fetchStackFamily('stk weird/slug')
     const [url] = m.mock.calls[0]
     expect(String(url)).toContain('/api/v1/stacks/stk%20weird%2Fslug/family')
+  })
+})
+
+// ─── reportExperimentConverted() ─────────────────────────────────────────
+describe('reportExperimentConverted()', () => {
+  it('POSTs the right payload to /api/v1/experiments/converted', async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse({ ok: true }))
+    await reportExperimentConverted({
+      experiment: 'upgrade_button',
+      variant: 'urgent',
+      action: 'checkout_started',
+    })
+    const [url, init] = m.mock.calls[0]
+    expect(String(url)).toContain('/api/v1/experiments/converted')
+    expect((init as any).method).toBe('POST')
+    expect(JSON.parse((init as any).body)).toEqual({
+      experiment: 'upgrade_button',
+      variant: 'urgent',
+      action: 'checkout_started',
+    })
+  })
+
+  it('swallows network errors (analytics tail must not wag the conversion dog)', async () => {
+    const m = installFetch()
+    m.mockRejectedValueOnce(new Error('offline'))
+    // Must NOT throw. If it does, the test fails by surfacing the rejection.
+    await reportExperimentConverted({
+      experiment: 'upgrade_button',
+      variant: 'control',
+      action: 'checkout_started',
+    })
+  })
+
+  it('swallows 400 from a stale-variant rejection', async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse(
+      { ok: false, error: 'variant_mismatch' },
+      { status: 400 },
+    ))
+    await reportExperimentConverted({
+      experiment: 'upgrade_button',
+      variant: 'control',
+      action: 'checkout_started',
+    })
   })
 })
