@@ -1,29 +1,11 @@
 // Real API surface — talks to api.instanode.dev (via Vite proxy in dev,
 // same-origin in prod).
 //
-// Mid-state, 2026-05-12: the §10.21 FIXTURE removal is in progress.
-//   - listStacks: cleaned (returns honest empty {items:[],total:0} on
-//     error). This is what /app/deployments consumes.
-//   - fetchTeam / updateTeam / listMembers / listInvitations / inviteMember:
-//     cleaned to honest derive-from-/auth/me or empty results.
-//   - getStack / getStackLogs / fetchActivity / fetchBilling 503 path /
-//     listInvoices 503 path / listVault: STILL use FIXTURE_* fallbacks.
-//     These are tracked under §10.21 to remove in a follow-up.
-//
-// The fixtures file is still imported below until that cleanup lands —
-// removing each usage requires a per-page UX decision (empty state vs.
-// error banner) that's easier to land in a focused PR.
-
-import {
-  FIXTURE_STACKS, FIXTURE_BUILD_LOGS, FIXTURE_BILLING, FIXTURE_INVOICES,
-  FIXTURE_VAULT, FIXTURE_ACTIVITY,
-} from './fixtures'
-
-// fake() — tiny helper for the remaining FIXTURE-fallback paths. Returns
-// the literal value as a resolved promise. Production code never calls
-// it on the happy path — only inside catch blocks for surfaces that
-// don't have a live API yet. Tracked for removal in §10.21.
-function fake<T>(value: T): Promise<T> { return Promise.resolve(value) }
+// §10.21 complete (2026-05-12): every FIXTURE_* fallback that previously
+// masked backend outages is gone. Surfaces with no live endpoint return
+// honest empty/null results; surfaces with a partial backend (billing 503,
+// invoices 503) now propagate errors so the consuming page renders a
+// real error banner instead of lying with mock data.
 
 import type {
   Resource, DashboardStack, DashboardTeam, BillingDetails, Invoice,
@@ -378,13 +360,27 @@ export async function listStacks(): Promise<{ ok: true; items: DashboardStack[];
   }
 }
 
-export async function getStack(slug: string): Promise<{ ok: true; stack: DashboardStack }> {
-  const s = FIXTURE_STACKS.find((x) => x.slug === slug) ?? FIXTURE_STACKS[0]
-  return fake({ ok: true as const, stack: s })
+// §10.21: no live GET /api/v1/stacks/:slug yet. Derive the detail from
+// listStacks() so the dashboard stops fabricating stack metadata. Returns
+// `stack: null` honestly when the slug isn't found instead of silently
+// substituting the first FIXTURE_STACKS entry, which previously made the
+// dashboard render a fake "flashcards" stack for every unknown slug.
+export async function getStack(slug: string): Promise<{ ok: true; stack: DashboardStack | null }> {
+  try {
+    const r = await listStacks()
+    const stack = r.items.find((x) => x.slug === slug) ?? null
+    return { ok: true as const, stack }
+  } catch {
+    return { ok: true as const, stack: null }
+  }
 }
 
+// §10.21: no live GET /api/v1/stacks/:slug/build-logs yet. Return an
+// honest empty buffer instead of canned build logs that don't match the
+// user's actual deploy. Real-time logs stream via streamSSE on
+// DeployDetailPage.
 export async function getStackLogs(slug: string) {
-  return fake({ ok: true as const, slug, lines: FIXTURE_BUILD_LOGS })
+  return { ok: true as const, slug, lines: [] as Array<{ ts: string; phase: string; level: string; message: string }> }
 }
 
 // ─── Custom domains (LIVE) ──────────────────────────────────────────────
@@ -451,16 +447,13 @@ export async function deleteCustomDomain(stackSlug: string, id: string): Promise
 
 // ─── Billing (LIVE: every endpoint hits the agent API) ──────────────────
 //
-// fetchBilling   — LIVE. Calls GET /api/v1/billing on the agent API,
-//                  which returns the aggregated billing state (tier,
-//                  subscription_status, next_renewal_at, amount_inr,
-//                  payment_method, razorpay_*_id). Falls back to a
-//                  whoami-derived shape when the endpoint isn't
-//                  available (503 = Razorpay unconfigured, e.g. local
-//                  dev) so the UI stays usable.
+// fetchBilling   — LIVE. Calls GET /api/v1/billing on the agent API and
+//                  returns the aggregated billing state. Errors (including
+//                  503 = Razorpay unconfigured) propagate so the page
+//                  renders a real error banner instead of mock data.
 //
-// listInvoices   — LIVE. Calls GET /api/v1/billing/invoices on the agent
-//                  API; falls back to FIXTURE_INVOICES on 503.
+// listInvoices   — LIVE. Calls GET /api/v1/billing/invoices. Errors
+//                  propagate (no fixture fallback).
 //
 // createCheckout — LIVE. Calls POST /api/v1/billing/checkout, creates a
 //                  real Razorpay subscription, and returns the hosted
@@ -505,40 +498,23 @@ function mapBillingState(r: BillingStateResp): BillingDetails {
 }
 
 export async function fetchBilling(): Promise<{ ok: true; plan: string; billing: BillingDetails }> {
-  try {
-    const r = await call<BillingStateResp>('/api/v1/billing')
-    return { ok: true as const, plan: r.tier, billing: mapBillingState(r) }
-  } catch (e: any) {
-    // 503 = Razorpay unconfigured in this env (e.g. local dev without
-    // RAZORPAY_KEY_ID). Fall back to the whoami-derived shape +
-    // FIXTURE_BILLING so the page still renders. Any other error
-    // propagates so the caller sees a real failure.
-    if (e?.status === 503) {
-      try {
-        const me = await fetchMe()
-        return { ok: true as const, plan: me.user.tier, billing: FIXTURE_BILLING }
-      } catch {
-        return { ok: true as const, plan: 'hobby', billing: FIXTURE_BILLING }
-      }
-    }
-    throw e
-  }
+  // §10.21: every error propagates. The previous 503 fallback returned
+  // FIXTURE_BILLING (fake "active subscription, ****4242 visa, renews in
+  // 9 days") whenever Razorpay was unconfigured, which lied to users in
+  // local dev and any partial-outage state. BillingPage now catches the
+  // APIError and renders a real error banner.
+  const r = await call<BillingStateResp>('/api/v1/billing')
+  return { ok: true as const, plan: r.tier, billing: mapBillingState(r) }
 }
 
 type InvoicesResp = { ok: boolean; invoices?: Invoice[] }
 
 export async function listInvoices(): Promise<{ ok: true; invoices: Invoice[] }> {
-  try {
-    const r = await call<InvoicesResp>('/api/v1/billing/invoices')
-    return { ok: true, invoices: r.invoices ?? [] }
-  } catch (e: any) {
-    // 503 = billing_not_configured (no Razorpay keys in this env). Fall
-    // back to the fixture list so the page renders something usable in
-    // local dev. Any other error propagates so the UI shows a real
-    // failure state.
-    if (e?.status === 503) return { ok: true, invoices: FIXTURE_INVOICES }
-    throw e
-  }
+  // §10.21: errors propagate. The previous 503 fallback returned three
+  // mock "paid" invoices that didn't correspond to any real payment;
+  // BillingPage now surfaces the failure honestly.
+  const r = await call<InvoicesResp>('/api/v1/billing/invoices')
+  return { ok: true, invoices: r.invoices ?? [] }
 }
 
 export async function createCheckout(
@@ -560,6 +536,10 @@ export async function cancelSubscription(): Promise<{ ok: true }> {
 type VaultListResp = { ok: boolean; keys: string[] }
 
 export async function listVault(env: string): Promise<{ ok: true; entries: VaultEntry[] }> {
+  // §10.21: 401 still rethrows (AuthGate redirects to /login). Other
+  // errors return an honest empty list — the page renders an empty state
+  // rather than fabricating Stripe / OpenAI / Anthropic keys the user
+  // has never stored.
   try {
     const r = await call<VaultListResp>(`/api/v1/vault/${encodeURIComponent(env)}`)
     const entries: VaultEntry[] = (r.keys ?? []).map((key) => ({
@@ -577,7 +557,7 @@ export async function listVault(env: string): Promise<{ ok: true; entries: Vault
     return { ok: true, entries }
   } catch (e: any) {
     if (e?.status === 401) throw e
-    return fake({ ok: true as const, entries: FIXTURE_VAULT.filter((v) => v.env === env) })
+    return { ok: true as const, entries: [] }
   }
 }
 
@@ -602,6 +582,12 @@ export async function deleteVaultSecret(env: string, key: string): Promise<void>
 // provision / claim / rotate / delete / vault.put / etc.
 // Falls back to synthesising from resource timestamps if the audit call fails.
 export async function fetchActivity(): Promise<{ ok: true; items: ActivityItem[] }> {
+  // §10.21: 401 still rethrows. On any other failure we still try the
+  // resource-synthesis fallback (honest data, just synthesised from the
+  // live resource list). If that also fails we return an empty list
+  // instead of FIXTURE_ACTIVITY — the page renders "no activity yet"
+  // rather than fabricating "marcus rotated STRIPE_SECRET_KEY" rows
+  // that never happened.
   try {
     type AuditResp = {
       ok: boolean
@@ -628,7 +614,8 @@ export async function fetchActivity(): Promise<{ ok: true; items: ActivityItem[]
     return { ok: true, items }
   } catch (e: any) {
     if (e?.status === 401) throw e
-    // Fall back to synthesising from resources so the dashboard still renders.
+    // Fall back to synthesising from resources so the dashboard still
+    // renders something honest (real resources, real timestamps).
     try {
       const r = await listResources()
       const items: ActivityItem[] = r.items.slice(0, 8).map((res) => ({
@@ -641,7 +628,7 @@ export async function fetchActivity(): Promise<{ ok: true; items: ActivityItem[]
       } as unknown as ActivityItem))
       return { ok: true, items }
     } catch {
-      return fake({ ok: true as const, items: FIXTURE_ACTIVITY })
+      return { ok: true as const, items: [] }
     }
   }
 }

@@ -234,9 +234,6 @@ export function BillingPage() {
         we don't expose a self-serve path on purpose.
       </ROBanner>
 
-      <ContractBanner kind="locked" badge="locked">
-        <strong>6 endpoints live.</strong> <code>GET /billing</code> · <code>POST /checkout</code> · <code>/cancel</code> · <code>GET /invoices</code> · <code>POST /update-payment</code> · <code>POST /change-plan</code>.
-      </ContractBanner>
 
       <div className="plan-card">
         <div className="plan-summary">

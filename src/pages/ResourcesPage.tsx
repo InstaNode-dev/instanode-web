@@ -51,11 +51,6 @@ export function ResourcesPage() {
 
   return (
     <>
-      <ContractBanner kind="locked" badge="locked">
-        <strong>GET /api/v1/resources</strong> · returns <code>{`{"ok": true, "items": Resource[], "total": number}`}</code>. Backed by{' '}
-        <code>resourcesH.List()</code> which fans out to gRPC <code>agent.ListResources(team_id)</code>. <code>connection_url</code>{' '}
-        is intentionally omitted from list responses — only <code>GET /:id</code> and <code>/rotate</code> include it.
-      </ContractBanner>
 
       <div className="filters">
         {TYPES.map((t) => (

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { Brand, ResourceIcon } from '../components/Common'
 import { claim, createAPIKey, createCheckout, listResources, setToken } from '../api'
 import type { Resource, ResourceType } from '../api'
@@ -63,6 +63,7 @@ export function ClaimPage() {
   const [stage, setStage] = useState<Stage>('enter-email')
   const [err, setErr] = useState<string | null>(null)
   const [preview, setPreview] = useState<Preview[]>([])
+  const [previewErr, setPreviewErr] = useState<string | null>(null)
   const [resources, setResources] = useState<Resource[]>([])
   const [countdownMs, setCountdownMs] = useState<number | null>(null)
   const [explainerOpen, setExplainerOpen] = useState(true)
@@ -72,7 +73,15 @@ export function ClaimPage() {
   useEffect(() => {
     if (!token) return
     const decoded = decodeJWT(token)
-    if (!decoded) return
+    if (!decoded) {
+      // §10.21: previously this branch returned silently, leaving the page
+      // with an empty preview and the email form — looking like a normal
+      // claim flow. A malformed/expired token now surfaces a real banner
+      // so the user knows to ask their agent for a fresh link.
+      setPreviewErr('invalid_or_expired')
+      return
+    }
+    setPreviewErr(null)
     const types = (decoded.rt as ResourceType[]) ?? []
     const tokens = decoded.tok ?? []
     setPreview(
@@ -161,6 +170,41 @@ export function ClaimPage() {
           <div style={{ marginBottom: 24 }}><Brand /></div>
           <h1>Missing claim link.</h1>
           <p>This page expects a token. Open the claim link from your agent's response.</p>
+        </div>
+      </div>
+    )
+  }
+
+  // ── Invalid / expired claim token ────────────────────────────────────
+  // Previously this state rendered a blank email form. Now we surface a
+  // real error banner with a clear next step. (§10.21.)
+  if (previewErr) {
+    return (
+      <div className="auth-shell">
+        <div className="auth-card" data-testid="claim-invalid" style={{ maxWidth: 480 }}>
+          <div style={{ marginBottom: 24 }}><Brand /></div>
+          <h1>Invalid or expired claim link.</h1>
+          <p>
+            This claim link is invalid or expired. Provision a fresh resource to get a new one.
+          </p>
+          <div
+            role="alert"
+            data-testid="claim-invalid-error"
+            style={{
+              marginTop: 16, marginBottom: 20,
+              padding: '10px 12px',
+              borderLeft: '2px solid var(--rose)',
+              fontSize: 12.5,
+              fontFamily: 'var(--font-mono)',
+              color: 'var(--text)',
+            }}
+          >
+            Tokens are single-use and expire after 24 hours. Ask your agent to call
+            <code style={{ marginLeft: 4 }}>POST /db/new</code> (or any /new endpoint) to mint a fresh link.
+          </div>
+          <Link to="/pricing" className="btn btn-primary" data-testid="claim-invalid-pricing" style={{ width: '100%', justifyContent: 'center' }}>
+            See plans →
+          </Link>
         </div>
       </div>
     )

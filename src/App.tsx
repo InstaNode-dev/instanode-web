@@ -78,9 +78,9 @@ const DeploymentsPage = lazy(() =>
 const DeployDetailPage = lazy(() =>
   import('./pages/DeployDetailPage').then((m) => ({ default: m.DeployDetailPage })),
 )
-const StacksPage = lazy(() =>
-  import('./pages/StacksPage').then((m) => ({ default: m.StacksPage })),
-)
+// StacksPage retired 2026-05-12 — duplicate of DeploymentsPage. UI says
+// "Deployments" (user language); the API stays /api/v1/stacks (existing
+// data model). One page, one route.
 const VaultPage = lazy(() =>
   import('./pages/VaultPage').then((m) => ({ default: m.VaultPage })),
 )
@@ -191,7 +191,6 @@ export function AppRoutes() {
           <Route path="resources/:id" element={<ResourceDetailPage />} />
           <Route path="deployments" element={<DeploymentsPage />} />
           <Route path="deployments/:id" element={<DeployDetailPage />} />
-          <Route path="stacks" element={<StacksPage />} />
           <Route path="vault" element={<VaultPage />} />
           <Route path="team" element={<TeamPage />} />
           <Route path="billing" element={<BillingPage />} />
