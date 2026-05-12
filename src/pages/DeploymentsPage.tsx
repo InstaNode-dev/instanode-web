@@ -1,17 +1,27 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
-  ContractBanner, EnvPill, StatusPill, ResourceIcon, RelTime
+  EnvPill, StatusPill, ResourceIcon, RelTime, PromptCard
 } from '../components/Common'
 import { QuotaWallBanner } from '../components/QuotaWallBanner'
+import { IpAllowList, IP_ALLOW_LIST_MAX } from '../components/IpAllowList'
+import { UpgradePromptCard } from '../components/UpgradePromptCard'
 import * as api from '../api'
-import type { DashboardDeployment } from '../api'
+import type { DashboardDeployment, Tier } from '../api'
 import { useDashboardCtx } from '../hooks/useDashboardCtx'
+
+// Tiers that can ship a private deploy (Track B). The agent API enforces
+// the same gate via 402 + agent_action on POST /deploy/new — keeping the
+// allowlist in lockstep keeps the UI from offering a feature the backend
+// will reject.
+const PRIVATE_DEPLOY_TIERS: ReadonlySet<Tier> = new Set(['pro', 'team', 'growth'])
 
 export function DeploymentsPage() {
   const ctx = useDashboardCtx()
   const [items, setItems] = useState<DashboardDeployment[]>([])
   const [loading, setLoading] = useState(true)
+  const tier = (ctx.me?.user.tier ?? 'anonymous') as Tier
+  const canUsePrivateDeploy = PRIVATE_DEPLOY_TIERS.has(tier)
 
   // Source of truth: GET /api/v1/deployments (single-container apps via
   // POST /deploy/new). The env switcher in the sidebar drives the ?env=
@@ -131,6 +141,139 @@ export function DeploymentsPage() {
           </Link>
         ))}
       </div>
+
+      {/* Private deploy section — Pro+ feature. Pro+ users get the live
+          configurator that produces a precise agent prompt (since deploys
+          are agent-driven in this product). Hobby / free / anonymous see
+          a feature-specific UpgradePromptCard from src/components/upgradeCopy.ts. */}
+      <section
+        data-testid="private-deploy-section"
+        style={{ marginTop: 32 }}
+      >
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, marginBottom: 12 }}>
+          <h3 style={{ fontSize: 14, fontWeight: 500, color: 'var(--text)', margin: 0 }}>
+            Private deploys
+          </h3>
+          <span style={{ fontSize: 11.5, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>
+            IP allow-list · max {IP_ALLOW_LIST_MAX} entries
+          </span>
+          {canUsePrivateDeploy && (
+            <span className="tag" style={{ marginLeft: 'auto' }}>pro</span>
+          )}
+        </div>
+        {canUsePrivateDeploy ? (
+          <PrivateDeployConfigurator />
+        ) : (
+          <PrivateDeployUpsell />
+        )}
+      </section>
     </>
+  )
+}
+
+// PrivateDeployUpsell — tier-gated explainer for hobby/free/anonymous.
+// Mirrors the PromoteUpsell + CustomDomainUpsell pattern: copy lives in
+// upgradeCopy.ts under `private_deploy`.
+function PrivateDeployUpsell() {
+  return (
+    <div data-testid="private-deploy-upsell">
+      <UpgradePromptCard feature="private_deploy" />
+    </div>
+  )
+}
+
+// PrivateDeployConfigurator — Pro+ surface. Renders a Private toggle and,
+// when on, the IpAllowList tag input. Once configured the panel exposes a
+// PromptCard with a precise agent prompt that mirrors the createDeploy()
+// helper's wire shape — agents do the actual deploy, the dashboard just
+// composes the prose.
+//
+// Why a PromptCard and not a "Deploy" button:
+//   The dashboard's contract is read-only — mutations are agent-driven
+//   (see DeployDetailPage's redeploy/rollback/stop PromptCards). Adding
+//   our own multipart file-upload form would fork the surface. The
+//   createDeploy() helper still exists for symmetry with the backend, so
+//   the agent prompt fields stay in lockstep with the actual wire shape.
+function PrivateDeployConfigurator() {
+  const [isPrivate, setIsPrivate] = useState(false)
+  const [allowedIps, setAllowedIps] = useState<string[]>([])
+
+  // Build a deterministic agent prompt body. Keys mirror createDeploy() in
+  // src/api/index.ts so a future copy-paste into a real API call stays
+  // accurate.
+  const allowedIpsJSON = JSON.stringify(allowedIps)
+  const promptText =
+    `Ship a private instanode deployment.\n` +
+    `\n` +
+    `- Endpoint: POST https://api.instanode.dev/deploy/new\n` +
+    `- Auth: use my INSTANODE_TOKEN env var as Bearer\n` +
+    `- Multipart fields (alongside the tarball):\n` +
+    `    private: ${isPrivate}\n` +
+    `    allowed_ips: ${allowedIpsJSON}\n` +
+    `\n` +
+    `Only requests originating from the IPs/CIDRs in allowed_ips can reach the deploy at the edge — everything else gets a 403.\n` +
+    `\n` +
+    `Pro tier required (the API returns 402 with agent_action otherwise). Empty allowed_ips with private=true returns 400 — give me at least one entry.`
+
+  return (
+    <div data-testid="private-deploy-configurator" className="card" style={{ padding: 16 }}>
+      <label
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          fontSize: 13,
+          cursor: 'pointer',
+          marginBottom: isPrivate ? 14 : 0,
+        }}
+      >
+        <input
+          type="checkbox"
+          data-testid="private-toggle"
+          checked={isPrivate}
+          onChange={(e) => setIsPrivate(e.target.checked)}
+        />
+        <span>
+          <strong style={{ fontWeight: 500 }}>Private deploy</strong>
+          <span style={{ color: 'var(--text-dim)', marginLeft: 6, fontSize: 12 }}>
+            Gate the deploy by an IP allow-list at the edge.
+          </span>
+        </span>
+      </label>
+
+      {isPrivate && (
+        <>
+          <div
+            data-testid="private-ip-input-wrap"
+            style={{ marginBottom: 14 }}
+          >
+            <div
+              style={{
+                fontSize: 11.5,
+                color: 'var(--text-faint)',
+                marginBottom: 6,
+                fontFamily: 'var(--font-mono)',
+              }}
+            >
+              allowed_ips
+            </div>
+            <IpAllowList value={allowedIps} onChange={setAllowedIps} />
+          </div>
+          <PromptCard
+            title="Ship private deploy"
+            prompt={
+              <>
+                Hand this prompt to your agent. The deploy will be gated by
+                the IP allow-list above; everything else gets a 403 at the
+                edge.
+              </>
+            }
+            promptText={promptText}
+            method="POST"
+            endpoint="/deploy/new"
+          />
+        </>
+      )}
+    </div>
   )
 }

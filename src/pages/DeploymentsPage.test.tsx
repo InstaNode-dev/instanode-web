@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { render, screen, waitFor, cleanup } from '@testing-library/react'
+import { render, screen, waitFor, cleanup, fireEvent } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 
 // Mock the api module so the page's useEffect resolves with controlled
@@ -24,16 +24,44 @@ vi.mock('../api', async () => {
   }
 })
 
+// Mock useDashboardCtx so each test pins a tier. The page reads ctx.me to
+// decide between the Pro+ configurator and the hobby/free upsell.
+let mockMe: any = null
+vi.mock('../hooks/useDashboardCtx', () => ({
+  useDashboardCtx: () => ({
+    me: mockMe,
+    meErr: null,
+    meLoading: false,
+    env: 'production',
+    envs: ['production'],
+    counts: { resources: 0, deployments: 0, vault: 0, team: 1 },
+    resources: [],
+    billing: null,
+    billingLoading: false,
+  }),
+}))
+
 import { DeploymentsPage } from './DeploymentsPage'
 import * as api from '../api'
-import type { DashboardDeployment } from '../api'
+import type { DashboardDeployment, Tier } from '../api'
 
 const mockListDeployments = api.listDeployments as unknown as ReturnType<typeof vi.fn>
 
 beforeEach(() => {
   mockListDeployments.mockReset()
+  // Default: empty deployments list so the privacy section renders without
+  // background row noise.
+  mockListDeployments.mockResolvedValue({ ok: true, items: [], total: 0 })
+  mockMe = null
 })
 afterEach(() => cleanup())
+
+function setTier(tier: Tier) {
+  mockMe = {
+    user: { id: 'u', email: 'me@test', tier, team_id: 't', created_at: '' },
+    team: { id: 't', slug: 't', name: 't', owner_id: 'u', member_count: 1, tier, created_at: '' },
+  }
+}
 
 function withRouter(ui: React.ReactNode) {
   return <MemoryRouter>{ui}</MemoryRouter>
@@ -140,5 +168,65 @@ describe('DeploymentsPage — non-empty state', () => {
     // deploying → building in the shared pill so users see a single
     // "in-progress" visual rather than two near-identical states.
     expect(container.textContent).toMatch(/building/)
+  })
+})
+
+// ─── Private deploy section (Track B) ────────────────────────────────────
+describe('DeploymentsPage — private deploy section, tier-gated', () => {
+  it('renders the UpgradePromptCard for hobby tier (no configurator)', async () => {
+    setTier('hobby')
+    render(withRouter(<DeploymentsPage />))
+    await waitFor(() => screen.getByTestId('private-deploy-section'))
+    expect(screen.getByTestId('private-deploy-upsell')).toBeTruthy()
+    // The UpgradePromptCard for private_deploy renders with this stable testId.
+    expect(screen.getByTestId('upgrade-prompt-private_deploy')).toBeTruthy()
+    // The configurator (with toggle) does NOT render for hobby.
+    expect(screen.queryByTestId('private-deploy-configurator')).toBeNull()
+    expect(screen.queryByTestId('private-toggle')).toBeNull()
+  })
+
+  it('renders the UpgradePromptCard for free / anonymous tier as well', async () => {
+    setTier('free')
+    render(withRouter(<DeploymentsPage />))
+    await waitFor(() => screen.getByTestId('private-deploy-section'))
+    expect(screen.getByTestId('private-deploy-upsell')).toBeTruthy()
+    expect(screen.queryByTestId('private-deploy-configurator')).toBeNull()
+  })
+
+  it('renders the configurator (Private toggle) for pro tier', async () => {
+    setTier('pro')
+    render(withRouter(<DeploymentsPage />))
+    await waitFor(() => screen.getByTestId('private-deploy-section'))
+    expect(screen.getByTestId('private-deploy-configurator')).toBeTruthy()
+    expect(screen.getByTestId('private-toggle')).toBeTruthy()
+    // No upsell rendered for pro.
+    expect(screen.queryByTestId('private-deploy-upsell')).toBeNull()
+  })
+
+  it('toggling Private on reveals the IP allow-list input', async () => {
+    setTier('pro')
+    render(withRouter(<DeploymentsPage />))
+    await waitFor(() => screen.getByTestId('private-deploy-configurator'))
+    // IP input is hidden when toggle is off.
+    expect(screen.queryByTestId('private-ip-input-wrap')).toBeNull()
+    expect(screen.queryByTestId('ip-allow-list')).toBeNull()
+    const toggle = screen.getByTestId('private-toggle') as HTMLInputElement
+    fireEvent.click(toggle)
+    expect(toggle.checked).toBe(true)
+    // Now the IP allow-list appears.
+    expect(screen.getByTestId('private-ip-input-wrap')).toBeTruthy()
+    expect(screen.getByTestId('ip-allow-list')).toBeTruthy()
+  })
+
+  it('toggling Private off hides the IP allow-list again', async () => {
+    setTier('pro')
+    render(withRouter(<DeploymentsPage />))
+    await waitFor(() => screen.getByTestId('private-deploy-configurator'))
+    const toggle = screen.getByTestId('private-toggle') as HTMLInputElement
+    fireEvent.click(toggle)
+    expect(screen.getByTestId('ip-allow-list')).toBeTruthy()
+    fireEvent.click(toggle)
+    expect(toggle.checked).toBe(false)
+    expect(screen.queryByTestId('ip-allow-list')).toBeNull()
   })
 })

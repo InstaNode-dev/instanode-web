@@ -103,6 +103,14 @@ export interface DashboardDeployment {
   build_duration_s?: number
   /** Optional resource binding (UUID of the primary resource). */
   resource_id?: string
+  /** When true the deploy is gated by an IP allow-list; agents/browsers
+   *  outside `allowed_ips` get a 403 from the edge. Defaults to false on
+   *  older API builds (public deploy). Pro+ feature — anonymous / free
+   *  / hobby get 402 from POST /deploy/new when this is set. */
+  private?: boolean
+  /** IPv4 addresses or CIDR blocks (max 32) permitted to reach the
+   *  deployment when `private=true`. Empty / undefined when public. */
+  allowed_ips?: string[]
 }
 
 export interface DashboardTeam {

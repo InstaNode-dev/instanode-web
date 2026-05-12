@@ -52,6 +52,7 @@ describe('UpgradePromptCard — per-feature copy', () => {
     'family_bindings',
     'quota_wall',
     'custom_domain',
+    'private_deploy',
   ]
 
   for (const feature of FEATURES) {

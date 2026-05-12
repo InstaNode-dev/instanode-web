@@ -434,6 +434,12 @@ type DeploymentRespItem = {
   build_duration_s?: number
   resource_id?: string
   name?: string
+  // Track B (private deploys): server flags + IP allow-list. Older API
+  // builds omit these fields entirely — the adapter treats them as
+  // `private=false` and `allowed_ips=[]` so the dashboard never lies about
+  // privacy state when the backend hasn't shipped yet.
+  private?: boolean
+  allowed_ips?: string[]
 }
 
 type DeploymentsListResp = {
@@ -489,6 +495,11 @@ function adaptDeployment(d: DeploymentRespItem): DashboardDeployment {
     last_deploy_at: d.last_deploy_at ?? d.updated_at,
     build_duration_s: d.build_duration_s,
     resource_id: d.resource_id,
+    // Private-deploy fields (Track B). Older API builds omit them; we
+    // surface false / [] so the UI never silently inherits "private"
+    // state from a stale payload.
+    private: d.private ?? false,
+    allowed_ips: d.allowed_ips ?? [],
   }
 }
 
@@ -519,6 +530,102 @@ export async function getDeployment(
     if (e?.status === 404) return { ok: true, deployment: null }
     throw e
   }
+}
+
+// ─── createDeploy — POST /deploy/new (Track B private-deploy fields) ─────
+//
+// The dashboard doesn't usually drive deploys itself (the read-only model
+// favours agent-driven mutations via PromptCard), but the createDeploy
+// helper exists so:
+//   1. The "Configure private access" panel on DeploymentsPage can build a
+//      precise agent prompt that mirrors the request shape the helper
+//      would send (single source of truth for the field names).
+//   2. Future agentic flows in the dashboard (e.g. one-click redeploy with
+//      a privacy patch) can call this without re-implementing the contract.
+//
+// Body shape — accepted by the Track A backend:
+//   - tarball is uploaded multipart; the dashboard doesn't have file-upload
+//     UI yet, so this helper takes the metadata and trusts the caller to
+//     attach a tarball via FormData if needed (omit for prompts-only flow).
+//   - env_vars is sent as `env` (server's legacy alias) for symmetry with
+//     the response adapter above.
+//   - `private` (bool) + `allowed_ips` (string[]) are the Track B fields
+//     this Track B PR introduces. Backend returns 402 with agent_action on
+//     hobby/free/anonymous, 400 with `validation_error` on empty
+//     allowed_ips when private=true, or invalid IPs/CIDRs.
+//
+// Errors propagate (APIError with status + code); the caller decides
+// whether to surface them inline or fall back to the prompt-only path.
+export interface CreateDeployInput {
+  name?: string
+  port?: number
+  env?: string           // Env scope name (production / staging / dev).
+  env_vars?: Record<string, string>
+  resource_id?: string
+  /** Track B: gate the deploy by an IP allow-list. Requires Pro+. */
+  private?: boolean
+  /** Track B: IPv4 addresses or CIDR blocks (max 32) permitted when
+   *  `private` is true. Backend returns 400 on empty list when private=true
+   *  or on invalid IP/CIDR strings. */
+  allowed_ips?: string[]
+}
+
+export async function createDeploy(
+  input: CreateDeployInput,
+): Promise<{ ok: true; deployment: DashboardDeployment }> {
+  // Wire shape matches the Track A `POST /deploy/new` contract: env_vars
+  // is sent as `env` (legacy alias) for symmetry with the list-response
+  // adapter above. The dedicated `environment` field carries the env
+  // scope. `private` + `allowed_ips` ride alongside as top-level fields.
+  const body: Record<string, unknown> = {}
+  if (input.name) body.name = input.name
+  if (input.port !== undefined) body.port = input.port
+  if (input.env) body.environment = input.env
+  if (input.env_vars) body.env = input.env_vars
+  if (input.resource_id) body.resource_id = input.resource_id
+  if (input.private !== undefined) body.private = input.private
+  if (input.allowed_ips !== undefined) body.allowed_ips = input.allowed_ips
+  const r = await call<DeploymentGetResp>('/deploy/new', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+  if (!r.item) {
+    throw new APIError(500, 'invalid_response', 'POST /deploy/new returned no item')
+  }
+  return { ok: true, deployment: adaptDeployment(r.item) }
+}
+
+// ─── updateDeploymentAccess — PATCH /api/v1/deployments/:id (Track A) ────
+//
+// Pro+ feature: toggle a deployment's privacy state and edit its
+// allowed_ips after creation. The PATCH endpoint is Track A's
+// responsibility — until it ships, this helper still issues the request
+// and surfaces a 404 to the caller so the DeployDetailPage can render a
+// read-only "edits pending backend" hint instead of pretending the change
+// landed.
+//
+// Errors:
+//   - 402 with agent_action — tier gate (hobby / free / anonymous)
+//   - 400 with validation_error — empty allowed_ips when private=true,
+//     invalid IPs/CIDRs, > 32 entries
+//   - 404 — endpoint not yet shipped (Track A pending)
+//   - 5xx — server error; bubble up so the page shows a real banner
+export async function updateDeploymentAccess(
+  id: string,
+  privateFlag: boolean,
+  allowedIps: string[],
+): Promise<{ ok: true; deployment: DashboardDeployment }> {
+  const r = await call<DeploymentGetResp>(
+    `/api/v1/deployments/${encodeURIComponent(id)}`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({ private: privateFlag, allowed_ips: allowedIps }),
+    },
+  )
+  if (!r.item) {
+    throw new APIError(500, 'invalid_response', 'PATCH /deployments/:id returned no item')
+  }
+  return { ok: true, deployment: adaptDeployment(r.item) }
 }
 
 // ─── Stack family — env-sibling grid ─────────────────────────────────────

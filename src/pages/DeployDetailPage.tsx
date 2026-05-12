@@ -5,10 +5,16 @@ import {
 } from '../components/Common'
 import { CustomDomainPanel } from '../components/CustomDomainPanel'
 import { UpgradePromptCard } from '../components/UpgradePromptCard'
+import { IpAllowList } from '../components/IpAllowList'
 import { useDashboardCtx } from '../hooks/useDashboardCtx'
 import * as api from '../api'
 import type { DashboardStack, DashboardDeployment, Tier, StackFamilyMember } from '../api'
 import { streamSSE } from '../lib/sseStream'
+
+// Tiers that can edit a deployment's private state. Same set as on
+// DeploymentsPage's configurator — the API enforces this with a 402 +
+// agent_action on PATCH /api/v1/deployments/:id.
+const PRIVATE_DEPLOY_EDIT_TIERS: ReadonlySet<Tier> = new Set(['pro', 'team', 'growth'])
 
 // Tiers that have access to custom domains. Anonymous and hobby see an
 // upsell card; everyone else sees the live panel. Source of truth: the
@@ -76,6 +82,12 @@ type DeployView =
       // don't have a stack slug, so we surface the app_id and the panel
       // is hidden in render.
       slug: string
+      // Track B (private deploys): the privacy state surfaced on the
+      // Overview tab. Older API builds omit these fields entirely; the
+      // adapter defaults them to false / [] so the UI never silently
+      // inherits state from a stale payload.
+      private: boolean
+      allowed_ips: string[]
     }
   | {
       kind: 'stack'
@@ -117,6 +129,8 @@ export function DeployDetailPage() {
             build_duration_s: d.build_duration_s,
             last_deploy_at: d.last_deploy_at,
             slug: d.app_id,
+            private: d.private ?? false,
+            allowed_ips: d.allowed_ips ?? [],
           })
           setLoaded(true)
           return
@@ -186,6 +200,16 @@ export function DeployDetailPage() {
             <StatusPill status={d.status} />
             <EnvPill env={d.env} />
             <TierPill tier={d.tier} />
+            {view.kind === 'deployment' && view.private && (
+              <span
+                data-testid="privacy-badge"
+                className="tag"
+                title={`IP allow-list: ${view.allowed_ips.length} entr${view.allowed_ips.length === 1 ? 'y' : 'ies'}`}
+                style={{ background: 'rgba(255,200,80,0.08)', color: 'var(--text)' }}
+              >
+                private
+              </span>
+            )}
           </div>
           {d.url && (
             <a href={d.url} target="_blank" rel="noreferrer"
@@ -384,7 +408,238 @@ function Overview({ d, tier, view }: { d: DashboardStack; tier: Tier; view: Depl
           <PromoteUpsell />
         )}
       </section>
+
+      {/* Privacy panel — only renders for /deploy/new deployments (stacks
+          don't yet have a privacy state). Always shows the deploy's
+          private flag + allowed_ips; the inline editor is gated on Pro+
+          and a feature flag because Track A's PATCH endpoint is still in
+          flight. */}
+      {view.kind === 'deployment' && (
+        <PrivacyPanel view={view} tier={tier} />
+      )}
     </>
+  )
+}
+
+// Tier-gated panel that renders the deploy's privacy state (public vs
+// private + allowed_ips list). On Pro+ tiers it also exposes an inline
+// editor backed by updateDeploymentAccess() — but the editor stays
+// read-only until Track A ships PATCH /api/v1/deployments/:id. We detect
+// "not yet shipped" via a 404 on submit and surface an honest hint
+// instead of pretending the change landed.
+function PrivacyPanel({
+  view,
+  tier,
+}: {
+  view: Extract<DeployView, { kind: 'deployment' }>
+  tier: Tier
+}) {
+  const canEdit = PRIVATE_DEPLOY_EDIT_TIERS.has(tier)
+  // Editable local state; resets whenever the upstream view changes (the
+  // detail page re-loads on id change, which produces a new view object).
+  const [editing, setEditing] = useState(false)
+  const [draftPrivate, setDraftPrivate] = useState(view.private)
+  const [draftIps, setDraftIps] = useState<string[]>(view.allowed_ips)
+  const [submitting, setSubmitting] = useState(false)
+  const [submitErr, setSubmitErr] = useState<string | null>(null)
+  const [submitOk, setSubmitOk] = useState(false)
+
+  function startEdit() {
+    setDraftPrivate(view.private)
+    setDraftIps(view.allowed_ips)
+    setSubmitErr(null)
+    setSubmitOk(false)
+    setEditing(true)
+  }
+  function cancelEdit() {
+    setEditing(false)
+    setSubmitErr(null)
+  }
+  async function save() {
+    setSubmitting(true)
+    setSubmitErr(null)
+    setSubmitOk(false)
+    try {
+      await api.updateDeploymentAccess(view.id, draftPrivate, draftIps)
+      setSubmitOk(true)
+      setEditing(false)
+    } catch (e: any) {
+      // 404 here means Track A hasn't shipped PATCH yet — surface the
+      // friendly "edits pending backend" copy rather than a raw error.
+      if (e?.status === 404) {
+        setSubmitErr(
+          'Editing access settings requires the backend PATCH endpoint, which is still rolling out. Ask your agent to redeploy with the updated allow-list for now.',
+        )
+      } else if (e?.status === 402) {
+        setSubmitErr('Your plan does not include private deploys. Upgrade to Pro.')
+      } else {
+        setSubmitErr(e?.message ?? 'Failed to update access settings.')
+      }
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <section data-testid="privacy-panel" style={{ marginTop: 32 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, marginBottom: 12 }}>
+        <h3 style={{ fontSize: 14, fontWeight: 500, color: 'var(--text)', margin: 0 }}>
+          Access
+        </h3>
+        <span
+          data-testid="privacy-state"
+          style={{
+            fontSize: 11.5,
+            color: view.private ? 'var(--text)' : 'var(--text-faint)',
+            fontFamily: 'var(--font-mono)',
+          }}
+        >
+          {view.private
+            ? `private · ${view.allowed_ips.length} IP${view.allowed_ips.length === 1 ? '' : 's'} allowed`
+            : 'public'}
+        </span>
+        {canEdit && !editing && (
+          <button
+            data-testid="privacy-edit-btn"
+            className="cp"
+            onClick={startEdit}
+            style={{ marginLeft: 'auto' }}
+          >
+            edit
+          </button>
+        )}
+      </div>
+
+      {!editing && (
+        <div className="card" style={{ padding: 14 }}>
+          {view.private ? (
+            view.allowed_ips.length > 0 ? (
+              <IpAllowList
+                value={view.allowed_ips}
+                onChange={() => {
+                  /* read-only display in non-edit mode */
+                }}
+                disabled
+              />
+            ) : (
+              <div
+                data-testid="privacy-empty-allowlist"
+                style={{ fontSize: 12.5, color: 'var(--text-dim)' }}
+              >
+                Private deploy with an empty allow-list — no requests can reach
+                the app. Edit the list to grant access.
+              </div>
+            )
+          ) : (
+            <div
+              data-testid="privacy-public-hint"
+              style={{ fontSize: 12.5, color: 'var(--text-dim)', lineHeight: 1.6 }}
+            >
+              <strong style={{ color: 'var(--text)', fontWeight: 500 }}>
+                Public deploy.
+              </strong>{' '}
+              Anyone with the URL can reach this app.{' '}
+              {canEdit
+                ? 'Turn on Private below to gate it by an IP allow-list.'
+                : 'Private deploys with IP allow-lists are a Pro feature.'}
+            </div>
+          )}
+          {submitOk && (
+            <div
+              data-testid="privacy-save-ok"
+              role="status"
+              style={{
+                marginTop: 10,
+                fontSize: 11.5,
+                color: 'var(--accent, #00e48e)',
+              }}
+            >
+              Access settings updated.
+            </div>
+          )}
+        </div>
+      )}
+
+      {editing && canEdit && (
+        <div className="card" style={{ padding: 14 }}>
+          <label
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 10,
+              fontSize: 13,
+              cursor: 'pointer',
+              marginBottom: draftPrivate ? 14 : 0,
+            }}
+          >
+            <input
+              type="checkbox"
+              data-testid="privacy-edit-private-toggle"
+              checked={draftPrivate}
+              onChange={(e) => setDraftPrivate(e.target.checked)}
+            />
+            <span>
+              <strong style={{ fontWeight: 500 }}>Private deploy</strong>
+              <span style={{ color: 'var(--text-dim)', marginLeft: 6, fontSize: 12 }}>
+                Gate the deploy by an IP allow-list at the edge.
+              </span>
+            </span>
+          </label>
+          {draftPrivate && (
+            <div style={{ marginBottom: 14 }}>
+              <div
+                style={{
+                  fontSize: 11.5,
+                  color: 'var(--text-faint)',
+                  marginBottom: 6,
+                  fontFamily: 'var(--font-mono)',
+                }}
+              >
+                allowed_ips
+              </div>
+              <IpAllowList value={draftIps} onChange={setDraftIps} />
+            </div>
+          )}
+          {submitErr && (
+            <div
+              data-testid="privacy-edit-error"
+              role="alert"
+              style={{
+                marginBottom: 10,
+                fontSize: 11.5,
+                color: 'var(--red, #ff7a8a)',
+                lineHeight: 1.5,
+              }}
+            >
+              {submitErr}
+            </div>
+          )}
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button
+              data-testid="privacy-edit-save"
+              className="cp"
+              onClick={save}
+              disabled={submitting || (draftPrivate && draftIps.length === 0)}
+              title={
+                draftPrivate && draftIps.length === 0
+                  ? 'Add at least one IP/CIDR to enable private deploy'
+                  : undefined
+              }
+            >
+              {submitting ? 'saving…' : 'save'}
+            </button>
+            <button
+              data-testid="privacy-edit-cancel"
+              className="cp"
+              onClick={cancelEdit}
+              disabled={submitting}
+            >
+              cancel
+            </button>
+          </div>
+        </div>
+      )}
+    </section>
   )
 }
 

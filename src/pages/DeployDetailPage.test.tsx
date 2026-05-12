@@ -66,6 +66,7 @@ vi.mock('../api', async () => {
     getDeployment: vi.fn(),
     listStacks: vi.fn(),
     listResources: vi.fn(),
+    updateDeploymentAccess: vi.fn(),
   }
 })
 
@@ -75,12 +76,14 @@ const mockFetchFamily = api.fetchStackFamily as unknown as ReturnType<typeof vi.
 const mockGetDeployment = api.getDeployment as unknown as ReturnType<typeof vi.fn>
 const mockListStacks = api.listStacks as unknown as ReturnType<typeof vi.fn>
 const mockListResources = api.listResources as unknown as ReturnType<typeof vi.fn>
+const mockUpdateAccess = api.updateDeploymentAccess as unknown as ReturnType<typeof vi.fn>
 
 beforeEach(() => {
   mockFetchFamily.mockReset()
   mockGetDeployment.mockReset()
   mockListStacks.mockReset()
   mockListResources.mockReset()
+  mockUpdateAccess.mockReset()
   sseCalls.length = 0
   // Sensible defaults so tests that don't care about these don't blow up
   // on undefined returns.
@@ -411,5 +414,139 @@ describe('DeployDetailPage — log SSE URL', () => {
     await waitFor(() => expect(sseCalls.length).toBeGreaterThan(0))
 
     expect(sseCalls[0]).toBe('/api/v1/stacks/demo-prod/logs/web')
+  })
+})
+
+// ─── DeployDetailPage — privacy panel (Track B) ──────────────────────────
+//
+// Coverage for the deploy's privacy state surface:
+//   1. Public deploy renders the public hint, no `private` badge.
+//   2. Private deploy renders the badge, IP allow-list (disabled), and
+//      the "N IPs allowed" status line.
+//   3. Pro+ tier (the mocked useDashboardCtx default) gets the edit
+//      button; clicking it reveals the toggle + IpAllowList.
+//   4. Save calls updateDeploymentAccess. A 404 (Track A endpoint not yet
+//      shipped) surfaces the "edits pending backend" hint instead of a
+//      raw error.
+import { fireEvent } from '@testing-library/react'
+
+describe('DeployDetailPage — privacy panel', () => {
+  it('renders the public-hint card when the deploy is public', async () => {
+    mockGetDeployment.mockResolvedValueOnce({
+      ok: true,
+      deployment: deployment({ private: false, allowed_ips: [] }),
+    })
+    renderPage(`/deployments/${deployment().id}`)
+    await waitFor(() => expect(screen.getByTestId('privacy-panel')).toBeTruthy())
+    expect(screen.getByTestId('privacy-public-hint')).toBeTruthy()
+    // No `private` badge in the header for a public deploy.
+    expect(screen.queryByTestId('privacy-badge')).toBeNull()
+    expect(screen.getByTestId('privacy-state').textContent).toContain('public')
+  })
+
+  it('renders the private badge + IP list (disabled) for a private deploy', async () => {
+    mockGetDeployment.mockResolvedValueOnce({
+      ok: true,
+      deployment: deployment({
+        private: true,
+        allowed_ips: ['8.8.8.8', '10.0.0.0/8'],
+      }),
+    })
+    renderPage(`/deployments/${deployment().id}`)
+    await waitFor(() => expect(screen.getByTestId('privacy-panel')).toBeTruthy())
+    expect(screen.getByTestId('privacy-badge')).toBeTruthy()
+    expect(screen.getByTestId('privacy-state').textContent).toContain('private')
+    expect(screen.getByTestId('privacy-state').textContent).toContain('2 IPs allowed')
+    // The IpAllowList renders its chips (disabled mode hides × buttons).
+    expect(screen.getByTestId('ip-allow-list-chip-8.8.8.8')).toBeTruthy()
+    expect(screen.getByTestId('ip-allow-list-chip-10.0.0.0/8')).toBeTruthy()
+  })
+
+  it('renders the empty-allowlist hint for private with no allowed_ips', async () => {
+    mockGetDeployment.mockResolvedValueOnce({
+      ok: true,
+      deployment: deployment({ private: true, allowed_ips: [] }),
+    })
+    renderPage(`/deployments/${deployment().id}`)
+    await waitFor(() => expect(screen.getByTestId('privacy-panel')).toBeTruthy())
+    expect(screen.getByTestId('privacy-empty-allowlist')).toBeTruthy()
+  })
+
+  it('Pro+ tier sees the edit button; click reveals the toggle + IpAllowList', async () => {
+    mockGetDeployment.mockResolvedValueOnce({
+      ok: true,
+      deployment: deployment({ private: false, allowed_ips: [] }),
+    })
+    renderPage(`/deployments/${deployment().id}`)
+    await waitFor(() => expect(screen.getByTestId('privacy-panel')).toBeTruthy())
+    const editBtn = screen.getByTestId('privacy-edit-btn')
+    fireEvent.click(editBtn)
+    expect(screen.getByTestId('privacy-edit-private-toggle')).toBeTruthy()
+    // Toggle Private on → IpAllowList appears.
+    const toggle = screen.getByTestId('privacy-edit-private-toggle') as HTMLInputElement
+    fireEvent.click(toggle)
+    expect(toggle.checked).toBe(true)
+    expect(screen.getByTestId('ip-allow-list')).toBeTruthy()
+  })
+
+  it('save calls updateDeploymentAccess with the edited state', async () => {
+    mockGetDeployment.mockResolvedValueOnce({
+      ok: true,
+      deployment: deployment({ private: false, allowed_ips: [] }),
+    })
+    mockUpdateAccess.mockResolvedValueOnce({
+      ok: true,
+      deployment: deployment({ private: true, allowed_ips: ['8.8.8.8'] }),
+    })
+    renderPage(`/deployments/${deployment().id}`)
+    await waitFor(() => expect(screen.getByTestId('privacy-panel')).toBeTruthy())
+    fireEvent.click(screen.getByTestId('privacy-edit-btn'))
+    fireEvent.click(screen.getByTestId('privacy-edit-private-toggle'))
+    const input = screen.getByTestId('ip-allow-list-input') as HTMLInputElement
+    fireEvent.change(input, { target: { value: '8.8.8.8' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    fireEvent.click(screen.getByTestId('privacy-edit-save'))
+    await waitFor(() => expect(mockUpdateAccess).toHaveBeenCalled())
+    expect(mockUpdateAccess.mock.calls[0]).toEqual([
+      deployment().id,
+      true,
+      ['8.8.8.8'],
+    ])
+  })
+
+  it('surfaces a friendly "edits pending backend" hint on 404 from updateDeploymentAccess', async () => {
+    mockGetDeployment.mockResolvedValueOnce({
+      ok: true,
+      deployment: deployment({ private: false, allowed_ips: [] }),
+    })
+    mockUpdateAccess.mockRejectedValueOnce(
+      Object.assign(new Error('not_found'), { status: 404 }),
+    )
+    renderPage(`/deployments/${deployment().id}`)
+    await waitFor(() => expect(screen.getByTestId('privacy-panel')).toBeTruthy())
+    fireEvent.click(screen.getByTestId('privacy-edit-btn'))
+    fireEvent.click(screen.getByTestId('privacy-edit-private-toggle'))
+    const input = screen.getByTestId('ip-allow-list-input') as HTMLInputElement
+    fireEvent.change(input, { target: { value: '8.8.8.8' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    fireEvent.click(screen.getByTestId('privacy-edit-save'))
+    await waitFor(() => expect(mockUpdateAccess).toHaveBeenCalled())
+    const errBanner = await waitFor(() => screen.getByTestId('privacy-edit-error'))
+    expect(errBanner.textContent ?? '').toMatch(/PATCH endpoint|still rolling out/i)
+  })
+
+  it('save button is disabled when Private is on but allowed_ips is empty', async () => {
+    mockGetDeployment.mockResolvedValueOnce({
+      ok: true,
+      deployment: deployment({ private: false, allowed_ips: [] }),
+    })
+    renderPage(`/deployments/${deployment().id}`)
+    await waitFor(() => expect(screen.getByTestId('privacy-panel')).toBeTruthy())
+    fireEvent.click(screen.getByTestId('privacy-edit-btn'))
+    fireEvent.click(screen.getByTestId('privacy-edit-private-toggle'))
+    const save = screen.getByTestId('privacy-edit-save') as HTMLButtonElement
+    // private=true, allowed_ips=[] → save disabled (matches backend
+    // validation: 400 on empty list when private).
+    expect(save.disabled).toBe(true)
   })
 })
