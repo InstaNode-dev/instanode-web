@@ -254,4 +254,106 @@ export interface AuthMeResponse {
   team: DashboardTeam
   access_token?: string
   experiments?: Record<string, string>
+  /** Track A platform-admin flag — when true, the dashboard renders the
+   *  `/app/admin/customers` route + sidebar link. Older API builds omit
+   *  the field entirely, in which case the dashboard treats the caller
+   *  as a regular user (404 on the admin route, link hidden). The flag
+   *  is server-authoritative; the dashboard never elevates by itself. */
+  is_platform_admin?: boolean
+}
+
+// ---------- Admin customers (Track A — founder console) ----------
+//
+// Shape of GET /api/v1/admin/customers responses. Track A is shipping
+// the backend in parallel; we mirror the contract here so the dashboard
+// compiles independently. Fields the agent API hasn't pinned yet are
+// marked optional so the adapter can degrade gracefully.
+
+export interface AdminCustomerSummary {
+  team_id: string
+  primary_email: string
+  /** Display name — agents that never set one fall back to the email
+   *  local part on the server side. May be empty for very old teams. */
+  name?: string
+  tier: Tier
+  /** Monthly MRR in INR paise (×100). Track A returns 0 for unpaid teams. */
+  mrr_monthly: number
+  /** Yearly MRR in INR paise — 0 when the team isn't on a yearly plan. */
+  mrr_yearly: number
+  /** Aggregate storage across every resource owned by the team. */
+  storage_bytes: number
+  /** Count of running deployments. */
+  deployments_active: number
+  /** ISO-8601 — last authenticated request (auth, provision, dashboard). */
+  last_active: string | null
+  created_at: string
+}
+
+export interface AdminCustomerListResponse {
+  ok: true
+  customers: AdminCustomerSummary[]
+  total: number
+}
+
+export interface AdminAuditEntry {
+  id: string
+  kind: string
+  summary: string
+  at: string
+  actor?: string
+}
+
+export interface AdminPromoEntry {
+  id: string
+  code: string
+  kind: 'percent_off' | 'first_month_free' | 'amount_off'
+  value: number
+  applies_to: number
+  valid_for_days: number
+  expires_at: string | null
+  created_at: string
+}
+
+export interface AdminSubscriptionInfo {
+  status?: string
+  next_renewal_at?: string | null
+  amount_inr?: number | null
+  razorpay_subscription_id?: string | null
+}
+
+export interface AdminCustomerDetailResponse {
+  ok: true
+  team: DashboardTeam & { primary_email?: string }
+  users: User[]
+  resources: Resource[]
+  audit_log: AdminAuditEntry[]
+  deploys: DashboardDeployment[]
+  subscription: AdminSubscriptionInfo | null
+  promos?: AdminPromoEntry[]
+}
+
+export interface AdminIssuePromoInput {
+  kind: 'percent_off' | 'first_month_free' | 'amount_off'
+  /** Integer — 15 for 15% off; 49 for $49 off; ignored for first_month_free. */
+  value: number
+  /** Integer — 1 = first month only, 3 = first 3 months, 0 = ongoing. */
+  applies_to: number
+  /** Days the code is redeemable for. Default 30. */
+  valid_for_days: number
+}
+
+export interface AdminIssuePromoResponse {
+  ok: true
+  code: string
+  expires_at: string | null
+}
+
+export interface AdminSetTierInput {
+  tier: Tier
+  reason: string
+}
+
+export interface AdminSetTierResponse {
+  ok: true
+  team: DashboardTeam
 }

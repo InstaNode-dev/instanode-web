@@ -26,7 +26,8 @@ export const PAGE_META: Record<string, PageMeta> = {
   '/vault':           m('Vault',         'read'),
   '/billing':         m('Billing',       'write'),
   '/settings':        m('Settings',      'read'),
-  '/contracts':       m('API contracts', 'read')
+  '/contracts':       m('API contracts', 'read'),
+  '/admin/customers': m('Customers',      'write'),
 }
 
 function getMeta(path: string): PageMeta {
@@ -75,6 +76,8 @@ function computeCrumb(routeKey: string, pathname: string, ctx: DashboardCtx): st
       return 'profile'
     case '/contracts':
       return 'api reference'
+    case '/admin/customers':
+      return 'platform admin'
     default:
       return ''
   }
@@ -147,9 +150,14 @@ const icons = {
   )
 }
 
-function NavRow({ to, icon, children, badge, badgeStyle }: { to: string; icon: ReactNode; children: ReactNode; badge?: ReactNode; badgeStyle?: React.CSSProperties }) {
+function NavRow({ to, icon, children, badge, badgeStyle, testId }: { to: string; icon: ReactNode; children: ReactNode; badge?: ReactNode; badgeStyle?: React.CSSProperties; testId?: string }) {
   return (
-    <NavLink to={to} end={to === '/app'} className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+    <NavLink
+      to={to}
+      end={to === '/app'}
+      className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
+      data-testid={testId}
+    >
       {icon}
       {children}
       {badge != null && <span className="badge" style={badgeStyle}>{badge}</span>}
@@ -214,6 +222,23 @@ export function AppShell() {
             <NavRow to="/app/vault" icon={icons.vault} badge={String(ctx.counts.vault)}>Vault</NavRow>
             <NavRow to="/app/billing" icon={icons.billing}>Billing</NavRow>
             <NavRow to="/app/settings" icon={icons.settings}>Settings</NavRow>
+
+            {/* Admin-only — only rendered when /auth/me sets
+                is_platform_admin: true. Non-admin users never see the
+                link, and the underlying page 404-redirects too, so the
+                route's existence isn't leaked. */}
+            {ctx.me?.is_platform_admin && (
+              <>
+                <div className="nav-section">platform admin</div>
+                <NavRow
+                  to="/app/admin/customers"
+                  icon={icons.team}
+                  testId="nav-admin-customers"
+                >
+                  Customers
+                </NavRow>
+              </>
+            )}
 
             <div className="nav-section">design ref</div>
             {/* §10.21: removed the "11 gaps" badge — the contracts page is a
