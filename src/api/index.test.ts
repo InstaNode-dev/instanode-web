@@ -1259,3 +1259,117 @@ describe('reportExperimentConverted()', () => {
     })
   })
 })
+
+// ─── Admin URL prefix wiring (Track A — unguessable path) ──────────────
+//
+// The admin URL builders must read the prefix the API serves on /auth/me
+// and stitch it into the request path. Empty prefix → throw a clear
+// error (programmer error: UI should have gated on getAdminPathPrefix
+// first). logout() clears the stash so a re-login by a different user
+// can't inherit the previous user's admin path.
+
+describe('Admin URL prefix wiring', () => {
+  it('fetchMe stashes admin_path_prefix when the API serves it', async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse({
+      ok: true,
+      user_id: 'u_admin',
+      team_id: 't_admin',
+      email: 'founder@instanode.dev',
+      tier: 'team',
+      trial_ends_at: null,
+      is_platform_admin: true,
+      admin_path_prefix: 'abcdefghijklmnopqrstuvwxyz012345',
+    }))
+    // Imported lazily so we get the freshly-mocked module instance.
+    const { fetchMe, getAdminPathPrefix } = await import('./index')
+    const me = await fetchMe()
+    expect(me.admin_path_prefix).toBe('abcdefghijklmnopqrstuvwxyz012345')
+    expect(getAdminPathPrefix()).toBe('abcdefghijklmnopqrstuvwxyz012345')
+  })
+
+  it('fetchMe leaves the prefix empty when the API omits the field', async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse({
+      ok: true,
+      user_id: 'u_user',
+      team_id: 't_user',
+      email: 'alice@example.com',
+      tier: 'hobby',
+      trial_ends_at: null,
+      // is_platform_admin and admin_path_prefix both absent
+    }))
+    const { fetchMe, getAdminPathPrefix, setAdminPathPrefix } = await import('./index')
+    // Pre-seed a stale prefix to prove fetchMe resets it.
+    setAdminPathPrefix('stale_should_be_cleared_xxxxxxxx')
+    const me = await fetchMe()
+    expect(me.admin_path_prefix).toBeUndefined()
+    expect(getAdminPathPrefix()).toBe('')
+  })
+
+  it('logout clears the stashed admin prefix', async () => {
+    const { setAdminPathPrefix, getAdminPathPrefix } = await import('./index')
+    setAdminPathPrefix('prefix_set_by_prior_admin_session_abc')
+    expect(getAdminPathPrefix()).not.toBe('')
+    await logout()
+    expect(getAdminPathPrefix()).toBe('')
+  })
+
+  it('admin builders mint /api/v1/<prefix>/customers when the prefix is set', async () => {
+    const { setAdminPathPrefix, listAdminCustomers } = await import('./index')
+    setAdminPathPrefix('abcdefghijklmnopqrstuvwxyz012345')
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse({ ok: true, customers: [], total: 0 }))
+    await listAdminCustomers()
+    const url = String(m.mock.calls[0][0])
+    expect(url).toContain('/api/v1/abcdefghijklmnopqrstuvwxyz012345/customers')
+    // The legacy guessable path must NOT appear in the request URL.
+    expect(url).not.toContain('/api/v1/admin/customers')
+  })
+
+  it('admin builders throw admin_endpoints_unavailable when the prefix is empty', async () => {
+    const { setAdminPathPrefix, listAdminCustomers, getAdminCustomer, setAdminCustomerTier, issueAdminCustomerPromo } =
+      await import('./index')
+    setAdminPathPrefix('') // closed-by-default
+    installFetch() // not actually called — every builder throws before fetch.
+
+    await expect(listAdminCustomers()).rejects.toMatchObject({
+      status: 403,
+      code: 'admin_endpoints_unavailable',
+    })
+    await expect(getAdminCustomer('t_x')).rejects.toMatchObject({
+      status: 403,
+      code: 'admin_endpoints_unavailable',
+    })
+    await expect(
+      setAdminCustomerTier('t_x', { tier: 'pro', reason: 'comp' } as any),
+    ).rejects.toMatchObject({ status: 403, code: 'admin_endpoints_unavailable' })
+    await expect(
+      issueAdminCustomerPromo('t_x', {
+        kind: 'percent_off',
+        value: 10,
+        valid_for_days: 30,
+      } as any),
+    ).rejects.toMatchObject({ status: 403, code: 'admin_endpoints_unavailable' })
+  })
+
+  it('admin builders never include /admin/ in the request URL', async () => {
+    // Belt-and-braces — even if the prefix happens to contain the
+    // substring "admin", the LEGACY path /api/v1/admin/customers must
+    // not appear in any request. Concretely: we set a prefix that
+    // contains "admin" and check the URL is built around the prefix
+    // verbatim, not the literal /api/v1/admin/.
+    const { setAdminPathPrefix, listAdminCustomers } = await import('./index')
+    const prefixWithAdminSubstring = 'preadminxxxxxxxxxxxxxxxxxxxxxxxx' // 32 chars, contains "admin"
+    setAdminPathPrefix(prefixWithAdminSubstring)
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse({ ok: true, customers: [], total: 0 }))
+    await listAdminCustomers()
+    const url = String(m.mock.calls[0][0])
+    expect(url).toContain(`/api/v1/${prefixWithAdminSubstring}/customers`)
+    // The exact legacy path is /api/v1/admin/customers — i.e. /admin/
+    // bounded by slashes. A prefix containing "admin" as substring must
+    // NOT produce that exact path.
+    expect(url).not.toContain('/api/v1/admin/customers')
+  })
+})

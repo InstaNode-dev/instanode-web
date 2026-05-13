@@ -119,13 +119,22 @@ export function AdminCustomersPage() {
     writeStoredCurrency(next)
   }
 
-  // Gate the entire page on the admin flag. We render Navigate(*) which
-  // matches the dashboard's catch-all and redirects to "/" — i.e., the
-  // route 404-equivalents instead of 403-ing. Non-admin users never
-  // learn the URL exists.
+  // Gate the entire page on TWO server-authoritative signals:
+  //   1. is_platform_admin — caller is on the ADMIN_EMAILS allowlist.
+  //   2. admin_path_prefix — present-and-non-empty means the operator
+  //      has configured ADMIN_PATH_PREFIX on the API. Without a prefix,
+  //      the admin URL builder in src/api/index.ts can't construct a
+  //      request anyway, so the page would be useless.
+  //
+  // We render Navigate(*) which matches the dashboard's catch-all and
+  // redirects to "/" — the route 404-equivalents instead of 403-ing.
+  // Non-admin users never learn the URL exists. Belt-and-braces: even if
+  // is_platform_admin somehow flips true without a prefix, the route
+  // still hides itself.
   const me = ctx.me
   const meLoading = ctx.meLoading
-  const isAdmin = me?.is_platform_admin === true
+  const hasAdminPrefix = typeof me?.admin_path_prefix === 'string' && me.admin_path_prefix.length > 0
+  const isAdmin = me?.is_platform_admin === true && hasAdminPrefix
 
   useEffect(() => {
     if (!isAdmin) return

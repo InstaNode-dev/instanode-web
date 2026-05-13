@@ -166,6 +166,12 @@ export async function fetchMe(): Promise<AuthMeResponse> {
      *  dashboard surfaces the `/app/admin/customers` console only when
      *  this is `true`. Absent on older API builds → treat as `false`. */
     is_platform_admin?: boolean
+    /** Unguessable URL prefix for the admin customer-management surface.
+     *  Sent by the API only when (a) the caller is on the ADMIN_EMAILS
+     *  allowlist AND (b) the deploy has ADMIN_PATH_PREFIX configured.
+     *  Absent for every other caller / configuration. Treat as "no admin
+     *  surface available" when undefined or empty. */
+    admin_path_prefix?: string
   }
   // No try/catch — errors propagate. The previous fixture fallback masked
   // backend outages by serving the `aanya@acme.dev` mock identity, which
@@ -179,6 +185,11 @@ export async function fetchMe(): Promise<AuthMeResponse> {
   // human-readable identity we have until a real team table exposes a slug.
   const localPart = me.email?.split('@')[0] ?? ''
   const slug = localPart.toLowerCase().replace(/[^a-z0-9-]/g, '-') || me.team_id.slice(0, 8)
+  // Stash the admin path prefix in a module-local var so the admin URL
+  // builders below can mint `/api/v1/${prefix}/customers/...` requests
+  // without forcing every caller to plumb it through manually. The prefix
+  // is a secret — see setAdminPathPrefix() — never log, never echo to UI.
+  setAdminPathPrefix(me.admin_path_prefix ?? '')
   return {
     user: {
       id: me.user_id,
@@ -198,6 +209,7 @@ export async function fetchMe(): Promise<AuthMeResponse> {
     },
     experiments: me.experiments,
     is_platform_admin: me.is_platform_admin === true,
+    admin_path_prefix: me.admin_path_prefix,
   }
 }
 
@@ -229,6 +241,12 @@ export async function reportExperimentConverted(input: {
 
 export async function logout(): Promise<{ ok: true }> {
   clearToken()
+  // Drop the admin URL prefix on logout. A stale prefix in module-local
+  // state would survive across a re-login by a different user (admin →
+  // non-admin same tab), and the non-admin's first /auth/me would race
+  // with their first admin-page render. Belt-and-braces: also clears it
+  // in tests that mock fetchMe but exercise logout afterwards.
+  setAdminPathPrefix('')
   return { ok: true }
 }
 
@@ -1230,16 +1248,78 @@ export async function fetchQuotaWall(): Promise<QuotaWallResponse> {
 
 // ─── Admin Customers (Track A — founder console) ────────────────────────
 //
-// Four endpoints back the /app/admin/customers page:
-//   listAdminCustomers       — GET  /api/v1/admin/customers
-//   getAdminCustomer         — GET  /api/v1/admin/customers/:team_id
-//   setAdminCustomerTier     — POST /api/v1/admin/customers/:team_id/tier
-//   issueAdminCustomerPromo  — POST /api/v1/admin/customers/:team_id/promo
+// Four endpoints back the /app/admin/customers page. They register on the
+// API under an UNGUESSABLE PATH PREFIX (env var ADMIN_PATH_PREFIX), not
+// the legacy /api/v1/admin/customers path. The prefix is delivered to
+// admin clients in the /auth/me response (`admin_path_prefix` field) and
+// stashed module-locally by fetchMe().
+//
+//   listAdminCustomers       — GET  /api/v1/<prefix>/customers
+//   getAdminCustomer         — GET  /api/v1/<prefix>/customers/:team_id
+//   setAdminCustomerTier     — POST /api/v1/<prefix>/customers/:team_id/tier
+//   issueAdminCustomerPromo  — POST /api/v1/<prefix>/customers/:team_id/promo
 //
 // Track A returns 403 with `agent_action` for non-admin callers; the
 // dashboard's route guard turns the page into a 404 for those users so
 // the route's existence isn't leaked. Other errors propagate so the
 // page renders a real banner instead of silently failing.
+//
+// SECURITY: the prefix is a credential with the same blast radius as a
+// session token. NEVER log it. NEVER echo it into rendered UI text. NEVER
+// hand it to a third-party analytics tool. The module-local var is the
+// canonical store; treat reads through getAdminPathPrefix() as "I am
+// about to build an admin URL right now."
+
+/** Module-local cache of the admin URL prefix. Populated by fetchMe()
+ *  from the /auth/me response (`admin_path_prefix`) and reset to '' by
+ *  logout(). The two reader entry-points are:
+ *
+ *  - getAdminPathPrefix() — used by tests + the route gate to check
+ *    "is the admin surface available to this session?"
+ *  - buildAdminURL(...)    — used by every admin API function to mint
+ *    a request URL; throws if the prefix is empty.
+ *
+ *  Stored at module scope so the four admin builders below stay free of
+ *  per-call arguments. Bundle-scoped, not module-scoped-per-bundle: the
+ *  Vite build leaves one instance of this module per build, so all four
+ *  builders + the route guard see the same cache. */
+let _adminPathPrefix = ''
+
+/** setAdminPathPrefix is called by fetchMe() with the value from the
+ *  /auth/me response. Idempotent; safe to call on every fetchMe(). */
+export function setAdminPathPrefix(prefix: string): void {
+  _adminPathPrefix = prefix
+}
+
+/** getAdminPathPrefix returns the currently stashed admin URL prefix, or
+ *  the empty string if /auth/me has not yet loaded or returned no value.
+ *  Components use this to decide "should I render the admin route?" — an
+ *  empty result means "no", regardless of why (no prefix configured on
+ *  the server, the caller isn't on ADMIN_EMAILS, fetchMe hasn't run yet,
+ *  or the session was just logged out). */
+export function getAdminPathPrefix(): string {
+  return _adminPathPrefix
+}
+
+/** buildAdminURL is the only place that turns the stashed prefix into an
+ *  HTTP path. Throws with a clear, copy-and-paste-able error message when
+ *  the prefix is empty — admin functions should never be called from UI
+ *  that hasn't already gated on getAdminPathPrefix(), so an empty here
+ *  is a programmer error, not a user-visible state.
+ *
+ *  Note: we deliberately omit the prefix from the error message to avoid
+ *  the case where the empty-state error gets logged with a non-empty
+ *  prefix value next to it. */
+function buildAdminURL(suffix: string): string {
+  if (_adminPathPrefix === '') {
+    throw new APIError(
+      403,
+      'admin_endpoints_unavailable',
+      'admin endpoints unavailable: not authorized or session not loaded',
+    )
+  }
+  return `/api/v1/${_adminPathPrefix}${suffix}`
+}
 
 /** Filter / sort options accepted by GET /api/v1/admin/customers. The
  *  query string is built up only for the fields the caller actually sets
@@ -1267,7 +1347,8 @@ export async function listAdminCustomers(
   if (input.limit !== undefined) params.set('limit', String(input.limit))
   if (input.offset !== undefined) params.set('offset', String(input.offset))
   const qs = params.toString()
-  const path = qs ? `/api/v1/admin/customers?${qs}` : '/api/v1/admin/customers'
+  const base = buildAdminURL('/customers')
+  const path = qs ? `${base}?${qs}` : base
   const r = await call<{
     ok: boolean
     customers?: AdminCustomerListResponse['customers']
@@ -1288,7 +1369,7 @@ export async function getAdminCustomer(
     deploys?: AdminCustomerDetailResponse['deploys']
     subscription?: AdminCustomerDetailResponse['subscription']
     promos?: AdminCustomerDetailResponse['promos']
-  }>(`/api/v1/admin/customers/${encodeURIComponent(teamID)}`)
+  }>(buildAdminURL(`/customers/${encodeURIComponent(teamID)}`))
   return {
     ok: true,
     team: r.team ?? ({ id: teamID } as AdminCustomerDetailResponse['team']),
@@ -1306,7 +1387,7 @@ export async function setAdminCustomerTier(
   input: AdminSetTierInput,
 ): Promise<AdminSetTierResponse> {
   const r = await call<{ ok: boolean; team: DashboardTeam }>(
-    `/api/v1/admin/customers/${encodeURIComponent(teamID)}/tier`,
+    buildAdminURL(`/customers/${encodeURIComponent(teamID)}/tier`),
     { method: 'POST', body: JSON.stringify(input) },
   )
   return { ok: true, team: r.team }
@@ -1317,7 +1398,7 @@ export async function issueAdminCustomerPromo(
   input: AdminIssuePromoInput,
 ): Promise<AdminIssuePromoResponse> {
   const r = await call<{ ok: boolean; code: string; expires_at: string | null }>(
-    `/api/v1/admin/customers/${encodeURIComponent(teamID)}/promo`,
+    buildAdminURL(`/customers/${encodeURIComponent(teamID)}/promo`),
     { method: 'POST', body: JSON.stringify(input) },
   )
   return { ok: true, code: r.code, expires_at: r.expires_at ?? null }
