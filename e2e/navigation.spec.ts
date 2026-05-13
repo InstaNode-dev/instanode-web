@@ -10,13 +10,16 @@ test.describe('Navigation', () => {
   test('every nav link reaches its page', async ({ page }) => {
     // The authenticated app is mounted under /app/*; the sidebar nav links
     // point to /app/<section>. The Overview is just /app (or /app/).
+    //
+    // Tracks the live AppShell sidebar — Stacks was retired (b13b8ee:
+    // "/app/stacks duplicate route + StacksPage.tsx deleted, same data as
+    // Deployments") and Team has no sidebar nav link in the user-facing
+    // sidebar (the route exists but is no longer linked from chrome).
     await page.goto('/app')
     const targets: { name: RegExp; pathFragment?: string }[] = [
       { name: /Resources/i, pathFragment: '/app/resources' },
       { name: /Deployments/i, pathFragment: '/app/deployments' },
-      { name: /Stacks/i, pathFragment: '/app/stacks' },
       { name: /Vault/i, pathFragment: '/app/vault' },
-      { name: /Team/i, pathFragment: '/app/team' },
       { name: /Billing/i, pathFragment: '/app/billing' },
       { name: /Settings/i, pathFragment: '/app/settings' },
       { name: /Overview/i, pathFragment: '/app' },
