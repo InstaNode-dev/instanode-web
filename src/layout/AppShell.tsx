@@ -223,22 +223,29 @@ export function AppShell() {
             <NavRow to="/app/billing" icon={icons.billing}>Billing</NavRow>
             <NavRow to="/app/settings" icon={icons.settings}>Settings</NavRow>
 
-            {/* Admin-only — only rendered when /auth/me sets
-                is_platform_admin: true. Non-admin users never see the
-                link, and the underlying page 404-redirects too, so the
-                route's existence isn't leaked. */}
-            {ctx.me?.is_platform_admin && (
-              <>
-                <div className="nav-section">platform admin</div>
-                <NavRow
-                  to="/app/admin/customers"
-                  icon={icons.team}
-                  testId="nav-admin-customers"
-                >
-                  Customers
-                </NavRow>
-              </>
-            )}
+            {/* Admin-only — rendered when BOTH server-authoritative
+                signals fire: is_platform_admin (caller is on
+                ADMIN_EMAILS) AND admin_path_prefix (the API has an
+                unguessable admin URL prefix configured; without it, the
+                admin URL builder can't construct a request and the page
+                would be useless). Non-admin users + admin users on a
+                deploy without an admin path both see no link, and the
+                page 404-redirects, so the route's existence isn't
+                leaked either way. */}
+            {ctx.me?.is_platform_admin &&
+              typeof ctx.me?.admin_path_prefix === 'string' &&
+              ctx.me.admin_path_prefix.length > 0 && (
+                <>
+                  <div className="nav-section">platform admin</div>
+                  <NavRow
+                    to="/app/admin/customers"
+                    icon={icons.team}
+                    testId="nav-admin-customers"
+                  >
+                    Customers
+                  </NavRow>
+                </>
+              )}
 
             <div className="nav-section">design ref</div>
             {/* §10.21: removed the "11 gaps" badge — the contracts page is a

@@ -260,6 +260,18 @@ export interface AuthMeResponse {
    *  as a regular user (404 on the admin route, link hidden). The flag
    *  is server-authoritative; the dashboard never elevates by itself. */
   is_platform_admin?: boolean
+  /** Unguessable URL segment under which the founder-only customer-management
+   *  endpoints register on the API. The agent API serves this field ONLY
+   *  for callers on the ADMIN_EMAILS allowlist AND when the operator has
+   *  configured ADMIN_PATH_PREFIX. For every non-admin caller and every
+   *  deploy without an admin path, the field is absent (not empty — absent;
+   *  the field's mere presence would leak the surface's existence).
+   *
+   *  The admin API URL builders in src/api/index.ts read this value at
+   *  fetchMe-time and stash it in a module-local var. URLs are built as
+   *  `/api/v1/${prefix}/customers/...`. With no prefix loaded, the
+   *  builders throw a clear error and the admin route hides itself. */
+  admin_path_prefix?: string
 }
 
 // ---------- Admin customers (Track A — founder console) ----------

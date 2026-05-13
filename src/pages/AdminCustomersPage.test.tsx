@@ -42,14 +42,21 @@ vi.mock('../api', async () => {
 })
 
 // Stub useDashboardCtx so we control is_platform_admin per test.
+// We also surface admin_path_prefix because the page's gate is the
+// intersection of the two signals — both must be present for the
+// admin route to render. The fixture prefix is a 32-char alphanumeric
+// blob so it matches what the API would actually serve. Tests that
+// flip mockIsAdmin to false unset both signals at the same time.
 let mockIsAdmin = true
 let mockMeLoading = false
+const TEST_ADMIN_PATH_PREFIX = 'testfixturepathprefix0123456789ab'
 vi.mock('../hooks/useDashboardCtx', () => ({
   useDashboardCtx: () => ({
     me: {
       user: { id: 'u_admin', email: 'manas@instanode.dev', tier: 'team' },
       team: { id: 't_admin', slug: 'instanode', name: 'instanode', tier: 'team' },
       is_platform_admin: mockIsAdmin,
+      admin_path_prefix: mockIsAdmin ? TEST_ADMIN_PATH_PREFIX : undefined,
     },
     meErr: null,
     meLoading: mockMeLoading,
