@@ -1,6 +1,13 @@
 import { lazy, Suspense } from 'react'
 import { BrowserRouter, Navigate, Route, Routes, useLocation, useParams } from 'react-router-dom'
 
+// RouteTracker — eagerly imported. Tiny component (~1KB) that watches
+// useLocation and forwards every change to the New Relic browser agent
+// via setPageViewName + setCustomAttribute. Has to live INSIDE
+// <BrowserRouter> (useLocation needs router context) so we mount it as a
+// sibling of <AppRoutes>. Renders null — no markup contribution.
+import { RouteTracker } from './components/RouteTracker'
+
 // Homepage — eagerly imported. It's the cold-load path and the most-visited
 // public surface, so it stays in the main entry chunk.
 import { MarketingPage } from './pages/MarketingPage'
@@ -246,6 +253,11 @@ export function AppRoutes() {
 export function App() {
   return (
     <BrowserRouter>
+      {/* RouteTracker must sit inside the router so its useLocation() has a
+          context, and outside any Suspense boundary so it never unmounts
+          during a lazy-chunk fetch (an unmount would skip the
+          setPageViewName for that navigation). */}
+      <RouteTracker />
       <AppRoutes />
     </BrowserRouter>
   )

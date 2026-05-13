@@ -8,6 +8,30 @@
  *   2. Then mount React, wrapped in <ErrorBoundary> so render-time crashes
  *      surface as NR `noticeError` calls instead of a blank screen.
  *
+ * Mode: pro_plus_spa
+ * ──────────────────
+ * The `@newrelic/browser-agent` npm package exposes three loader shapes:
+ *
+ *   - `loaders/browser-agent-lite`     → jserrors only
+ *   - `loaders/browser-agent`          → jserrors + page_view_event +
+ *                                        page_view_timing + ajax + metrics
+ *                                        + session_trace + generic_events +
+ *                                        logging + soft_navigations
+ *                                        (this is the full "pro_plus_spa")
+ *   - `loaders/browser-agent-no-replay`→ same as above minus session_replay
+ *
+ * The dashboard IS an SPA (React Router, route-level lazy chunks under
+ * /app/*), so the right shape is the full BrowserAgent loader. It already
+ * pulls in `soft_navigations` (SPA route-change instrumentation) and
+ * `page_view_timing` (LCP / FID / CLS / FCP / TTFB web vitals) which the
+ * lite loader does NOT include. See:
+ *   node_modules/@newrelic/browser-agent/src/loaders/browser-agent.js
+ *
+ * We pass an explicit `init.soft_navigations.enabled = true` to make the
+ * intent unambiguous in this file (the default IS true, but tying the
+ * mode to a config flag means a future refactor that disables features
+ * surface in code review here, not in NR's dashboard going dark).
+ *
  * Fail-open: when VITE_NEWRELIC_LICENSE_KEY is empty (local dev, PR
  * previews, anyone running their own fork) we skip init entirely. This
  * mirrors how the Go services treat an empty NEW_RELIC_LICENSE_KEY — no
@@ -18,15 +42,27 @@ import ReactDOM from 'react-dom/client'
 import { BrowserAgent } from '@newrelic/browser-agent/loaders/browser-agent'
 import { App } from './App'
 import { ErrorBoundary } from './components/ErrorBoundary'
+import { buildBrowserAgentOptions } from './lib/newrelic-config'
 import './styles/tokens.css'
 
 // initNewRelic — boot the browser agent when both keys are present. The
 // agent attaches itself to `window.newrelic` so ErrorBoundary.componentDidCatch
-// can call `noticeError` later without holding a reference here.
+// and RouteTracker can call `noticeError`/`setPageViewName`/`setCustomAttribute`
+// later without holding a reference here.
 //
 // We pass VITE_COMMIT_ID as a global custom attribute via the init config so
 // every JS error, AJAX failure, page action, and SPA route change collected
 // by the agent is automatically stamped with the dashboard's build SHA.
+//
+// Feature flags below are explicit (vs. relying on defaults) so the mode is
+// readable from this file alone. All of these default to `true` in the
+// upstream agent, but we set them anyway to lock the contract:
+//   - soft_navigations:  SPA route-change events (the "spa" in pro_plus_spa)
+//   - page_view_event:   classic full-page-load PageView event
+//   - page_view_timing:  LCP / FID / CLS / FCP / TTFB → transmitted as
+//                        PageViewTiming events; viewable on NR's Page Views UI
+//   - ajax:              fetch/XHR waterfalls (AjaxRequest events)
+//   - distributed_tracing: cross-origin trace propagation to the Go API
 function initNewRelic(): void {
   const licenseKey = import.meta.env.VITE_NEWRELIC_LICENSE_KEY
   const applicationID = import.meta.env.VITE_NEWRELIC_APP_ID
@@ -36,28 +72,11 @@ function initNewRelic(): void {
     return
   }
   try {
-    new BrowserAgent({
-      info: {
-        beacon: 'bam.nr-data.net',
-        errorBeacon: 'bam.nr-data.net',
-        licenseKey,
-        applicationID,
-        sa: 1,
-      },
-      // loader_config mirrors `info` for the bootstrap fetch — same account.
-      loader_config: {
-        accountID: applicationID,
-        trustKey: applicationID,
-        agentID: applicationID,
-        licenseKey,
-        applicationID,
-      },
-      init: {
-        distributed_tracing: { enabled: true },
-        privacy: { cookies_enabled: true },
-        ajax: { deny_list: ['bam.nr-data.net'] },
-      },
-    })
+    // The actual options live in src/lib/newrelic-config.ts so a unit test
+    // can assert the pro_plus_spa shape (page_view_event, page_view_timing,
+    // soft_navigations, ajax, metrics all on) without instantiating the
+    // real agent (which hits the network + installs window listeners).
+    new BrowserAgent(buildBrowserAgentOptions({ licenseKey, applicationID }))
     // Stamp every event with the build SHA. The agent exposes setCustomAttribute
     // on window.newrelic once it finishes booting; do it best-effort.
     const nr = (window as Window & { newrelic?: { setCustomAttribute?: (k: string, v: string) => void } }).newrelic
