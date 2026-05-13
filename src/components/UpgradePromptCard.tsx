@@ -1,27 +1,34 @@
 // UpgradePromptCard — shared in-context upgrade prompt (U2).
 //
-// Renders a single feature-specific upsell tile (title + body + small CTA).
-// Copy is sourced from upgradeCopy.ts by the `feature` key, so every call site
-// stays at one prop. The CTA button label respects P1's /auth/me experiment
-// variant when present — see upgradeCopy.readUpgradeCtaVariant for the shape.
+// Renders a feature-specific upsell tile with:
+//   - title + body (surface-specific framing from upgradeCopy)
+//   - PRIMARY CTA button → /app/billing?frequency=yearly&plan=pro
+//   - SECONDARY text link → /app/billing?frequency=monthly&plan=pro
 //
-// Visual style mirrors the existing inline upsells (PromoteUpsell in
-// DeployDetailPage, CustomDomainPanel's upgrade_required banner) so the
-// chrome doesn't fork: one-line card with text on the left and a small
-// btn-primary on the right.
+// The primary destination is **Pro Annual** by default (per the 2026-05-13
+// pricing playbook — highest-LTV product, "2 months free" framing). The
+// secondary link keeps the monthly path discoverable for mid-cycle users
+// who don't want to commit to a yearly bill.
 //
-// Variant strategy:
+// Visual style mirrors the existing inline upsells so the chrome doesn't
+// fork: one card with text on the left, primary button on the right, and
+// a small "Or pay monthly" link directly under the primary CTA.
+//
+// Variant composition (P1):
 //   - Card copy varies by feature (this module's responsibility)
-//   - Button label varies by P1 experiment (read from /auth/me)
-//   - Per-surface override via `ctaLabel` on the copy entry takes priority
-//     over the experiment label, so a surface that needs a specific call
-//     to action can override.
+//   - PRIMARY button label varies by P1 experiment (read from /auth/me)
+//     — when present, the variant label REPLACES the default Pro Annual
+//     label on the primary CTA. The destination still points at the
+//     yearly frequency so we don't accidentally A/B test the destination.
+//   - The SECONDARY link is intentionally static — running an A/B on
+//     both surfaces at once would confound the experiment.
 
 import { useDashboardCtx } from '../hooks/useDashboardCtx'
 import {
   UPGRADE_COPY,
   BILLING_PATH,
   DEFAULT_UPGRADE_CTA,
+  buildCtaHref,
   readUpgradeCtaVariant,
   type UpgradeFeature,
 } from './upgradeCopy'
@@ -51,18 +58,22 @@ export function UpgradePromptCard({
   const copy = UPGRADE_COPY[feature]
   const ctx = useDashboardCtx()
 
-  // Variant resolution order:
+  // Variant resolution for the PRIMARY CTA label only.
+  // Order:
   //   1. test override (lets the unit test drive variant without /auth/me)
-  //   2. per-feature override (copy.ctaLabel) — surfaces that need their
-  //      own default ("Upgrade now" on a hard quota wall, etc.)
-  //   3. P1 experiment variant from /auth/me
-  //   4. DEFAULT_UPGRADE_CTA fallback
+  //   2. P1 experiment variant from /auth/me (replaces default when present)
+  //   3. per-feature primary label (the Pro Annual default)
+  //   4. DEFAULT_UPGRADE_CTA last-resort (shouldn't fire post-refactor, but
+  //      kept so a future surface that omits primaryCtaLabel still renders)
   const experimentLabel =
     variantOverride !== undefined
       ? variantOverride?.label
       : readUpgradeCtaVariant(ctx.me)?.label
-  const ctaLabel = copy.ctaLabel ?? experimentLabel ?? DEFAULT_UPGRADE_CTA
-  const ctaHref = href ?? copy.ctaHref ?? BILLING_PATH
+
+  const primaryLabel = experimentLabel ?? copy.primaryCtaLabel ?? DEFAULT_UPGRADE_CTA
+  const baseHref = href ?? copy.ctaHref ?? BILLING_PATH
+  const primaryHref = buildCtaHref(baseHref, copy.primaryCtaFrequency)
+  const secondaryHref = buildCtaHref(baseHref, copy.secondaryCtaFrequency)
 
   const padY = dense ? 10 : 14
   const padX = dense ? 12 : 18
@@ -108,13 +119,36 @@ export function UpgradePromptCard({
           </div>
         )}
       </div>
-      <a
-        href={ctaHref}
-        className="btn btn-primary btn-sm"
-        data-testid="upgrade-prompt-cta"
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'flex-end',
+          gap: 4,
+        }}
       >
-        {ctaLabel}
-      </a>
+        <a
+          href={primaryHref}
+          className="btn btn-primary btn-sm"
+          data-testid="upgrade-prompt-cta"
+          data-frequency={copy.primaryCtaFrequency}
+        >
+          {primaryLabel}
+        </a>
+        <a
+          href={secondaryHref}
+          data-testid="upgrade-prompt-cta-secondary"
+          data-frequency={copy.secondaryCtaFrequency}
+          style={{
+            fontSize: 11.5,
+            color: 'var(--text-dim)',
+            textDecoration: 'underline',
+            textUnderlineOffset: 2,
+          }}
+        >
+          {copy.secondaryCtaLabel}
+        </a>
+      </div>
     </section>
   )
 }
