@@ -1,4 +1,4 @@
-/* AdminCustomersPage.test.tsx — founder console coverage (Track B).
+/* AdminCustomersPage.test.tsx — founder console coverage (Track B + Track H).
  *
  * What we lock in:
  *   1. Non-admin users see a 404-equivalent (route 404s instead of 403s)
@@ -8,6 +8,8 @@
  *   5. Drawer opens on row click + tab switching works
  *   6. Issue promo modal submits and surfaces the generated code
  *   7. Tier change modal requires typed PROMOTE / DEMOTE confirmation
+ *   8. (Track H) Currency toggle defaults to USD, switches to INR, persists
+ *      across mount, propagates to drawer, honours VITE_INR_TO_USD override.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
@@ -605,5 +607,168 @@ describe('AdminCustomersPage — tier change flow', () => {
     })
     expect(modal.textContent).toContain('pro')
     expect(modal.textContent).toContain('team')
+  })
+})
+
+// ─── Track H: currency toggle (USD default + INR fallback) ──────────────
+describe('AdminCustomersPage — currency toggle', () => {
+  // Each test starts with a clean localStorage so the persisted choice
+  // from one case can't leak into the next.
+  beforeEach(() => {
+    try {
+      window.localStorage.removeItem('instant.admin.currency')
+    } catch {
+      // ignore
+    }
+  })
+
+  it('defaults to USD with the $ prefix on MRR cells', async () => {
+    render(withRouter(<AdminCustomersPage />))
+    await waitFor(() => {
+      expect(screen.getByTestId('admin-customer-row-t_big')).toBeTruthy()
+    })
+    const usdBtn = screen.getByTestId('admin-currency-USD') as HTMLButtonElement
+    expect(usdBtn.getAttribute('aria-pressed')).toBe('true')
+    const inrBtn = screen.getByTestId('admin-currency-INR') as HTMLButtonElement
+    expect(inrBtn.getAttribute('aria-pressed')).toBe('false')
+
+    // t_big has mrr_monthly = 490000 paise = ₹4900 = ~$58.80 at 0.012
+    const cell = screen.getByTestId('admin-customer-mrr-t_big')
+    expect(cell.textContent).toContain('$')
+    expect(cell.textContent).not.toContain('₹')
+  })
+
+  it('toggling to INR re-renders MRR with the ₹ prefix', async () => {
+    render(withRouter(<AdminCustomersPage />))
+    await waitFor(() => {
+      expect(screen.getByTestId('admin-customer-row-t_big')).toBeTruthy()
+    })
+    fireEvent.click(screen.getByTestId('admin-currency-INR'))
+    await waitFor(() => {
+      const cell = screen.getByTestId('admin-customer-mrr-t_big')
+      expect(cell.textContent).toContain('₹')
+    })
+    expect(screen.getByTestId('admin-customer-mrr-t_big').textContent).not.toContain('$')
+    const inrBtn = screen.getByTestId('admin-currency-INR') as HTMLButtonElement
+    expect(inrBtn.getAttribute('aria-pressed')).toBe('true')
+  })
+
+  it('persists the choice across mount via localStorage', async () => {
+    const { unmount } = render(withRouter(<AdminCustomersPage />))
+    await waitFor(() => {
+      expect(screen.getByTestId('admin-customer-row-t_big')).toBeTruthy()
+    })
+    fireEvent.click(screen.getByTestId('admin-currency-INR'))
+    await waitFor(() => {
+      expect(
+        (screen.getByTestId('admin-currency-INR') as HTMLButtonElement)
+          .getAttribute('aria-pressed'),
+      ).toBe('true')
+    })
+    expect(window.localStorage.getItem('instant.admin.currency')).toBe('INR')
+
+    unmount()
+    cleanup()
+
+    // Re-mount — INR should still be selected because the page reads
+    // localStorage on first render.
+    render(withRouter(<AdminCustomersPage />))
+    await waitFor(() => {
+      expect(screen.getByTestId('admin-customer-row-t_big')).toBeTruthy()
+    })
+    expect(
+      (screen.getByTestId('admin-currency-INR') as HTMLButtonElement)
+        .getAttribute('aria-pressed'),
+    ).toBe('true')
+    expect(screen.getByTestId('admin-customer-mrr-t_big').textContent).toContain('₹')
+  })
+
+  it('propagates the chosen currency into the drawer', async () => {
+    render(withRouter(<AdminCustomersPage />))
+    await waitFor(() => {
+      expect(screen.getByTestId('admin-customer-row-t_big')).toBeTruthy()
+    })
+    fireEvent.click(screen.getByTestId('admin-customer-row-t_big'))
+    await waitFor(() => {
+      expect(screen.getByTestId('drawer-overview')).toBeTruthy()
+    })
+    // Default USD — drawer MRR row should carry a $.
+    const mrr = screen.getByTestId('drawer-mrr')
+    expect(mrr.textContent).toContain('$')
+    expect(mrr.textContent).not.toContain('₹')
+  })
+
+  it('drawer renders INR when the page is toggled to INR', async () => {
+    render(withRouter(<AdminCustomersPage />))
+    await waitFor(() => {
+      expect(screen.getByTestId('admin-customer-row-t_big')).toBeTruthy()
+    })
+    fireEvent.click(screen.getByTestId('admin-currency-INR'))
+    fireEvent.click(screen.getByTestId('admin-customer-row-t_big'))
+    await waitFor(() => {
+      expect(screen.getByTestId('drawer-overview')).toBeTruthy()
+    })
+    const mrr = screen.getByTestId('drawer-mrr')
+    expect(mrr.textContent).toContain('₹')
+  })
+})
+
+// ─── Track H: currency helpers (lib-level coverage) ─────────────────────
+describe('lib/currency — formatMoney + override', () => {
+  it('formatINR returns ₹-prefixed locale string for non-zero paise', async () => {
+    const { formatINR } = await import('../lib/currency')
+    expect(formatINR(490000)).toContain('₹')
+    expect(formatINR(490000)).toContain('4,900')
+  })
+
+  it('formatINR returns em dash for zero / nullish', async () => {
+    const { formatINR } = await import('../lib/currency')
+    expect(formatINR(0)).toBe('—')
+    expect(formatINR(null)).toBe('—')
+    expect(formatINR(undefined)).toBe('—')
+  })
+
+  it('formatUSD returns $-prefixed string converted via the static rate', async () => {
+    const { formatUSD, ACTIVE_INR_TO_USD } = await import('../lib/currency')
+    // 490000 paise = ₹4900, at 0.012 → $58.80.
+    const out = formatUSD(490000)
+    expect(out).toContain('$')
+    // Assert against the active rate so the test still passes if ops
+    // ever bumps the default constant.
+    const expectedDollars = 4900 * ACTIVE_INR_TO_USD
+    // Pull the numeric part out — locale formatting may insert commas.
+    const stripped = out.replace(/[^0-9.]/g, '')
+    expect(Number(stripped)).toBeCloseTo(expectedDollars, 2)
+  })
+
+  it('formatMoney dispatches USD vs INR by code', async () => {
+    const { formatMoney } = await import('../lib/currency')
+    expect(formatMoney(490000, 'USD')).toContain('$')
+    expect(formatMoney(490000, 'INR')).toContain('₹')
+  })
+
+  it('VITE_INR_TO_USD override parses through resolveInrToUsd', async () => {
+    // Vite statically inlines `import.meta.env.VITE_*` at transform time,
+    // so the module-load constant ACTIVE_INR_TO_USD can't be re-driven
+    // from a test. The override path is the parser; assert its rules
+    // directly. (Build-time override is wired in AdminCustomersPage via
+    // ACTIVE_INR_TO_USD; the integration is exercised by the visual
+    // tests above.)
+    const { resolveInrToUsd, INR_TO_USD } = await import('../lib/currency')
+    expect(resolveInrToUsd('0.05')).toBeCloseTo(0.05, 5)
+    expect(resolveInrToUsd('0.0125')).toBeCloseTo(0.0125, 5)
+    // Falsy / missing → static fallback.
+    expect(resolveInrToUsd('')).toBe(INR_TO_USD)
+    expect(resolveInrToUsd(null)).toBe(INR_TO_USD)
+    expect(resolveInrToUsd(undefined)).toBe(INR_TO_USD)
+  })
+
+  it('falls back to the static rate when VITE_INR_TO_USD is unparseable', async () => {
+    const { resolveInrToUsd, INR_TO_USD } = await import('../lib/currency')
+    expect(resolveInrToUsd('banana')).toBe(INR_TO_USD)
+    expect(resolveInrToUsd('NaN')).toBe(INR_TO_USD)
+    // Zero / negative rates are nonsensical — fall back too.
+    expect(resolveInrToUsd('0')).toBe(INR_TO_USD)
+    expect(resolveInrToUsd('-0.5')).toBe(INR_TO_USD)
   })
 })

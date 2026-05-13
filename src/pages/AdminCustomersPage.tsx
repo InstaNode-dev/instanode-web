@@ -24,6 +24,13 @@ import type { AdminCustomerSummary, Tier } from '../api/types'
 import { TierPill } from '../components/Common'
 import { CustomerDetailDrawer, formatBytes } from '../components/CustomerDetailDrawer'
 import { useDashboardCtx } from '../hooks/useDashboardCtx'
+import {
+  ACTIVE_INR_TO_USD,
+  type CurrencyCode,
+  formatMoney,
+  readStoredCurrency,
+  writeStoredCurrency,
+} from '../lib/currency'
 
 type SortKey =
   | 'mrr'
@@ -44,16 +51,6 @@ const FILTER_PILLS: Array<{ key: 'all' | Tier; label: string }> = [
   { key: 'pro', label: 'Pro' },
   { key: 'team', label: 'Team' },
 ]
-
-function formatINRCompact(amount: number): string {
-  if (!Number.isFinite(amount) || amount === 0) return '—'
-  const rupees = amount / 100
-  return new Intl.NumberFormat('en-IN', {
-    style: 'currency',
-    currency: 'INR',
-    maximumFractionDigits: 0,
-  }).format(rupees)
-}
 
 function formatDate(iso: string | null): string {
   if (!iso) return '—'
@@ -112,6 +109,15 @@ export function AdminCustomersPage() {
   const [sortKey, setSortKey] = useState<SortKey>('mrr')
   const [sortDir, setSortDir] = useState<SortDir>('desc')
   const [openTeamID, setOpenTeamID] = useState<string | null>(null)
+  // Currency toggle — USD by default (founder convention). Persisted in
+  // localStorage so reload keeps the operator's choice. See
+  // src/lib/currency.ts for the conversion rate + override mechanism.
+  const [currency, setCurrency] = useState<CurrencyCode>(() => readStoredCurrency())
+
+  function handleCurrencyChange(next: CurrencyCode) {
+    setCurrency(next)
+    writeStoredCurrency(next)
+  }
 
   // Gate the entire page on the admin flag. We render Navigate(*) which
   // matches the dashboard's catch-all and redirects to "/" — i.e., the
@@ -202,6 +208,38 @@ export function AdminCustomersPage() {
           {total} total
         </span>
         <span style={{ flex: 1 }} />
+        <div
+          role="group"
+          aria-label="Currency"
+          data-testid="admin-currency-toggle"
+          title={`USD is converted from INR at 1₹ = $${ACTIVE_INR_TO_USD} (static rate; for directional comparison only)`}
+          style={{ display: 'flex', gap: 0 }}
+        >
+          {(['USD', 'INR'] as CurrencyCode[]).map((c) => (
+            <button
+              key={c}
+              type="button"
+              aria-pressed={currency === c}
+              data-testid={`admin-currency-${c}`}
+              onClick={() => handleCurrencyChange(c)}
+              className={`btn ${currency === c ? 'primary' : ''}`}
+              style={{
+                padding: '4px 10px',
+                fontSize: 12,
+                background:
+                  currency === c ? 'var(--accent-soft, #eef)' : 'transparent',
+                border: '1px solid var(--border, #ddd)',
+                borderRadius:
+                  c === 'USD' ? '4px 0 0 4px' : '0 4px 4px 0',
+                marginLeft: c === 'INR' ? -1 : 0,
+                cursor: 'pointer',
+                fontWeight: currency === c ? 600 : 400,
+              }}
+            >
+              {c}
+            </button>
+          ))}
+        </div>
         <div
           role="tablist"
           aria-label="Filter by tier"
@@ -358,8 +396,11 @@ export function AdminCustomersPage() {
                 <td style={{ padding: '8px 6px' }}>
                   <TierPill tier={row.tier} />
                 </td>
-                <td style={{ padding: '8px 6px', textAlign: 'right' }}>
-                  {formatINRCompact(row.mrr_monthly)}
+                <td
+                  style={{ padding: '8px 6px', textAlign: 'right' }}
+                  data-testid={`admin-customer-mrr-${row.team_id}`}
+                >
+                  {formatMoney(row.mrr_monthly, currency)}
                 </td>
                 <td style={{ padding: '8px 6px', textAlign: 'right' }}>
                   {formatBytes(row.storage_bytes)}
@@ -391,6 +432,7 @@ export function AdminCustomersPage() {
       {openRow && (
         <CustomerDetailDrawer
           summary={openRow}
+          currency={currency}
           onClose={() => setOpenTeamID(null)}
         />
       )}

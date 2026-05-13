@@ -24,6 +24,7 @@ import type {
   AdminCustomerDetailResponse,
   AdminCustomerSummary,
 } from '../api/types'
+import { type CurrencyCode, DEFAULT_CURRENCY, formatMoney } from '../lib/currency'
 import { EnvPill, RelTime, TierPill } from './Common'
 import { IssuePromoModal } from './IssuePromoModal'
 import { TierChangeModal } from './TierChangeModal'
@@ -32,18 +33,10 @@ type Tab = 'overview' | 'resources' | 'activity' | 'promos'
 
 interface Props {
   summary: AdminCustomerSummary
+  /** Display currency for MRR fields — controlled by the page-level
+   *  toggle. Defaults to USD when omitted (founder convention). */
+  currency?: CurrencyCode
   onClose: () => void
-}
-
-function formatINR(amount?: number | null): string {
-  if (amount == null || !Number.isFinite(amount) || amount === 0) return '—'
-  // Track A returns amounts in paise. Render in INR with locale grouping.
-  const rupees = amount / 100
-  return new Intl.NumberFormat('en-IN', {
-    style: 'currency',
-    currency: 'INR',
-    maximumFractionDigits: 0,
-  }).format(rupees)
 }
 
 export function formatBytes(b: number | null | undefined): string {
@@ -59,7 +52,11 @@ export function formatBytes(b: number | null | undefined): string {
   return `${v.toFixed(digits)} ${units[i]}`
 }
 
-export function CustomerDetailDrawer({ summary, onClose }: Props) {
+export function CustomerDetailDrawer({
+  summary,
+  currency = DEFAULT_CURRENCY,
+  onClose,
+}: Props) {
   const [tab, setTab] = useState<Tab>('overview')
   const [detail, setDetail] = useState<AdminCustomerDetailResponse | null>(null)
   const [loading, setLoading] = useState(true)
@@ -252,7 +249,7 @@ export function CustomerDetailDrawer({ summary, onClose }: Props) {
           )}
 
           {!loading && !error && detail && tab === 'overview' && (
-            <OverviewTab summary={summary} detail={detail} />
+            <OverviewTab summary={summary} detail={detail} currency={currency} />
           )}
           {!loading && !error && detail && tab === 'resources' && (
             <ResourcesTab detail={detail} />
@@ -298,9 +295,11 @@ export function CustomerDetailDrawer({ summary, onClose }: Props) {
 function OverviewTab({
   summary,
   detail,
+  currency,
 }: {
   summary: AdminCustomerSummary
   detail: AdminCustomerDetailResponse
+  currency: CurrencyCode
 }) {
   const rows: Array<[string, React.ReactNode]> = [
     ['Email', summary.primary_email],
@@ -317,9 +316,11 @@ function OverviewTab({
       ),
     ],
     [
-      'MRR (monthly)',
-      formatINR(summary.mrr_monthly) +
-        (summary.mrr_yearly > 0 ? ` · yearly ${formatINR(summary.mrr_yearly)}` : ''),
+      `MRR (monthly, ${currency})`,
+      formatMoney(summary.mrr_monthly, currency) +
+        (summary.mrr_yearly > 0
+          ? ` · yearly ${formatMoney(summary.mrr_yearly, currency)}`
+          : ''),
     ],
     ['Last active', summary.last_active ? <RelTime at={summary.last_active} /> : '—'],
     [
@@ -361,7 +362,14 @@ function OverviewTab({
           <dt className="dim" style={{ fontWeight: 500 }}>
             {k}
           </dt>
-          <dd style={{ margin: 0 }}>{v}</dd>
+          <dd
+            style={{ margin: 0 }}
+            data-testid={
+              typeof k === 'string' && k.startsWith('MRR') ? 'drawer-mrr' : undefined
+            }
+          >
+            {v}
+          </dd>
         </div>
       ))}
     </dl>
