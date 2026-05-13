@@ -13,7 +13,12 @@ import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
 import { render, screen, cleanup, waitFor, fireEvent } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import type { ReactNode } from 'react'
-import { UPGRADE_COPY, DEFAULT_UPGRADE_CTA } from './upgradeCopy'
+import {
+  UPGRADE_COPY,
+  PRIMARY_CTA_LABEL_PRO_ANNUAL,
+  SECONDARY_CTA_LABEL_PRO_MONTHLY,
+  BILLING_PATH,
+} from './upgradeCopy'
 
 // ─── Module mocks ────────────────────────────────────────────────────────
 
@@ -234,17 +239,26 @@ describe('CustomDomainPanel — custom_domain upgrade prompt on 402', () => {
 // ─── P1 variant composition ──────────────────────────────────────────────
 
 describe('UpgradePromptCard composes with the P1 experiment variant', () => {
-  it('falls back to DEFAULT_UPGRADE_CTA when /auth/me has no variant', async () => {
+  it('defaults the primary CTA to the Pro Annual label when /auth/me has no variant', async () => {
     mockTier = 'hobby'
     mockEnv = 'staging'
     render(withRouter(<VaultPage />))
     await waitFor(() =>
       expect(screen.queryByTestId('upgrade-prompt-vault_prod')).toBeTruthy(),
     )
-    expect(screen.getByTestId('upgrade-prompt-cta').textContent).toBe(DEFAULT_UPGRADE_CTA)
+    expect(screen.getByTestId('upgrade-prompt-cta').textContent).toBe(
+      PRIMARY_CTA_LABEL_PRO_ANNUAL,
+    )
+    // The secondary "Or pay monthly" link always renders alongside the
+    // primary regardless of variant state.
+    expect(
+      screen.getByTestId('upgrade-prompt-cta-secondary').textContent,
+    ).toBe(SECONDARY_CTA_LABEL_PRO_MONTHLY)
   })
 
-  it('uses the P1 variant label when /auth/me supplies one', async () => {
+  it('uses the P1 variant label on the PRIMARY CTA when /auth/me supplies one', async () => {
+    // Regression guard: P1 variants must continue to override the primary
+    // CTA copy. This is the load-bearing assertion for the P1 composition.
     mockTier = 'hobby'
     mockEnv = 'staging'
     mockMe = { experiments: { upgrade_cta: { variant: 'B', label: 'Try Pro free' } } }
@@ -253,5 +267,55 @@ describe('UpgradePromptCard composes with the P1 experiment variant', () => {
       expect(screen.queryByTestId('upgrade-prompt-vault_prod')).toBeTruthy(),
     )
     expect(screen.getByTestId('upgrade-prompt-cta').textContent).toBe('Try Pro free')
+    // …but the destination stays yearly so the experiment only measures copy.
+    const primaryHref =
+      (screen.getByTestId('upgrade-prompt-cta') as HTMLAnchorElement).getAttribute('href') ?? ''
+    expect(primaryHref).toContain('frequency=yearly')
+    expect(primaryHref).toContain('plan=pro')
+    // …and the secondary monthly link is unaffected by the variant.
+    expect(
+      screen.getByTestId('upgrade-prompt-cta-secondary').textContent,
+    ).toBe(SECONDARY_CTA_LABEL_PRO_MONTHLY)
   })
+})
+
+// ─── 5-surface regression: primary→yearly, secondary→monthly ─────────────
+//
+// U2 lit up UpgradePromptCard across 5 surfaces (vault_prod, provision_twin,
+// family_bindings, quota_wall, custom_domain — the BillingPage CTA is a 6th
+// but lives in a parallel PR). This block proves the Pro Annual primary +
+// monthly secondary render correctly on every surface, in isolation, with
+// no /auth/me variant in flight.
+
+import { UpgradePromptCard } from './UpgradePromptCard'
+import type { UpgradeFeature } from './upgradeCopy'
+
+describe('5-surface regression — primary yearly + secondary monthly', () => {
+  const SURFACES: UpgradeFeature[] = [
+    'vault_prod',
+    'provision_twin',
+    'family_bindings',
+    'quota_wall',
+    'custom_domain',
+  ]
+
+  for (const feature of SURFACES) {
+    it(`renders Pro Annual primary + monthly secondary on ${feature}`, () => {
+      render(<UpgradePromptCard feature={feature} />)
+      const primary = screen.getByTestId('upgrade-prompt-cta') as HTMLAnchorElement
+      const secondary = screen.getByTestId(
+        'upgrade-prompt-cta-secondary',
+      ) as HTMLAnchorElement
+      expect(primary.textContent).toBe(PRIMARY_CTA_LABEL_PRO_ANNUAL)
+      expect(secondary.textContent).toBe(SECONDARY_CTA_LABEL_PRO_MONTHLY)
+      const pHref = primary.getAttribute('href') ?? ''
+      const sHref = secondary.getAttribute('href') ?? ''
+      expect(pHref.startsWith(BILLING_PATH)).toBe(true)
+      expect(pHref).toContain('frequency=yearly')
+      expect(pHref).toContain('plan=pro')
+      expect(sHref.startsWith(BILLING_PATH)).toBe(true)
+      expect(sHref).toContain('frequency=monthly')
+      expect(sHref).toContain('plan=pro')
+    })
+  }
 })
