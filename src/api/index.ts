@@ -10,7 +10,10 @@
 import type {
   Resource, DashboardStack, DashboardDeployment, DeploymentStatus,
   DashboardTeam, BillingDetails, Invoice,
-  TeamMember, TeamInvitation, AuthMeResponse, VaultEntry, ActivityItem
+  TeamMember, TeamInvitation, AuthMeResponse, VaultEntry, ActivityItem,
+  AdminCustomerListResponse, AdminCustomerDetailResponse,
+  AdminIssuePromoInput, AdminIssuePromoResponse,
+  AdminSetTierInput, AdminSetTierResponse,
 } from './types'
 
 export * from './types'
@@ -159,6 +162,10 @@ export async function fetchMe(): Promise<AuthMeResponse> {
      *  field entirely — callers must treat undefined as "no
      *  experiment, render control variant". */
     experiments?: Record<string, string>
+    /** Track A — server-authoritative platform-admin flag. The
+     *  dashboard surfaces the `/app/admin/customers` console only when
+     *  this is `true`. Absent on older API builds → treat as `false`. */
+    is_platform_admin?: boolean
   }
   // No try/catch — errors propagate. The previous fixture fallback masked
   // backend outages by serving the `aanya@acme.dev` mock identity, which
@@ -190,6 +197,7 @@ export async function fetchMe(): Promise<AuthMeResponse> {
       created_at: '',
     },
     experiments: me.experiments,
+    is_platform_admin: me.is_platform_admin === true,
   }
 }
 
@@ -1218,4 +1226,99 @@ export type QuotaWallResponse = {
 
 export async function fetchQuotaWall(): Promise<QuotaWallResponse> {
   return call<QuotaWallResponse>('/api/v1/usage/wall')
+}
+
+// ─── Admin Customers (Track A — founder console) ────────────────────────
+//
+// Four endpoints back the /app/admin/customers page:
+//   listAdminCustomers       — GET  /api/v1/admin/customers
+//   getAdminCustomer         — GET  /api/v1/admin/customers/:team_id
+//   setAdminCustomerTier     — POST /api/v1/admin/customers/:team_id/tier
+//   issueAdminCustomerPromo  — POST /api/v1/admin/customers/:team_id/promo
+//
+// Track A returns 403 with `agent_action` for non-admin callers; the
+// dashboard's route guard turns the page into a 404 for those users so
+// the route's existence isn't leaked. Other errors propagate so the
+// page renders a real banner instead of silently failing.
+
+/** Filter / sort options accepted by GET /api/v1/admin/customers. The
+ *  query string is built up only for the fields the caller actually sets
+ *  so older API builds that don't yet honour a flag don't get tripped on
+ *  an empty string. */
+export interface ListAdminCustomersInput {
+  /** Free-text search (email, name, team_id substring). */
+  q?: string
+  /** Filter pill — undefined or 'all' returns every tier. */
+  tier?: 'all' | 'anonymous' | 'free' | 'hobby' | 'pro' | 'team' | 'growth'
+  /** Track A sort keys: mrr | last_active | created_at | storage | deployments. */
+  sort_by?: string
+  /** Page size — Track A clamps to 200; default 50. */
+  limit?: number
+  offset?: number
+}
+
+export async function listAdminCustomers(
+  input: ListAdminCustomersInput = {},
+): Promise<AdminCustomerListResponse> {
+  const params = new URLSearchParams()
+  if (input.q && input.q.trim()) params.set('q', input.q.trim())
+  if (input.tier && input.tier !== 'all') params.set('tier', input.tier)
+  if (input.sort_by) params.set('sort_by', input.sort_by)
+  if (input.limit !== undefined) params.set('limit', String(input.limit))
+  if (input.offset !== undefined) params.set('offset', String(input.offset))
+  const qs = params.toString()
+  const path = qs ? `/api/v1/admin/customers?${qs}` : '/api/v1/admin/customers'
+  const r = await call<{
+    ok: boolean
+    customers?: AdminCustomerListResponse['customers']
+    total?: number
+  }>(path)
+  return { ok: true, customers: r.customers ?? [], total: r.total ?? 0 }
+}
+
+export async function getAdminCustomer(
+  teamID: string,
+): Promise<AdminCustomerDetailResponse> {
+  const r = await call<{
+    ok: boolean
+    team?: AdminCustomerDetailResponse['team']
+    users?: AdminCustomerDetailResponse['users']
+    resources?: AdminCustomerDetailResponse['resources']
+    audit_log?: AdminCustomerDetailResponse['audit_log']
+    deploys?: AdminCustomerDetailResponse['deploys']
+    subscription?: AdminCustomerDetailResponse['subscription']
+    promos?: AdminCustomerDetailResponse['promos']
+  }>(`/api/v1/admin/customers/${encodeURIComponent(teamID)}`)
+  return {
+    ok: true,
+    team: r.team ?? ({ id: teamID } as AdminCustomerDetailResponse['team']),
+    users: r.users ?? [],
+    resources: r.resources ?? [],
+    audit_log: r.audit_log ?? [],
+    deploys: r.deploys ?? [],
+    subscription: r.subscription ?? null,
+    promos: r.promos ?? [],
+  }
+}
+
+export async function setAdminCustomerTier(
+  teamID: string,
+  input: AdminSetTierInput,
+): Promise<AdminSetTierResponse> {
+  const r = await call<{ ok: boolean; team: DashboardTeam }>(
+    `/api/v1/admin/customers/${encodeURIComponent(teamID)}/tier`,
+    { method: 'POST', body: JSON.stringify(input) },
+  )
+  return { ok: true, team: r.team }
+}
+
+export async function issueAdminCustomerPromo(
+  teamID: string,
+  input: AdminIssuePromoInput,
+): Promise<AdminIssuePromoResponse> {
+  const r = await call<{ ok: boolean; code: string; expires_at: string | null }>(
+    `/api/v1/admin/customers/${encodeURIComponent(teamID)}/promo`,
+    { method: 'POST', body: JSON.stringify(input) },
+  )
+  return { ok: true, code: r.code, expires_at: r.expires_at ?? null }
 }

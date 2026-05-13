@@ -96,6 +96,13 @@ const SettingsPage = lazy(() =>
 const ContractsPage = lazy(() =>
   import('./pages/ContractsPage').then((m) => ({ default: m.ContractsPage })),
 )
+// AdminCustomersPage — founder console at /app/admin/customers. The page
+// itself reads ctx.me.is_platform_admin and renders a Navigate when the
+// caller isn't an admin, so non-admins never see the route exists. We
+// still lazy-load it so the bytes don't ship for regular users.
+const AdminCustomersPage = lazy(() =>
+  import('./pages/AdminCustomersPage').then((m) => ({ default: m.AdminCustomersPage })),
+)
 
 import { getToken } from './api'
 
@@ -196,6 +203,9 @@ export function AppRoutes() {
           <Route path="billing" element={<BillingPage />} />
           <Route path="settings" element={<SettingsPage />} />
           <Route path="contracts" element={<ContractsPage />} />
+          {/* Admin-only — the page itself renders <Navigate to="/" /> for
+              non-admin users so the route 404s instead of 403s. */}
+          <Route path="admin/customers" element={<AdminCustomersPage />} />
         </Route>
 
         {/* Back-compat: every legacy unprefixed path that used to be a
