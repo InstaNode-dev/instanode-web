@@ -1,13 +1,20 @@
-/* BillingPage.test.tsx — component coverage for the upgrade flow.
+/* BillingPage.test.tsx — component coverage for the redesigned upgrade flow.
  *
- * Focused on the three handlers that move money:
- *   - handleChangePlan → api.createCheckout(nextTier) → window.location.href
- *   - handleCancel → window.confirm → api.cancelSubscription → re-fetch
- *   - error surfacing into checkoutErr state
+ * 2026-05-13 redesign coverage:
+ *   - All 4 tier cards render side-by-side (Free / Hobby / Pro / Team)
+ *   - Annual is the default frequency on first render
+ *   - The Annual position copy reads "2 months free"
+ *   - The monthly equivalent is visible when Annual is selected
+ *   - "Most Popular" badge renders only on Pro
+ *   - Current tier shows "Your plan" pill, not a CTA
+ *   - Promo UI is gone — Razorpay's hosted checkout handles codes
  *
- * Renderer concerns (price formatting, usage rows) are not asserted —
- * those are intentional fixed strings and would burn on every visual
- * tweak. We assert on the behaviour that has financial consequences. */
+ * Plus the pre-redesign concerns that still matter:
+ *   - handleSelectTier → api.createCheckout(tier, frequency) → navigation
+ *   - Error surfacing into checkoutErr state
+ *   - No self-serve cancellation (mailto link only)
+ *   - Usage panel reflects fetchBillingUsage() (§10.20 contract)
+ */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { render, screen, waitFor, fireEvent, cleanup } from '@testing-library/react'
@@ -15,9 +22,7 @@ import userEvent from '@testing-library/user-event'
 import { BillingPage } from './BillingPage'
 import type { BillingDetails, DashboardTeam, Invoice, User } from '../api'
 
-// §10.21: the runtime `api/fixtures.ts` module is gone — test-only data
-// lives here, inlined and minimal. These shapes match the api types and
-// exist solely so the BillingPage tests can pin expected rendering.
+// §10.21: test-only data lives here, inlined and minimal.
 const FIXTURE_USER: User = {
   id: 'u_test',
   email: 'aanya@acme.dev',
@@ -59,8 +64,6 @@ const FIXTURE_INVOICES: Invoice[] = [
 ]
 
 // ─── Module-level mocks ──────────────────────────────────────────────────
-// We mock the api module so tests never hit fetch(); each test sets up
-// the response shape it cares about.
 vi.mock('../api', async () => {
   const actual = await vi.importActual<typeof import('../api')>('../api')
   return {
@@ -68,16 +71,9 @@ vi.mock('../api', async () => {
     fetchBilling: vi.fn(),
     listInvoices: vi.fn(),
     listResources: vi.fn(),
-    // §10.20: BillingPage's Usage panel now reads fetchBillingUsage() (a
-    // server-side cached aggregate) instead of listResources(). The
-    // listResources mock above stays in the module-level mock for the
-    // pre-§10.20 tests that still reference it; new tests should drive
-    // fetchBillingUsage.
     fetchBillingUsage: vi.fn(),
     createCheckout: vi.fn(),
     cancelSubscription: vi.fn(),
-    // P3: discount-code path validates with the api before applying the
-    // code to checkout. Mocked so tests can drive both ok + error shapes.
     validatePromotion: vi.fn(),
   }
 })
@@ -102,7 +98,6 @@ import * as api from '../api'
 
 // ─── Test helpers ────────────────────────────────────────────────────────
 
-/** Default happy-path billing + invoices response. */
 function mockHappyBilling() {
   ;(api.fetchBilling as any).mockResolvedValue({
     ok: true,
@@ -113,21 +108,14 @@ function mockHappyBilling() {
     ok: true,
     invoices: FIXTURE_INVOICES,
   })
-  // Pre-§10.20 tests still mock listResources; new code path doesn't
-  // call it, so this resolves to an unused empty list.
   ;(api.listResources as any).mockResolvedValue({
     ok: true,
     items: [],
     total: 0,
   })
-  // §10.20: default zero-usage server response. Tests that pin specific
-  // usage figures override this with a payload carrying real bytes/counts.
   ;(api.fetchBillingUsage as any).mockResolvedValue(makeUsageResp({}))
 }
 
-/** §10.20 test helper — build a BillingUsage response with optional overrides
- *  per metric. Unspecified metrics default to {bytes:0, limit_bytes:-1} or
- *  {count:0, limit:-1} matching the server's "no row" shape. */
 function makeUsageResp(over: Partial<{
   postgres_bytes: number
   redis_bytes: number
@@ -140,7 +128,6 @@ function makeUsageResp(over: Partial<{
   return {
     ok: true,
     freshness_seconds: 30,
-    // Pin as_of so the "as of Ns ago" footnote renders deterministically.
     as_of: new Date(Date.now() - 5000).toISOString(),
     usage: {
       postgres: { bytes: over.postgres_bytes ?? 0, limit_bytes: 1024 * 1024 * 1024 },
@@ -154,21 +141,18 @@ function makeUsageResp(over: Partial<{
   }
 }
 
-/** Wait for the page to finish its initial load (skeleton → real content). */
+/** Wait for the page to finish its initial load (skeleton → real content).
+ *  The new layout always renders the pricing grid once billing arrives, so
+ *  we wait for any tier card to appear. */
 async function waitForLoaded() {
-  // The page shows a .skel div while billing is null. Once billing
-  // resolves it renders the plan label. Wait for the upgrade button.
   await waitFor(() => {
-    const btn = screen.queryByRole('button', { name: /upgrade to/i })
-    expect(btn).toBeTruthy()
+    expect(screen.queryByTestId('pricing-grid-cards')).toBeTruthy()
   })
 }
 
 // jsdom 24 ships window.location.href as a non-configurable setter — we
 // can't intercept it directly without triggering a real navigation.
-// Workaround: swap window.location wholesale with a plain object we
-// control, then restore on teardown. The replacement implements only
-// the surface BillingPage touches (href getter/setter).
+// Workaround: swap window.location wholesale with a plain object we control.
 let hrefSetTo: string | null = null
 let originalLocation: Location | null = null
 function installLocationHrefSpy() {
@@ -207,6 +191,8 @@ function restoreLocation() {
 beforeEach(() => {
   mockTier = 'hobby'
   installLocationHrefSpy()
+  // Default-Annual relies on no stored preference. Clear between tests.
+  try { window.localStorage.removeItem('instant.billing.plan_frequency') } catch {}
 })
 
 afterEach(() => {
@@ -226,9 +212,8 @@ describe('BillingPage — backend-down error state (§10.21)', () => {
     await waitFor(() => {
       expect(screen.getByTestId('billing-error')).toBeTruthy()
     })
-    // Critical: must NOT render the upgrade CTA (which would imply a working
-    // billing surface). The error state is exclusive.
-    expect(screen.queryByRole('button', { name: /upgrade to/i })).toBeNull()
+    // Must NOT render the pricing grid (the error state is exclusive).
+    expect(screen.queryByTestId('pricing-grid-cards')).toBeNull()
   })
 
   it('surfaces the error message on the billing-error banner', async () => {
@@ -246,54 +231,36 @@ describe('BillingPage — backend-down error state (§10.21)', () => {
 // ─── Initial render ──────────────────────────────────────────────────────
 describe('BillingPage — initial render', () => {
   it('shows a skeleton while billing is loading', () => {
-    ;(api.fetchBilling as any).mockReturnValue(new Promise(() => {}))   // never resolves
+    ;(api.fetchBilling as any).mockReturnValue(new Promise(() => {}))
     ;(api.listInvoices as any).mockReturnValue(new Promise(() => {}))
     ;(api.listResources as any).mockReturnValue(new Promise(() => {}))
-    // §10.20: BillingPage calls fetchBillingUsage now; it must return a
-    // pending promise (never resolves) so the skeleton state holds.
     ;(api.fetchBillingUsage as any).mockReturnValue(new Promise(() => {}))
     const { container } = render(<BillingPage />)
     expect(container.querySelector('.skel')).toBeTruthy()
   })
 
-  it('renders the Hobby plan label when tier=hobby', async () => {
+  it('renders the "You\'re on Hobby today" headline when tier=hobby', async () => {
     mockTier = 'hobby'
     mockHappyBilling()
     render(<BillingPage />)
     await waitForLoaded()
-    expect(screen.getByRole('heading', { name: 'Hobby' })).toBeTruthy()
+    expect(screen.getByRole('heading', { name: /you're on hobby today/i })).toBeTruthy()
   })
 
-  it('renders the Pro plan label when tier=pro', async () => {
+  it('renders the "You\'re on Pro today" headline when tier=pro', async () => {
     mockTier = 'pro'
     mockHappyBilling()
     render(<BillingPage />)
     await waitForLoaded()
-    expect(screen.getByRole('heading', { name: 'Pro' })).toBeTruthy()
+    expect(screen.getByRole('heading', { name: /you're on pro today/i })).toBeTruthy()
   })
 
-  it('falls back to the Hobby plan when tier is unknown', async () => {
+  it('falls back to the Hobby label when tier is unknown', async () => {
     mockTier = 'unknown-tier'
     mockHappyBilling()
     render(<BillingPage />)
     await waitForLoaded()
-    expect(screen.getByRole('heading', { name: 'Hobby' })).toBeTruthy()
-  })
-
-  it('shows the upgrade-to-next-tier label (hobby → Pro)', async () => {
-    mockTier = 'hobby'
-    mockHappyBilling()
-    render(<BillingPage />)
-    await waitForLoaded()
-    expect(screen.getByRole('button', { name: /upgrade to pro/i })).toBeTruthy()
-  })
-
-  it('shows the upgrade-to-next-tier label (pro → Team)', async () => {
-    mockTier = 'pro'
-    mockHappyBilling()
-    render(<BillingPage />)
-    await waitForLoaded()
-    expect(screen.getByRole('button', { name: /upgrade to team/i })).toBeTruthy()
+    expect(screen.getByRole('heading', { name: /you're on hobby today/i })).toBeTruthy()
   })
 
   it('renders the payment method line from billing.payment_last4', async () => {
@@ -327,7 +294,6 @@ describe('BillingPage — initial render', () => {
     mockHappyBilling()
     render(<BillingPage />)
     await waitForLoaded()
-    // Cancellation is intentionally not self-serve — must contact support.
     expect(screen.queryByRole('button', { name: /cancel subscription/i })).toBeNull()
     const link = screen.getByTestId('contact-support-cancel') as HTMLAnchorElement
     expect(link.tagName).toBe('A')
@@ -335,9 +301,275 @@ describe('BillingPage — initial render', () => {
   })
 })
 
-// ─── handleChangePlan ────────────────────────────────────────────────────
-describe('BillingPage — handleChangePlan (upgrade flow)', () => {
-  it('calls api.createCheckout("pro", "monthly") when user is on hobby and clicks Upgrade', async () => {
+// ─── 4-tier pricing grid (2026-05-13 redesign) ──────────────────────────
+describe('BillingPage — 4-tier pricing grid', () => {
+  it('renders all four tier cards side by side (Free / Hobby / Pro / Team)', async () => {
+    mockTier = 'hobby'
+    mockHappyBilling()
+    render(<BillingPage />)
+    await waitForLoaded()
+    expect(screen.getByTestId('tier-card-free')).toBeTruthy()
+    expect(screen.getByTestId('tier-card-hobby')).toBeTruthy()
+    expect(screen.getByTestId('tier-card-pro')).toBeTruthy()
+    expect(screen.getByTestId('tier-card-team')).toBeTruthy()
+  })
+
+  it('renders the cards inside the pricing-grid-cards container', async () => {
+    mockTier = 'hobby'
+    mockHappyBilling()
+    render(<BillingPage />)
+    await waitForLoaded()
+    const grid = screen.getByTestId('pricing-grid-cards')
+    // All four cards live inside the grid.
+    expect(grid.querySelector('[data-tier="free"]')).toBeTruthy()
+    expect(grid.querySelector('[data-tier="hobby"]')).toBeTruthy()
+    expect(grid.querySelector('[data-tier="pro"]')).toBeTruthy()
+    expect(grid.querySelector('[data-tier="team"]')).toBeTruthy()
+  })
+
+  it('renders the Most Popular badge only on the Pro card', async () => {
+    mockTier = 'hobby'
+    mockHappyBilling()
+    render(<BillingPage />)
+    await waitForLoaded()
+    const badges = screen.getAllByTestId('tier-most-popular-badge')
+    expect(badges.length).toBe(1)
+    // The badge lives inside the Pro card.
+    const proCard = screen.getByTestId('tier-card-pro')
+    expect(proCard.contains(badges[0])).toBe(true)
+    // No badge on the other cards.
+    expect(screen.getByTestId('tier-card-hobby').querySelector('[data-testid="tier-most-popular-badge"]')).toBeNull()
+    expect(screen.getByTestId('tier-card-free').querySelector('[data-testid="tier-most-popular-badge"]')).toBeNull()
+    expect(screen.getByTestId('tier-card-team').querySelector('[data-testid="tier-most-popular-badge"]')).toBeNull()
+  })
+
+  it('marks the Pro card with data-highlight="true" (raised + thicker border)', async () => {
+    mockTier = 'hobby'
+    mockHappyBilling()
+    render(<BillingPage />)
+    await waitForLoaded()
+    expect(screen.getByTestId('tier-card-pro').getAttribute('data-highlight')).toBe('true')
+    expect(screen.getByTestId('tier-card-hobby').getAttribute('data-highlight')).toBe('false')
+    expect(screen.getByTestId('tier-card-free').getAttribute('data-highlight')).toBe('false')
+    expect(screen.getByTestId('tier-card-team').getAttribute('data-highlight')).toBe('false')
+  })
+
+  it('renders "Your plan" pill on the current tier (Hobby user)', async () => {
+    mockTier = 'hobby'
+    mockHappyBilling()
+    render(<BillingPage />)
+    await waitForLoaded()
+    expect(screen.getByTestId('tier-card-hobby').getAttribute('data-current')).toBe('true')
+    expect(screen.getByTestId('tier-your-plan-hobby')).toBeTruthy()
+    // No upgrade CTA inside the current tier card.
+    expect(screen.getByTestId('tier-card-hobby').querySelector('[data-testid="tier-cta-hobby"]')).toBeNull()
+  })
+
+  it('renders "Your plan" pill on the current tier (Pro user)', async () => {
+    mockTier = 'pro'
+    mockHappyBilling()
+    render(<BillingPage />)
+    await waitForLoaded()
+    expect(screen.getByTestId('tier-card-pro').getAttribute('data-current')).toBe('true')
+    expect(screen.getByTestId('tier-your-plan-pro')).toBeTruthy()
+    // The variant UpgradeButton for Pro doesn't render on the Pro card —
+    // its slot is replaced by the "Your plan" pill.
+    expect(screen.getByTestId('tier-card-pro').querySelector('[data-testid="upgrade-button"]')).toBeNull()
+  })
+
+  it('de-emphasises the Team card price (uses --text-dim, not --text)', async () => {
+    mockTier = 'hobby'
+    mockHappyBilling()
+    render(<BillingPage />)
+    await waitForLoaded()
+    const teamPrice = screen.getByTestId('tier-price-team')
+    const headlineSpan = teamPrice.querySelector('span')!
+    // The Team anchor uses a dimmed color so the headline doesn't compete
+    // with Pro's accent.
+    expect(headlineSpan.getAttribute('style')?.toLowerCase()).toContain('--text-dim')
+  })
+
+  it('Team card CTA says "Contact sales", not "Upgrade"', async () => {
+    mockTier = 'pro'
+    mockHappyBilling()
+    render(<BillingPage />)
+    await waitForLoaded()
+    const teamCta = screen.getByTestId('tier-cta-team') as HTMLButtonElement
+    expect(teamCta.textContent?.toLowerCase()).toContain('contact sales')
+  })
+})
+
+// ─── Annual is the default frequency ────────────────────────────────────
+describe('BillingPage — Annual is the default frequency', () => {
+  it('renders Annual selected on first mount (no stored value)', async () => {
+    mockTier = 'hobby'
+    mockHappyBilling()
+    render(<BillingPage />)
+    await waitForLoaded()
+    expect(screen.getByTestId('frequency-yearly').getAttribute('aria-checked')).toBe('true')
+    expect(screen.getByTestId('frequency-monthly').getAttribute('aria-checked')).toBe('false')
+  })
+
+  it('rehydrates monthly when the user explicitly stored monthly previously', async () => {
+    mockTier = 'hobby'
+    mockHappyBilling()
+    window.localStorage.setItem('instant.billing.plan_frequency', 'monthly')
+    render(<BillingPage />)
+    await waitForLoaded()
+    expect(screen.getByTestId('frequency-monthly').getAttribute('aria-checked')).toBe('true')
+    expect(screen.getByTestId('frequency-yearly').getAttribute('aria-checked')).toBe('false')
+  })
+
+  it('persists the new selection back to localStorage', async () => {
+    mockTier = 'hobby'
+    mockHappyBilling()
+    render(<BillingPage />)
+    await waitForLoaded()
+    // Annual is already default — flip to monthly + back.
+    fireEvent.click(screen.getByTestId('frequency-monthly'))
+    expect(window.localStorage.getItem('instant.billing.plan_frequency')).toBe('monthly')
+    fireEvent.click(screen.getByTestId('frequency-yearly'))
+    expect(window.localStorage.getItem('instant.billing.plan_frequency')).toBe('yearly')
+  })
+
+  it('shows the "2 months free" copy inside the Annual toggle position', async () => {
+    mockTier = 'hobby'
+    mockHappyBilling()
+    render(<BillingPage />)
+    await waitForLoaded()
+    const twoMonthsFree = screen.getByTestId('frequency-2-months-free')
+    expect(twoMonthsFree.textContent?.toLowerCase()).toContain('2 months free')
+    // It must live inside the Annual button (the toggle position),
+    // not as standalone marketing copy elsewhere on the page.
+    const yearlyBtn = screen.getByTestId('frequency-yearly')
+    expect(yearlyBtn.contains(twoMonthsFree)).toBe(true)
+  })
+})
+
+// ─── Annual mode: monthly-equivalent + savings ───────────────────────────
+describe('BillingPage — Annual mode price display', () => {
+  it('shows the monthly-equivalent on the Hobby tier when Annual is active', async () => {
+    mockTier = 'free'
+    mockHappyBilling()
+    render(<BillingPage />)
+    await waitForLoaded()
+    const hobbyPrice = screen.getByTestId('tier-price-hobby')
+    expect(hobbyPrice.textContent).toContain('$7.50')
+    // Subtext makes clear this is the monthly equivalent of the yearly
+    // bill ("$7.50/mo, billed yearly").
+    expect(hobbyPrice.textContent?.toLowerCase()).toContain('billed yearly')
+  })
+
+  it('shows the monthly-equivalent on the Pro tier when Annual is active', async () => {
+    mockTier = 'hobby'
+    mockHappyBilling()
+    render(<BillingPage />)
+    await waitForLoaded()
+    const proPrice = screen.getByTestId('tier-price-pro')
+    expect(proPrice.textContent).toContain('$40.83')
+    expect(proPrice.textContent?.toLowerCase()).toContain('billed yearly')
+  })
+
+  it('shows the absolute-dollar savings subtext under Annual prices', async () => {
+    mockTier = 'hobby'
+    mockHappyBilling()
+    render(<BillingPage />)
+    await waitForLoaded()
+    // Hobby: $90/yr · save $18  ;  Pro: $490/yr · save $98
+    expect(screen.getByTestId('tier-savings-hobby').textContent).toMatch(/\$90\/yr.*save \$18/)
+    expect(screen.getByTestId('tier-savings-pro').textContent).toMatch(/\$490\/yr.*save \$98/)
+  })
+
+  it('switches to the headline monthly price + "/mo" when the user picks Monthly', async () => {
+    mockTier = 'hobby'
+    mockHappyBilling()
+    render(<BillingPage />)
+    await waitForLoaded()
+    fireEvent.click(screen.getByTestId('frequency-monthly'))
+    const proPrice = screen.getByTestId('tier-price-pro')
+    expect(proPrice.textContent).toContain('$49')
+    expect(proPrice.textContent).toContain('/mo')
+    // No "billed yearly" subtext on monthly.
+    expect(proPrice.textContent?.toLowerCase()).not.toContain('billed yearly')
+    // No savings line on monthly.
+    expect(screen.queryByTestId('tier-savings-pro')).toBeNull()
+  })
+
+  it('Free tier never shows a savings line (no yearly variant)', async () => {
+    mockTier = 'hobby'
+    mockHappyBilling()
+    render(<BillingPage />)
+    await waitForLoaded()
+    expect(screen.queryByTestId('tier-savings-free')).toBeNull()
+    // And the Free price block stays "$0 forever" regardless of toggle.
+    const freePrice = screen.getByTestId('tier-price-free')
+    expect(freePrice.textContent?.toLowerCase()).toContain('$0')
+    expect(freePrice.textContent?.toLowerCase()).toContain('forever')
+  })
+})
+
+// ─── CTA copy (price-anchored, tier-aware) ──────────────────────────────
+describe('BillingPage — CTA copy', () => {
+  it('Hobby user sees "Get Pro — $40.83/mo" on the Pro card in Annual mode', async () => {
+    mockTier = 'hobby'
+    mockHappyBilling()
+    render(<BillingPage />)
+    await waitForLoaded()
+    const proCta = screen.getByTestId('upgrade-button')
+    expect(proCta.textContent).toContain('Get Pro')
+    expect(proCta.textContent).toContain('$40.83/mo')
+  })
+
+  it('Hobby user sees "Get Pro — $49/mo" on the Pro card in Monthly mode', async () => {
+    mockTier = 'hobby'
+    mockHappyBilling()
+    render(<BillingPage />)
+    await waitForLoaded()
+    fireEvent.click(screen.getByTestId('frequency-monthly'))
+    const proCta = screen.getByTestId('upgrade-button')
+    expect(proCta.textContent).toContain('Get Pro')
+    expect(proCta.textContent).toContain('$49/mo')
+  })
+
+  it('Free user sees "Start Hobby — $7.50/mo" on the Hobby card in Annual mode', async () => {
+    mockTier = 'free'
+    mockHappyBilling()
+    render(<BillingPage />)
+    await waitForLoaded()
+    const hobbyCta = screen.getByTestId('tier-cta-hobby') as HTMLButtonElement
+    expect(hobbyCta.textContent).toContain('Start Hobby')
+    expect(hobbyCta.textContent).toContain('$7.50/mo')
+  })
+
+  it('Pro user sees the "Upgrade to Team"/Contact sales button on the Team card', async () => {
+    mockTier = 'pro'
+    mockHappyBilling()
+    render(<BillingPage />)
+    await waitForLoaded()
+    const teamCta = screen.getByTestId('tier-cta-team') as HTMLButtonElement
+    expect(teamCta.textContent?.toLowerCase()).toContain('contact sales')
+  })
+
+  it('Team user sees no CTAs at all (highest plan)', async () => {
+    mockTier = 'team'
+    mockHappyBilling()
+    render(<BillingPage />)
+    await waitForLoaded()
+    // The Team card shows "Your plan" pill, every other card has a CTA
+    // — but Team users have nothing to upgrade to (Free is a downgrade,
+    // not a self-serve action). Free's CTA reads "Stay on Free" — a
+    // soft acknowledgement rather than an action.
+    expect(screen.getByTestId('tier-your-plan-team')).toBeTruthy()
+    // Hobby + Pro show "Start"/"Get" CTAs anyway — clicking them does
+    // nothing actionable in practice for a Team user (they'd be
+    // downgrading) but we don't block render. The point: no Upgrade CTA.
+    expect(screen.queryByRole('button', { name: /upgrade to team/i })).toBeNull()
+  })
+})
+
+// ─── handleSelectTier ────────────────────────────────────────────────────
+describe('BillingPage — handleSelectTier (upgrade flow)', () => {
+  it('calls api.createCheckout("pro", "yearly") when Hobby user clicks Get Pro (Annual default)', async () => {
     mockTier = 'hobby'
     mockHappyBilling()
     ;(api.createCheckout as any).mockResolvedValue({
@@ -345,23 +577,23 @@ describe('BillingPage — handleChangePlan (upgrade flow)', () => {
     })
     render(<BillingPage />)
     await waitForLoaded()
-    fireEvent.click(screen.getByRole('button', { name: /upgrade to pro/i }))
+    fireEvent.click(screen.getByTestId('upgrade-button'))
     await waitFor(() => expect(api.createCheckout).toHaveBeenCalledTimes(1))
-    // P2: BillingPage passes plan_frequency through to api.createCheckout.
-    // Monthly is the default unless the toggle was switched.
-    expect(api.createCheckout).toHaveBeenCalledWith('pro', 'monthly')
+    // Annual is the new default — checkout fires with "yearly".
+    expect(api.createCheckout).toHaveBeenCalledWith('pro', 'yearly')
   })
 
-  it('calls api.createCheckout("team", "monthly") when user is on pro', async () => {
-    mockTier = 'pro'
+  it('calls api.createCheckout("pro", "monthly") when the user flips to Monthly first', async () => {
+    mockTier = 'hobby'
     mockHappyBilling()
     ;(api.createCheckout as any).mockResolvedValue({
-      ok: true, short_url: 'https://rzp.io/i/xyz',
+      ok: true, short_url: 'https://rzp.io/i/m',
     })
     render(<BillingPage />)
     await waitForLoaded()
-    fireEvent.click(screen.getByRole('button', { name: /upgrade to team/i }))
-    await waitFor(() => expect(api.createCheckout).toHaveBeenCalledWith('team', 'monthly'))
+    fireEvent.click(screen.getByTestId('frequency-monthly'))
+    fireEvent.click(screen.getByTestId('upgrade-button'))
+    await waitFor(() => expect(api.createCheckout).toHaveBeenCalledWith('pro', 'monthly'))
   })
 
   it('redirects via window.location.href when short_url is returned', async () => {
@@ -372,7 +604,7 @@ describe('BillingPage — handleChangePlan (upgrade flow)', () => {
     })
     render(<BillingPage />)
     await waitForLoaded()
-    fireEvent.click(screen.getByRole('button', { name: /upgrade to pro/i }))
+    fireEvent.click(screen.getByTestId('upgrade-button'))
     await waitFor(() => expect(hrefSetTo).toBe('https://rzp.io/i/abc'))
   })
 
@@ -382,7 +614,7 @@ describe('BillingPage — handleChangePlan (upgrade flow)', () => {
     ;(api.createCheckout as any).mockResolvedValue({ ok: true, short_url: '' })
     const { container } = render(<BillingPage />)
     await waitForLoaded()
-    fireEvent.click(screen.getByRole('button', { name: /upgrade to pro/i }))
+    fireEvent.click(screen.getByTestId('upgrade-button'))
     await waitFor(() => expect(container.textContent).toContain('checkout returned no url'))
     expect(hrefSetTo).toBeNull()
   })
@@ -393,7 +625,7 @@ describe('BillingPage — handleChangePlan (upgrade flow)', () => {
     ;(api.createCheckout as any).mockRejectedValue(new Error('razorpay unreachable'))
     const { container } = render(<BillingPage />)
     await waitForLoaded()
-    fireEvent.click(screen.getByRole('button', { name: /upgrade to pro/i }))
+    fireEvent.click(screen.getByTestId('upgrade-button'))
     await waitFor(() => expect(container.textContent).toContain('razorpay unreachable'))
     expect(hrefSetTo).toBeNull()
   })
@@ -404,11 +636,11 @@ describe('BillingPage — handleChangePlan (upgrade flow)', () => {
     ;(api.createCheckout as any).mockRejectedValue({ /* no message */ })
     const { container } = render(<BillingPage />)
     await waitForLoaded()
-    fireEvent.click(screen.getByRole('button', { name: /upgrade to pro/i }))
+    fireEvent.click(screen.getByTestId('upgrade-button'))
     await waitFor(() => expect(container.textContent).toContain('checkout failed'))
   })
 
-  it('disables the Upgrade button while checkout is in flight', async () => {
+  it('disables the Upgrade CTA while checkout is in flight', async () => {
     mockTier = 'hobby'
     mockHappyBilling()
     let resolveCheckout: (v: any) => void = () => {}
@@ -417,7 +649,7 @@ describe('BillingPage — handleChangePlan (upgrade flow)', () => {
     )
     render(<BillingPage />)
     await waitForLoaded()
-    const btn = screen.getByRole('button', { name: /upgrade to pro/i }) as HTMLButtonElement
+    const btn = screen.getByTestId('upgrade-button') as HTMLButtonElement
     fireEvent.click(btn)
     await waitFor(() => expect(btn.disabled).toBe(true))
     resolveCheckout({ ok: true, short_url: 'https://rzp.io/i/abc' })
@@ -432,42 +664,43 @@ describe('BillingPage — handleChangePlan (upgrade flow)', () => {
       .mockResolvedValueOnce({ ok: true, short_url: 'https://rzp.io/i/ok' })
     const { container } = render(<BillingPage />)
     await waitForLoaded()
-    fireEvent.click(screen.getByRole('button', { name: /upgrade to pro/i }))
+    fireEvent.click(screen.getByTestId('upgrade-button'))
     await waitFor(() => expect(container.textContent).toContain('first fail'))
-    fireEvent.click(screen.getByRole('button', { name: /upgrade to pro/i }))
+    fireEvent.click(screen.getByTestId('upgrade-button'))
     await waitFor(() => expect(hrefSetTo).toBe('https://rzp.io/i/ok'))
-    // Error message cleared once redirect fires
     expect(container.textContent).not.toContain('first fail')
   })
 
-  it('does nothing when the team-tier user (no nextTier) clicks the disabled button', async () => {
-    // On team-tier the button label is "Change plan" and disabled — but
-    // double-check the guard inside handleChangePlan also short-circuits.
+  it('does not call createCheckout when a team-tier user clicks the Team "Your plan" pill', async () => {
     mockTier = 'team'
     mockHappyBilling()
     render(<BillingPage />)
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: /change plan/i })).toBeTruthy()
-    })
-    const btn = screen.getByRole('button', { name: /change plan/i }) as HTMLButtonElement
-    expect(btn.disabled).toBe(true)
-    // Programmatic click anyway — the early return should hold.
-    fireEvent.click(btn)
-    // No createCheckout call.
+    await waitForLoaded()
+    // No CTA on the current tier — the pill isn't a button.
+    expect(screen.queryByRole('button', { name: /upgrade to team/i })).toBeNull()
     expect(api.createCheckout).not.toHaveBeenCalled()
+  })
+
+  it('routes Team-card clicks to the sales mailto (Pro user clicking Contact sales)', async () => {
+    mockTier = 'pro'
+    mockHappyBilling()
+    render(<BillingPage />)
+    await waitForLoaded()
+    fireEvent.click(screen.getByTestId('tier-cta-team'))
+    // No createCheckout call — team isn't on Razorpay yet.
+    expect(api.createCheckout).not.toHaveBeenCalled()
+    // The page sets window.location.href to a sales mailto.
+    expect(hrefSetTo?.toLowerCase()).toContain('mailto:sales@instanode.dev')
   })
 })
 
 // ─── No self-serve cancel ─────────────────────────────────────────────────
-// Cancellation must be support-mediated. The page must not call
-// api.cancelSubscription on any click — there is no in-product path.
 describe('BillingPage — cancellation is support-only', () => {
   it('never calls api.cancelSubscription', async () => {
     mockTier = 'pro'
     mockHappyBilling()
     render(<BillingPage />)
     await waitForLoaded()
-    // Click every button on the page; none of them should fire cancelSubscription.
     screen.queryAllByRole('button').forEach((b) => fireEvent.click(b))
     expect(api.cancelSubscription).not.toHaveBeenCalled()
   })
@@ -484,7 +717,7 @@ describe('BillingPage — cancellation is support-only', () => {
 
 // ─── userEvent end-to-end smoke (real keyboard/pointer) ─────────────────
 describe('BillingPage — userEvent integration', () => {
-  it('a real click on Upgrade kicks off createCheckout', async () => {
+  it('a real click on the Pro CTA kicks off createCheckout with annual', async () => {
     mockTier = 'hobby'
     mockHappyBilling()
     ;(api.createCheckout as any).mockResolvedValue({
@@ -493,19 +726,13 @@ describe('BillingPage — userEvent integration', () => {
     const user = userEvent.setup()
     render(<BillingPage />)
     await waitForLoaded()
-    await user.click(screen.getByRole('button', { name: /upgrade to pro/i }))
-    await waitFor(() => expect(api.createCheckout).toHaveBeenCalledWith('pro', 'monthly'))
+    await user.click(screen.getByTestId('upgrade-button'))
+    await waitFor(() => expect(api.createCheckout).toHaveBeenCalledWith('pro', 'yearly'))
     await waitFor(() => expect(hrefSetTo).toBe('https://rzp.io/i/ue'))
   })
 })
 
 // ─── Usage panel — server-side cached aggregate (§10.20) ────────────────
-// The Usage panel reads /api/v1/billing/usage (cached 30s in Redis with
-// singleflight on the server). These tests pin the contract:
-//   (a) values reflect the server response, not a client-side aggregate,
-//   (b) BillingPage does NOT call listResources() for usage data,
-//   (c) the `as_of` footnote renders so the eventual-consistency tradeoff
-//       is visible to users.
 describe('BillingPage — Usage panel reflects fetchBillingUsage() (§10.20)', () => {
   it('renders postgres bytes (100 MB / 1 GB) from the server response', async () => {
     mockTier = 'hobby'
@@ -529,7 +756,6 @@ describe('BillingPage — Usage panel reflects fetchBillingUsage() (§10.20)', (
     await waitForLoaded()
     await waitFor(() => {
       const rows = container.querySelectorAll('.usage-row')
-      // 6 usage rows: postgres, redis, mongo, deployments, webhooks, team seats.
       expect(rows.length).toBe(6)
       const resourceRowKeys = ['postgres', 'redis', 'mongo', 'deployments', 'webhooks']
       resourceRowKeys.forEach((key) => {
@@ -549,23 +775,16 @@ describe('BillingPage — Usage panel reflects fetchBillingUsage() (§10.20)', (
     expect(container.textContent).not.toMatch(/\b47\b/)
   })
 
-  // §10.20 / §14: critical contract — the page must NOT round-trip to
-  // /resources for usage data anymore. Catches accidental reintroductions
-  // of the client-side aggregate.
   it('does not call listResources() for usage data', async () => {
     mockTier = 'hobby'
     mockHappyBilling()
     render(<BillingPage />)
     await waitForLoaded()
-    // Wait a tick to make sure any in-flight effect has a chance to fire.
     await new Promise((r) => setTimeout(r, 50))
     expect((api.listResources as any).mock?.calls?.length ?? 0).toBe(0)
-    // The new cached aggregate, on the other hand, must be called exactly once.
     expect((api.fetchBillingUsage as any).mock?.calls?.length ?? 0).toBe(1)
   })
 
-  // §10.20 / §13: the eventual-consistency footnote must render so users
-  // can see when the snapshot was computed.
   it('renders the "as of Ns ago" footnote when the cached payload arrives', async () => {
     mockTier = 'hobby'
     mockHappyBilling()
@@ -594,7 +813,6 @@ describe('BillingPage — §10.8 leak fixes', () => {
     mockHappyBilling()
     const { container } = render(<BillingPage />)
     await waitForLoaded()
-    // FIXTURE_INVOICES has three "paid" invoices — none are "running".
     expect(container.textContent?.toLowerCase()).toContain('paid')
     expect(container.textContent?.toLowerCase()).not.toContain('running')
   })
@@ -610,290 +828,52 @@ describe('BillingPage — §10.8 leak fixes', () => {
   })
 })
 
-// ─── P2: monthly/yearly billing toggle ──────────────────────────────────
-describe('BillingPage — monthly/yearly toggle', () => {
-  // The toggle persists in localStorage. Clear between tests so state
-  // from one case doesn't bleed into the next.
-  beforeEach(() => {
-    try { window.localStorage.removeItem('instant.billing.plan_frequency') } catch {}
-  })
-
-  it('renders the toggle with monthly selected by default', async () => {
+// ─── Promo UI is removed — Razorpay handles codes ───────────────────────
+describe('BillingPage — promo codes flow through Razorpay (no in-product input)', () => {
+  it('does NOT render the promo toggle/input/applied chip anywhere on the page', async () => {
     mockTier = 'hobby'
     mockHappyBilling()
     render(<BillingPage />)
     await waitForLoaded()
-    const toggle = screen.getByTestId('billing-frequency-toggle')
-    expect(toggle).toBeTruthy()
-    const monthly = screen.getByTestId('frequency-monthly')
-    const yearly = screen.getByTestId('frequency-yearly')
-    expect(monthly.getAttribute('aria-checked')).toBe('true')
-    expect(yearly.getAttribute('aria-checked')).toBe('false')
-  })
-
-  it('renders the save-$X/yr badge for the nextTier when the toggle is shown', async () => {
-    mockTier = 'hobby'
-    mockHappyBilling()
-    render(<BillingPage />)
-    await waitForLoaded()
-    const badge = screen.getByTestId('frequency-save-badge')
-    expect(badge.textContent).toMatch(/save \$98\/yr on pro/i)
-  })
-
-  it('passes plan_frequency=yearly to createCheckout when yearly is selected', async () => {
-    mockTier = 'hobby'
-    mockHappyBilling()
-    ;(api.createCheckout as any).mockResolvedValue({
-      ok: true, short_url: 'https://rzp.io/i/yr',
-    })
-    render(<BillingPage />)
-    await waitForLoaded()
-    fireEvent.click(screen.getByTestId('frequency-yearly'))
-    fireEvent.click(screen.getByRole('button', { name: /upgrade to pro/i }))
-    await waitFor(() => expect(api.createCheckout).toHaveBeenCalledWith('pro', 'yearly'))
-  })
-
-  it('persists the selected frequency in localStorage so it sticks across refreshes', async () => {
-    mockTier = 'hobby'
-    mockHappyBilling()
-    render(<BillingPage />)
-    await waitForLoaded()
-    fireEvent.click(screen.getByTestId('frequency-yearly'))
-    expect(window.localStorage.getItem('instant.billing.plan_frequency')).toBe('yearly')
-    fireEvent.click(screen.getByTestId('frequency-monthly'))
-    expect(window.localStorage.getItem('instant.billing.plan_frequency')).toBe('monthly')
-  })
-
-  it('rehydrates yearly from localStorage on subsequent mounts', async () => {
-    mockTier = 'hobby'
-    mockHappyBilling()
-    window.localStorage.setItem('instant.billing.plan_frequency', 'yearly')
-    render(<BillingPage />)
-    await waitForLoaded()
-    const yearly = screen.getByTestId('frequency-yearly')
-    expect(yearly.getAttribute('aria-checked')).toBe('true')
-  })
-
-  it('shows the effective per-month + annual total when yearly is active', async () => {
-    mockTier = 'hobby'
-    mockHappyBilling()
-    window.localStorage.setItem('instant.billing.plan_frequency', 'yearly')
-    render(<BillingPage />)
-    await waitForLoaded()
-    const eff = screen.getByTestId('frequency-effective-price')
-    expect(eff.textContent).toMatch(/\$490\/yr/)
-    expect(eff.textContent).toMatch(/\$40\.83\/mo/)
-  })
-
-  it('renames the Upgrade button to include "(yearly)" when yearly is selected', async () => {
-    mockTier = 'hobby'
-    mockHappyBilling()
-    window.localStorage.setItem('instant.billing.plan_frequency', 'yearly')
-    render(<BillingPage />)
-    await waitForLoaded()
-    const btn = screen.getByTestId('upgrade-button')
-    expect(btn.textContent?.toLowerCase()).toContain('yearly')
-  })
-
-  it('does not render the toggle when there is no nextTier (team-tier user)', async () => {
-    mockTier = 'team'
-    mockHappyBilling()
-    render(<BillingPage />)
-    // Team users have no "Upgrade to" button (plan.nextTier is undefined),
-    // so waitForLoaded() can't find one — wait for the Change plan button
-    // instead, which is rendered in the same place.
-    await waitFor(() => {
-      expect(screen.queryByRole('button', { name: /change plan/i })).toBeTruthy()
-    })
-    expect(screen.queryByTestId('billing-frequency-toggle')).toBeNull()
-  })
-})
-
-describe('BillingPage — discount code on checkout flow (P3)', () => {
-  it('renders the "Have a discount code?" toggle when a next-tier exists', async () => {
-    mockTier = 'hobby'
-    mockHappyBilling()
-    render(<BillingPage />)
-    await waitForLoaded()
-    expect(screen.getByTestId('promo-toggle')).toBeTruthy()
-    // Input is collapsed until the toggle is clicked.
-    expect(screen.queryByTestId('promo-input')).toBeNull()
-  })
-
-  it('does NOT render the toggle for team-tier (no upgrade target)', async () => {
-    mockTier = 'team'
-    mockHappyBilling()
-    render(<BillingPage />)
-    // Team tier renders the disabled "Change plan" button — wait for it
-    // before asserting the toggle's absence so we know the page has
-    // settled past its loading skeleton.
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: /change plan/i })).toBeTruthy()
-    })
+    // All P3 testids must be gone.
     expect(screen.queryByTestId('promo-toggle')).toBeNull()
-  })
-
-  it('expands the input when the toggle is clicked', async () => {
-    mockTier = 'hobby'
-    mockHappyBilling()
-    render(<BillingPage />)
-    await waitForLoaded()
-    fireEvent.click(screen.getByTestId('promo-toggle'))
-    expect(screen.getByTestId('promo-input')).toBeTruthy()
-    expect(screen.getByTestId('promo-apply')).toBeTruthy()
-  })
-
-  it('shows a green "applied" state when validatePromotion returns ok', async () => {
-    mockTier = 'hobby'
-    mockHappyBilling()
-    ;(api.validatePromotion as any).mockResolvedValue({
-      ok: true,
-      promotion: {
-        code: 'TWITTER15',
-        discount: { kind: 'percent_off', value: 15, applies_to: 3, unit: 'months' },
-        valid_until: '2026-09-01T00:00:00Z',
-      },
-    })
-    render(<BillingPage />)
-    await waitForLoaded()
-    fireEvent.click(screen.getByTestId('promo-toggle'))
-    fireEvent.change(screen.getByTestId('promo-input'), { target: { value: 'TWITTER15' } })
-    fireEvent.click(screen.getByTestId('promo-apply'))
-    await waitFor(() => {
-      expect(screen.getByTestId('promo-applied')).toBeTruthy()
-    })
-    // Green chip text mentions the code and the human-readable discount.
-    const text = screen.getByTestId('promo-applied-text').textContent ?? ''
-    expect(text).toContain('TWITTER15')
-    expect(text.toLowerCase()).toContain('15% off')
-    expect(text.toLowerCase()).toContain('first 3 months')
-  })
-
-  it('passes (code, plan) to validatePromotion (upper-cased + trimmed by api helper)', async () => {
-    mockTier = 'hobby'
-    mockHappyBilling()
-    ;(api.validatePromotion as any).mockResolvedValue({
-      ok: true,
-      promotion: {
-        code: 'LAUNCH50',
-        discount: { kind: 'percent_off', value: 50, applies_to: 1, unit: 'months' },
-        valid_until: '2026-09-01T00:00:00Z',
-      },
-    })
-    render(<BillingPage />)
-    await waitForLoaded()
-    fireEvent.click(screen.getByTestId('promo-toggle'))
-    fireEvent.change(screen.getByTestId('promo-input'), { target: { value: 'LAUNCH50' } })
-    fireEvent.click(screen.getByTestId('promo-apply'))
-    await waitFor(() => expect(api.validatePromotion).toHaveBeenCalledTimes(1))
-    // Plan is the next-tier target ("pro" when user is on hobby).
-    expect(api.validatePromotion).toHaveBeenCalledWith('LAUNCH50', 'pro')
-  })
-
-  it('shows a red error state when validatePromotion rejects with an api message', async () => {
-    mockTier = 'hobby'
-    mockHappyBilling()
-    ;(api.validatePromotion as any).mockRejectedValue(
-      Object.assign(new Error('Code not found.'), { status: 404 }),
-    )
-    render(<BillingPage />)
-    await waitForLoaded()
-    fireEvent.click(screen.getByTestId('promo-toggle'))
-    fireEvent.change(screen.getByTestId('promo-input'), { target: { value: 'NOPE' } })
-    fireEvent.click(screen.getByTestId('promo-apply'))
-    await waitFor(() => {
-      const err = screen.getByTestId('promo-error')
-      expect(err.textContent).toContain('Code not found.')
-    })
-    // Must NOT enter the applied state on failure.
+    expect(screen.queryByTestId('promo-input')).toBeNull()
+    expect(screen.queryByTestId('promo-input-row')).toBeNull()
+    expect(screen.queryByTestId('promo-apply')).toBeNull()
     expect(screen.queryByTestId('promo-applied')).toBeNull()
+    expect(screen.queryByTestId('promo-clear')).toBeNull()
+    expect(screen.queryByTestId('promo-error')).toBeNull()
   })
 
-  it('shows a friendly network-error message when validatePromotion has no status', async () => {
+  it('never calls validatePromotion (no dashboard-side code validation)', async () => {
     mockTier = 'hobby'
     mockHappyBilling()
-    // A real network failure surfaces as TypeError("Failed to fetch") with
-    // no `status`. The handler should drop into the friendly fallback
-    // rather than surfacing the bare TypeError message.
-    const netErr = new TypeError('Failed to fetch')
-    ;(api.validatePromotion as any).mockRejectedValue(netErr)
     render(<BillingPage />)
     await waitForLoaded()
-    fireEvent.click(screen.getByTestId('promo-toggle'))
-    fireEvent.change(screen.getByTestId('promo-input'), { target: { value: 'TWITTER15' } })
-    fireEvent.click(screen.getByTestId('promo-apply'))
-    await waitFor(() => {
-      const err = screen.getByTestId('promo-error')
-      expect(err.textContent?.toLowerCase()).toContain("couldn't reach the server")
-    })
+    await new Promise((r) => setTimeout(r, 50))
+    expect((api.validatePromotion as any).mock?.calls?.length ?? 0).toBe(0)
   })
 
-  it('passes promotion_code to createCheckout once a code is applied', async () => {
-    mockTier = 'hobby'
-    mockHappyBilling()
-    ;(api.validatePromotion as any).mockResolvedValue({
-      ok: true,
-      promotion: {
-        code: 'TWITTER15',
-        discount: { kind: 'percent_off', value: 15, applies_to: 3, unit: 'months' },
-        valid_until: '2026-09-01T00:00:00Z',
-      },
-    })
-    ;(api.createCheckout as any).mockResolvedValue({
-      ok: true, short_url: 'https://rzp.io/i/p3',
-    })
-    render(<BillingPage />)
-    await waitForLoaded()
-    fireEvent.click(screen.getByTestId('promo-toggle'))
-    fireEvent.change(screen.getByTestId('promo-input'), { target: { value: 'TWITTER15' } })
-    fireEvent.click(screen.getByTestId('promo-apply'))
-    await waitFor(() => expect(screen.queryByTestId('promo-applied')).toBeTruthy())
-    fireEvent.click(screen.getByRole('button', { name: /upgrade to pro/i }))
-    await waitFor(() => expect(api.createCheckout).toHaveBeenCalledTimes(1))
-    // Merged signature: (plan, plan_frequency, opts). Frequency defaults
-    // to 'monthly' (P2 toggle is not touched in this test).
-    expect(api.createCheckout).toHaveBeenCalledWith('pro', 'monthly', { promotion_code: 'TWITTER15' })
-  })
-
-  it('does NOT pass promotion_code to createCheckout when no code is applied', async () => {
+  it('createCheckout is called with exactly (plan, frequency) — no opts arg', async () => {
     mockTier = 'hobby'
     mockHappyBilling()
     ;(api.createCheckout as any).mockResolvedValue({
-      ok: true, short_url: 'https://rzp.io/i/p3-nopromo',
+      ok: true, short_url: 'https://rzp.io/i/no-promo',
     })
     render(<BillingPage />)
     await waitForLoaded()
-    // Click upgrade without ever touching the discount-code toggle.
-    fireEvent.click(screen.getByRole('button', { name: /upgrade to pro/i }))
+    fireEvent.click(screen.getByTestId('upgrade-button'))
     await waitFor(() => expect(api.createCheckout).toHaveBeenCalledTimes(1))
-    // Strict signature when no promo is applied — frequency defaults to
-    // 'monthly' (P2 merge). No opts third arg, so the call shape is
-    // exactly two positional args. Guards against a regression where
-    // every upgrade silently grows an empty opts object.
-    expect(api.createCheckout).toHaveBeenCalledWith('pro', 'monthly')
+    // Strict 2-arg call shape — guards against accidental empty-opts regression.
+    expect(api.createCheckout).toHaveBeenCalledWith('pro', 'yearly')
   })
 
-  it('Remove clears the applied code and lets the user enter a different one', async () => {
+  it('mentions that promo codes apply at Razorpay checkout (so users know where they go)', async () => {
     mockTier = 'hobby'
     mockHappyBilling()
-    ;(api.validatePromotion as any).mockResolvedValue({
-      ok: true,
-      promotion: {
-        code: 'COMEBACK10',
-        discount: { kind: 'percent_off', value: 10, applies_to: 1, unit: 'months' },
-        valid_until: '2026-09-01T00:00:00Z',
-      },
-    })
-    render(<BillingPage />)
+    const { container } = render(<BillingPage />)
     await waitForLoaded()
-    fireEvent.click(screen.getByTestId('promo-toggle'))
-    fireEvent.change(screen.getByTestId('promo-input'), { target: { value: 'COMEBACK10' } })
-    fireEvent.click(screen.getByTestId('promo-apply'))
-    await waitFor(() => expect(screen.queryByTestId('promo-applied')).toBeTruthy())
-    fireEvent.click(screen.getByTestId('promo-clear'))
-    // Back to the collapsed-toggle state — applied row gone, input row
-    // not auto-reopened (we don't want to surprise-focus the user).
-    expect(screen.queryByTestId('promo-applied')).toBeNull()
-    expect(screen.getByTestId('promo-toggle')).toBeTruthy()
+    expect(container.textContent?.toLowerCase()).toContain('promo codes apply at checkout')
+    expect(container.textContent?.toLowerCase()).toContain('razorpay')
   })
 })
