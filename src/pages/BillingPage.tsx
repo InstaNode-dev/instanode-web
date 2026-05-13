@@ -1,24 +1,36 @@
 import { useEffect, useState } from 'react'
-import { ROBanner, ContractBanner, TierPill } from '../components/Common'
+import { ROBanner, TierPill } from '../components/Common'
 import { UpgradeButton } from '../components/UpgradeButton'
+import { PricingGrid } from '../components/PricingGrid'
+import type { TierKey } from '../components/TierCard'
 import * as api from '../api'
-import type { BillingDetails, BillingUsage, Invoice, PlanFrequency, Promotion } from '../api'
+import type { BillingDetails, BillingUsage, Invoice, PlanFrequency } from '../api'
 import { useDashboardCtx } from '../hooks/useDashboardCtx'
 
-// P2: monthly/yearly preference is persisted in localStorage so the
-// toggle "sticks" across refreshes. Wrapped in a try/catch so SSR
-// (no window) and Safari-private-mode (writes throw QuotaExceeded)
-// stay non-fatal — the default 'monthly' is the safe fallback.
+// 2026-05-13 billing redesign: frequency now defaults to **annual**.
+//
+// Why default annual:
+//   Research (Athenic, InfluenceFlow 2026) shows defaulting to annual lifts
+//   annual adoption +19–35% and "2 months free" framing drove a +342%
+//   annual-signups lift in one cited test. Existing monthly subscribers
+//   keep monthly mid-cycle (they're already enrolled — the toggle only
+//   affects new checkout sessions).
+//
+// Persistence is preserved: a user who explicitly switches back to monthly
+// will see monthly on subsequent loads. The default flip only matters on
+// first-time render with no stored preference.
 const FREQ_STORAGE_KEY = 'instant.billing.plan_frequency'
 
 function readStoredFrequency(): PlanFrequency {
   try {
-    if (typeof window === 'undefined') return 'monthly'
+    if (typeof window === 'undefined') return 'yearly'
     const v = window.localStorage.getItem(FREQ_STORAGE_KEY)
+    if (v === 'monthly') return 'monthly'
     if (v === 'yearly') return 'yearly'
-    return 'monthly'
+    // No stored value → default Annual (the new default per the redesign).
+    return 'yearly'
   } catch {
-    return 'monthly'
+    return 'yearly'
   }
 }
 
@@ -32,23 +44,11 @@ function writeStoredFrequency(f: PlanFrequency): void {
   }
 }
 
-// P2: yearly pricing (annual amount → effective per-month, savings vs 12 x monthly).
-// All values in USD. Source of truth is api/plans.yaml (price_monthly_cents on the
-// {tier}_yearly entry). Keep in sync if those numbers change.
-const YEARLY_PRICING: Record<string, { yearlyTotal: number; effectiveMonthly: number; saveVsMonthly: number }> = {
-  // hobby_yearly = $90/yr → ~$7.50/mo, save $18/yr vs $9 x 12 = $108.
-  hobby: { yearlyTotal: 90, effectiveMonthly: 7.5, saveVsMonthly: 18 },
-  // pro_yearly = $490/yr → ~$40.83/mo, save $98/yr vs $49 x 12 = $588.
-  pro:   { yearlyTotal: 490, effectiveMonthly: 40.83, saveVsMonthly: 98 },
-  // team_yearly = $1990/yr → ~$165.83/mo, save $398/yr vs $199 x 12 = $2388.
-  team:  { yearlyTotal: 1990, effectiveMonthly: 165.83, saveVsMonthly: 398 },
-}
-
-// Typed per-service limits used by the Usage panel. `Infinity` means "no
-// dashboard-side cap shown" (team-tier headroom). Postgres / Redis / MongoDB
-// values are in MB to match how UsageRow renders them; deployments / webhooks
-// / seats are integer counts. Source of truth is api/plans.yaml — keep in
-// sync if those numbers change.
+// Per-service limits used by the Usage panel. `Infinity` means "no
+// dashboard-side cap shown" (team-tier headroom). Postgres / Redis /
+// MongoDB values are in MB to match how UsageRow renders them;
+// deployments / webhooks / seats are integer counts. Source of truth
+// is api/plans.yaml — keep in sync if those numbers change.
 type PlanLimits = {
   postgres_mb: number
   redis_mb: number
@@ -58,147 +58,55 @@ type PlanLimits = {
   team_seats: number
 }
 
-const PLANS: Record<string, {
-  label: string
-  price: string
-  features: Array<{ text: string; comingSoon?: boolean }>
-  nextTier?: string
-  highlight?: boolean
-  limits: PlanLimits
-}> = {
+// LIMITS — only the per-tier numeric caps the Usage panel needs. The grid
+// renders the marketing copy from PricingGrid's own internal table, so we
+// no longer need a duplicate `features` list here.
+const LIMITS: Record<string, { label: string; limits: PlanLimits; nextTier?: TierKey }> = {
   anonymous: {
     label: 'Anonymous',
-    price: '$0',
-    features: [
-      { text: '10 MB Postgres · 2 conn · 24h TTL' },
-      { text: '5 MB Redis · 24h TTL' },
-      { text: '5 MB MongoDB · 24h TTL' },
-      { text: '100 stored webhooks' },
-      { text: '0 deployments' },
-      { text: 'no vault — claim resources first' },
-      { text: 'agent-only access · no dashboard account' },
-    ],
     nextTier: 'hobby',
-    limits: {
-      postgres_mb: 10,
-      redis_mb: 5,
-      mongodb_mb: 5,
-      deployments: 0,
-      webhooks: 100,
-      team_seats: 1,
-    },
+    limits: { postgres_mb: 10, redis_mb: 5, mongodb_mb: 5, deployments: 0, webhooks: 100, team_seats: 1 },
   },
-  // `free` shares anonymous's limits exactly — the only differences are
-  // (a) the user has claimed (team_id is set, dashboard is reachable) and
-  // (b) the user-facing label, which reads as "you have an account, you
-  // just haven't paid yet". Same 24h TTL — pay from day one.
   free: {
     label: 'Free',
-    price: '$0',
-    features: [
-      { text: '10 MB Postgres · 2 conn · 24h TTL' },
-      { text: '5 MB Redis · 24h TTL' },
-      { text: '5 MB MongoDB · 24h TTL' },
-      { text: '100 stored webhooks' },
-      { text: '0 deployments' },
-      { text: 'no vault — upgrade to Hobby to unlock' },
-      { text: 'dashboard access · upgrade to keep resources past 24h' },
-    ],
     nextTier: 'hobby',
-    limits: {
-      postgres_mb: 10,
-      redis_mb: 5,
-      mongodb_mb: 5,
-      deployments: 0,
-      webhooks: 100,
-      team_seats: 1,
-    },
+    limits: { postgres_mb: 10, redis_mb: 5, mongodb_mb: 5, deployments: 0, webhooks: 100, team_seats: 1 },
   },
   hobby: {
     label: 'Hobby',
-    price: '$9 / mo',
-    features: [
-      { text: '1 GB Postgres · 8 conn' },
-      { text: '50 MB Redis' },
-      { text: '100 MB MongoDB · 5 conn' },
-      { text: '1 small deployment' },
-      { text: '20 vault entries · production env' },
-      { text: '*.deployment.instanode.dev domain' },
-      { text: '1000 stored webhooks' },
-    ],
     nextTier: 'pro',
-    limits: {
-      postgres_mb: 1024,
-      redis_mb: 50,
-      mongodb_mb: 100,
-      deployments: 1,
-      webhooks: 1000,
-      team_seats: 1,
-    },
+    limits: { postgres_mb: 1024, redis_mb: 50, mongodb_mb: 100, deployments: 1, webhooks: 1000, team_seats: 1 },
   },
   pro: {
     label: 'Pro',
-    price: '$49 / mo',
-    features: [
-      { text: '5 GB Postgres · 20 conn' },
-      { text: '256 MB Redis' },
-      { text: '2 GB MongoDB · 20 conn' },
-      { text: '10 medium deployments' },
-      { text: '200 vault entries · multi-env (dev/staging/prod + custom)' },
-      { text: 'custom domain' },
-      { text: '10k stored webhooks' },
-    ],
     nextTier: 'team',
-    highlight: true,
-    limits: {
-      postgres_mb: 5120,
-      redis_mb: 256,
-      mongodb_mb: 2048,
-      deployments: 10,
-      webhooks: 10000,
-      team_seats: 5,
-    },
+    limits: { postgres_mb: 5120, redis_mb: 256, mongodb_mb: 2048, deployments: 10, webhooks: 10000, team_seats: 5 },
   },
   team: {
     label: 'Team',
-    price: '$199 / mo',
-    // Team tier is under active development — every feature shown here is
-    // marked comingSoon until the multi-seat / RBAC / SSO surface ships and
-    // we publish real per-resource numbers. Don't promise "unlimited X" for
-    // capacity we haven't delivered.
-    features: [
-      { text: 'Everything in Pro, with larger per-resource limits', comingSoon: true },
-      { text: 'Multi-seat workspace · RBAC + audit log', comingSoon: true },
-      { text: 'SSO / SAML · 99.9% SLA + priority support', comingSoon: true },
-      { text: 'Dedicated node pools', comingSoon: true },
-      { text: 'Audit log export (CSV/JSONL)', comingSoon: true },
-    ],
-    // Team-tier capacity is "unlimited" relative to dashboard math — represent
-    // as Infinity so usage stays at 0% even for very large totals. UsageRow's
-    // formatter renders Infinity as "∞".
     limits: {
-      postgres_mb: Infinity,
-      redis_mb: Infinity,
-      mongodb_mb: Infinity,
-      deployments: Infinity,
-      webhooks: Infinity,
-      team_seats: Infinity,
+      postgres_mb: Infinity, redis_mb: Infinity, mongodb_mb: Infinity,
+      deployments: Infinity, webhooks: Infinity, team_seats: Infinity,
     },
   },
 }
 
-// Split a price string like "$49 / mo" into ("$", "49 / mo") to keep the
-// existing CSS structure (small dollar sign + big number + frequency).
-function splitPrice(price: string): { symbol: string; rest: string } {
-  const m = price.match(/^(\$|₹|€|£)?\s*(.*)$/)
-  if (!m) return { symbol: '$', rest: price }
-  return { symbol: m[1] ?? '', rest: m[2] ?? '' }
+// Normalise the user's tier into one of the four grid tiers. Anonymous +
+// any unknown value collapses to 'free' for the grid (so an anonymous
+// user viewing /app/billing sees Free highlighted as "Your plan").
+function gridTierFromTier(tier: string): TierKey {
+  if (tier === 'hobby' || tier === 'pro' || tier === 'team' || tier === 'free') {
+    return tier
+  }
+  // anonymous + unknown → free
+  return 'free'
 }
 
 export function BillingPage() {
   const { me } = useDashboardCtx()
   const tier = me?.team?.tier ?? 'hobby'
-  const plan = PLANS[tier] ?? PLANS.hobby
+  const limitDef = LIMITS[tier] ?? LIMITS.hobby
+  const currentGridTier = gridTierFromTier(tier)
 
   const [billing, setBilling] = useState<BillingDetails | null>(null)
   const [invoices, setInvoices] = useState<Invoice[]>([])
@@ -213,25 +121,12 @@ export function BillingPage() {
   const [checkoutErr, setCheckoutErr] = useState<string | null>(null)
   const [checkoutLoading, setCheckoutLoading] = useState(false)
 
-  // P2: monthly/yearly billing toggle. Drives the price preview, the
-  // "save $X/yr" badge, and the plan_frequency field sent on checkout.
-  // Persisted in localStorage so the choice sticks across refreshes.
+  // Frequency state — default Annual. Read once on mount.
   const [frequency, setFrequencyState] = useState<PlanFrequency>(() => readStoredFrequency())
   const setFrequency = (f: PlanFrequency) => {
     setFrequencyState(f)
     writeStoredFrequency(f)
   }
-
-  // ── Discount code state (P3) ───────────────────────────────────────────
-  // The input lives behind a "Have a discount code?" toggle so the upgrade
-  // CTA isn't crowded for the 95% of users who don't have a code. Once a
-  // code validates green it persists into the checkout call via
-  // applied.code; users can clear it to type a different one.
-  const [promoOpen, setPromoOpen] = useState(false)
-  const [promoCode, setPromoCode] = useState('')
-  const [promoErr, setPromoErr] = useState<string | null>(null)
-  const [promoValidating, setPromoValidating] = useState(false)
-  const [appliedPromo, setAppliedPromo] = useState<Promotion | null>(null)
 
   useEffect(() => {
     // Independent reads — each guarded individually so a failure on one
@@ -308,25 +203,43 @@ export function BillingPage() {
     )
   }
 
-  const { symbol, rest } = splitPrice(plan.price)
-
-  async function handleChangePlan() {
-    if (!plan.nextTier) return
+  // Map a clicked tier-key from the PricingGrid into the createCheckout
+  // call. The grid always targets an explicit tier, so we no longer rely
+  // on a "next tier" computed from the user's plan — the user can pick
+  // (e.g. Hobby user upgrading directly to Team).
+  //
+  // Edge cases:
+  //   - target === 'free': no checkout (Free is the no-cost tier; the
+  //     user would have to contact support to downgrade — we don't offer
+  //     a self-serve path).
+  //   - target === 'team': team is comingSoon; route the click to
+  //     support@ for a sales conversation rather than checkout. This
+  //     keeps the UX honest until the team-tier surface ships.
+  //   - target === currentGridTier: defensive no-op (the grid already
+  //     renders "Your plan" instead of a CTA, but the prop API exposes
+  //     the handler regardless — guard so a synthetic test click doesn't
+  //     fire a wasted checkout).
+  async function handleSelectTier(target: TierKey) {
+    if (target === currentGridTier) return
+    if (target === 'free') return
+    if (target === 'team') {
+      // Surfaces as a normal mailto navigation. We don't route through
+      // Razorpay because team tier isn't on Razorpay yet. The grid
+      // renders "Contact sales" as the button text so users aren't
+      // surprised when this happens.
+      window.location.href = 'mailto:sales@instanode.dev?subject=Team%20plan%20enquiry'
+      return
+    }
     setCheckoutErr(null)
     setCheckoutLoading(true)
     try {
-      // P2: pass the toggle's frequency through to the agent API. The
-      // server returns 503 billing_not_configured when frequency=yearly
-      // and the operator hasn't created the yearly Razorpay plan yet —
-      // that surfaces in checkoutErr below so users see a real reason
-      // rather than a silent failure.
-      // P3: pass promotion_code only when a code has actually been
-      // validated green — never the raw input string. The third-arg opts
-      // carry the promo code when applied; otherwise omitted so the
-      // request body matches the pre-P3 shape.
-      const r = appliedPromo
-        ? await api.createCheckout(plan.nextTier!, frequency, { promotion_code: appliedPromo.code })
-        : await api.createCheckout(plan.nextTier!, frequency)
+      // Promo codes are intentionally NOT plumbed through the dashboard
+      // anymore. Razorpay's hosted checkout has its own "Have a code?"
+      // affordance, which avoids the Baymard "coupon hunting" pattern:
+      // empty fields trigger users to abandon the upgrade and Google
+      // for codes. We send the user straight to Razorpay's checkout;
+      // code redemption happens there if they have one.
+      const r = await api.createCheckout(target, frequency)
       if (r.short_url) {
         window.location.href = r.short_url
         return
@@ -339,41 +252,28 @@ export function BillingPage() {
     }
   }
 
-  async function handleApplyPromo() {
-    if (!plan.nextTier) return
-    const code = promoCode.trim()
-    if (!code) {
-      setPromoErr('Enter a code.')
-      return
-    }
-    setPromoErr(null)
-    setPromoValidating(true)
-    try {
-      const r = await api.validatePromotion(code, plan.nextTier)
-      setAppliedPromo(r.promotion)
-    } catch (e: any) {
-      // Network errors (no status, no message): show the friendly fallback.
-      // API errors carrying a server message (404/409/410): surface it.
-      if (e?.status === undefined && (e?.name === 'TypeError' || /network|fetch/i.test(e?.message ?? ''))) {
-        setPromoErr("couldn't reach the server, try again")
-      } else {
-        setPromoErr(e?.message ?? 'Code not valid.')
+  // The Pro card's CTA composes with the P1 A/B UpgradeButton when the
+  // user is *not* already on Pro — keeps the experiment variants alive
+  // through the redesign. When the user *is* on Pro, the grid renders the
+  // "Your plan" pill (the slot is unused). When the user is on Team, Pro
+  // is just another non-current tier — we still render an UpgradeButton-
+  // shaped element so the variant copy is consistent.
+  const proCtaSlot = currentGridTier === 'pro' ? null : (
+    <UpgradeButton
+      variant={me?.experiments?.upgrade_button}
+      onClick={() => handleSelectTier('pro')}
+      disabled={checkoutLoading}
+      title="Upgrade to Pro"
+      testId="upgrade-button"
+      // Price-anchored override: research (Kissmetrics + PhoebeLown)
+      // shows verb + outcome + price beats generic "Upgrade".
+      label={
+        frequency === 'yearly'
+          ? 'Get Pro — $40.83/mo'
+          : 'Get Pro — $49/mo'
       }
-      setAppliedPromo(null)
-    } finally {
-      setPromoValidating(false)
-    }
-  }
-
-  function handleClearPromo() {
-    setAppliedPromo(null)
-    setPromoCode('')
-    setPromoErr(null)
-    // Collapse back to the discreet toggle — auto-reopening the input
-    // would steal focus and surprise the user. They can click "Have a
-    // discount code?" again if they want to try a different one.
-    setPromoOpen(false)
-  }
+    />
+  )
 
   return (
     <>
@@ -384,257 +284,185 @@ export function BillingPage() {
         we don't expose a self-serve path on purpose.
       </ROBanner>
 
-      {/* P2: monthly/yearly toggle. Only relevant for tiers where the next
-          tier has a yearly variant defined — anonymous → hobby, hobby → pro,
-          pro → team. Hidden when there's nothing to upgrade to. */}
-      {plan.nextTier && YEARLY_PRICING[plan.nextTier] && (
-        <BillingFrequencyToggle
-          frequency={frequency}
-          onChange={setFrequency}
-          nextTier={plan.nextTier}
-        />
-      )}
-
-      <div className="plan-card">
-        <div className="plan-summary">
-          <div className="lbl">current plan</div>
-          <h2 style={{ fontSize: 28, fontWeight: 400, letterSpacing: '-0.03em', marginBottom: 4 }}>{plan.label}</h2>
-          <div className="price">
-            <span style={{ fontSize: 18, color: 'var(--text-dim)' }}>{symbol}</span>
-            <span className="num">{rest.replace(/\s*\/\s*mo.*$/, '')}</span>
-            <span className="freq">{rest.includes('/') ? `/ ${rest.split('/')[1]?.trim()} · billed monthly` : '· billed monthly'}</span>
+      {/* Pricing grid: 4 tiers side-by-side with Pro highlighted. Replaces
+          the single-plan upgrade card. The grid owns its own frequency
+          toggle (Annual default) and renders "Your plan" on the current
+          tier; every other tier shows a tier-aware CTA whose copy embeds
+          the anchored price (e.g. "Get Pro — $40.83/mo"). */}
+      <section
+        data-testid="billing-upgrade-section"
+        style={{
+          marginTop: 14,
+          padding: '14px 14px 16px',
+          background: 'var(--surface)',
+          border: '1px solid var(--border)',
+          borderRadius: 10,
+        }}
+      >
+        <div style={{ marginBottom: 8 }}>
+          <div
+            style={{
+              fontFamily: 'var(--font-mono)',
+              fontSize: 10.5,
+              color: 'var(--text-faint)',
+              textTransform: 'uppercase',
+              letterSpacing: '0.06em',
+            }}
+          >
+            choose a plan
           </div>
-          <ul className="desc" style={{ listStyle: 'none', padding: 0, margin: '8px 0 12px' }}>
-            {plan.features.map((f, i) => (
-              <li key={i} style={{ opacity: f.comingSoon ? 0.6 : 1 }}>
-                {f.text}
-                {f.comingSoon && (
-                  <span style={{
-                    marginLeft: 6, padding: '1px 6px', fontSize: 10,
-                    fontFamily: 'var(--font-mono)', color: 'var(--violet)',
-                    border: '1px solid rgba(183,148,246,0.3)', borderRadius: 4,
-                    textTransform: 'uppercase', letterSpacing: 0.06,
-                  }}>soon</span>
-                )}
-              </li>
-            ))}
-          </ul>
-          {/* U2: "what unlocks" bulleted list above the primary CTA. Driven
-              by the next-tier definition in PLANS so we never duplicate the
-              feature copy. Only renders when the user has a higher tier to
-              move to. */}
-          {plan.nextTier && PLANS[plan.nextTier] && (
-            <div
-              data-testid="next-tier-unlocks"
-              style={{
-                marginBottom: 10,
-                padding: '10px 12px',
-                border: '1px solid var(--border)',
-                borderRadius: 6,
-                background: 'var(--surface)',
-              }}
-            >
-              <div
-                style={{
-                  fontFamily: 'var(--font-mono)',
-                  fontSize: 10.5,
-                  color: 'var(--text-faint)',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.05em',
-                  marginBottom: 6,
-                }}
-              >
-                what {PLANS[plan.nextTier]!.label.toLowerCase()} unlocks
-              </div>
-              <ul style={{ listStyle: 'disc', paddingLeft: 18, margin: 0 }}>
-                {PLANS[plan.nextTier]!.features.map((f, i) => (
-                  <li
-                    key={i}
-                    style={{
-                      fontSize: 12.5,
-                      color: 'var(--text-dim)',
-                      opacity: f.comingSoon ? 0.6 : 1,
-                      lineHeight: 1.55,
-                    }}
-                  >
-                    {f.text}
-                    {f.comingSoon && (
-                      <span style={{
-                        marginLeft: 6, padding: '1px 6px', fontSize: 10,
-                        fontFamily: 'var(--font-mono)', color: 'var(--violet)',
-                        border: '1px solid rgba(183,148,246,0.3)', borderRadius: 4,
-                        textTransform: 'uppercase', letterSpacing: 0.06,
-                      }}>soon</span>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-          {/* ── Discount code (P3) ───────────────────────────────────────
-              Sits below the unlocks list, above the upgrade CTA. Only
-              rendered when an upgrade target exists (no point applying
-              a discount on team-tier — there's nothing left to upgrade to). */}
-          {plan.nextTier && (
-            <PromoCodePanel
-              open={promoOpen}
-              code={promoCode}
-              validating={promoValidating}
-              err={promoErr}
-              applied={appliedPromo}
-              onOpen={() => setPromoOpen(true)}
-              onChangeCode={setPromoCode}
-              onApply={handleApplyPromo}
-              onClear={handleClearPromo}
-            />
-          )}
-          <div style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center' }}>
-            {plan.nextTier === 'pro' ? (
-              // A/B-tested upgrade CTA — variant comes from /auth/me's
-              // experiments map and decides both copy + colour. The
-              // button fires POST /api/v1/experiments/converted before
-              // navigating, capped at 500ms so a slow analytics
-              // endpoint never delays the checkout flow.
-              // P2 merge: when the yearly toggle is active and the next
-              // tier has yearly pricing, override the variant's default
-              // label to suffix "(yearly)" so the user sees what cadence
-              // they're about to commit to.
-              <UpgradeButton
-                variant={me?.experiments?.upgrade_button}
-                onClick={handleChangePlan}
-                disabled={checkoutLoading}
-                title="Upgrade to Pro"
-                testId="upgrade-button"
-                label={
-                  YEARLY_PRICING[plan.nextTier] && frequency === 'yearly'
-                    ? `Upgrade to Pro (yearly)`
-                    : undefined
-                }
-              />
-            ) : (
-              <button
-                className="btn btn-secondary btn-sm"
-                onClick={handleChangePlan}
-                disabled={!plan.nextTier || checkoutLoading}
-                title={plan.nextTier ? `Upgrade to ${PLANS[plan.nextTier]?.label ?? plan.nextTier}` : 'You are on the highest plan'}
-                data-testid="upgrade-button"
-              >
-                {plan.nextTier
-                  ? `Upgrade to ${PLANS[plan.nextTier]?.label ?? plan.nextTier}${
-                      YEARLY_PRICING[plan.nextTier] && frequency === 'yearly' ? ' (yearly)' : ''
-                    }`
-                  : 'Change plan'}
-              </button>
-            )}
+          <h2 style={{ fontSize: 20, fontWeight: 400, letterSpacing: '-0.02em', margin: '4px 0 0' }}>
+            You're on {limitDef.label} today.
+          </h2>
+        </div>
+        <PricingGrid
+          currentTier={currentGridTier}
+          frequency={frequency}
+          onFrequencyChange={setFrequency}
+          onSelectTier={(t) => { void handleSelectTier(t) }}
+          ctaDisabled={checkoutLoading}
+          proCtaSlot={proCtaSlot ?? undefined}
+        />
+        {checkoutErr && (
+          <div
+            data-testid="checkout-error"
+            style={{
+              marginTop: 10,
+              fontSize: 12,
+              color: 'var(--danger, #c33)',
+              fontFamily: 'var(--font-mono)',
+            }}
+          >
+            {checkoutErr}
+          </div>
+        )}
+        <div style={{ marginTop: 10, display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+          <a
+            className="btn btn-ghost btn-sm"
+            href="mailto:support@instanode.dev?subject=Cancel%20subscription"
+            data-testid="contact-support-cancel"
+          >
+            Cancel? Contact support
+          </a>
+          <span
+            style={{
+              fontFamily: 'var(--font-mono)',
+              fontSize: 11,
+              color: 'var(--text-faint)',
+              letterSpacing: '0.03em',
+            }}
+          >
+            Promo codes apply at checkout (Razorpay).
+          </span>
+        </div>
+      </section>
+
+      {/* Payment + auto-renew detail. Pulled out of the old plan card so
+          the upgrade grid can stand on its own. */}
+      <section style={{ marginTop: 18 }}>
+        <div
+          style={{
+            padding: '12px 14px',
+            background: 'var(--surface)',
+            border: '1px solid var(--border)',
+            borderRadius: 6,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              payment method
+            </span>
+            <span style={{ marginLeft: 'auto', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text)' }}>
+              {billing.payment_network?.toUpperCase()} · {billing.payment_last4}
+            </span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {/* The agent API never returns payment_exp_* — render only the
+                auto-renew date, which we do have. (§10.8 — kill the leak.) */}
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-dim)' }}>
+              auto-renews{' '}
+              {billing.current_period_end && new Date(billing.current_period_end).toLocaleDateString()}
+            </span>
+            {/* No self-serve "update payment method" endpoint exists. Route
+                the click through support, matching the cancel pattern. */}
             <a
-              className="btn btn-ghost btn-sm"
-              href="mailto:support@instanode.dev?subject=Cancel%20subscription"
-              data-testid="contact-support-cancel"
+              className="btn btn-sm btn-ghost"
+              style={{ marginLeft: 'auto' }}
+              href="mailto:support@instanode.dev?subject=Update%20payment%20method"
+              data-testid="contact-support-update-payment"
             >
-              Cancel? Contact support
+              Update
             </a>
           </div>
-          {checkoutErr && (
-            <div style={{ marginBottom: 12, fontSize: 12, color: 'var(--danger, #c33)', fontFamily: 'var(--font-mono)' }}>
-              {checkoutErr}
-            </div>
-          )}
-          <div style={{ padding: '12px 14px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 6 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                payment method
-              </span>
-              <span style={{ marginLeft: 'auto', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text)' }}>
-                {billing.payment_network?.toUpperCase()} · {billing.payment_last4}
-              </span>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              {/* The agent API never returns payment_exp_* — render only the
-                  auto-renew date, which we do have. (§10.8 — kill the leak.) */}
-              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-dim)' }}>
-                auto-renews{' '}
-                {billing.current_period_end && new Date(billing.current_period_end).toLocaleDateString()}
-              </span>
-              {/* No self-serve "update payment method" endpoint exists. Route
-                  the click through support, matching the cancel pattern. */}
-              <a
-                className="btn btn-sm btn-ghost"
-                style={{ marginLeft: 'auto' }}
-                href="mailto:support@instanode.dev?subject=Update%20payment%20method"
-                data-testid="contact-support-update-payment"
-              >
-                Update
-              </a>
-            </div>
-          </div>
         </div>
+      </section>
 
-        <div className="plan-usage">
-          <h4>Usage · this period</h4>
-          <UsageRow
-            k="postgres"
-            used={formatMB(usage.postgres_mb)}
-            limit={formatLimitMB(plan.limits.postgres_mb)}
-            pct={pctOf(usage.postgres_mb, plan.limits.postgres_mb)}
-            warn={isWarn(usage.postgres_mb, plan.limits.postgres_mb)}
-          />
-          <UsageRow
-            k="redis"
-            used={formatMB(usage.redis_mb)}
-            limit={formatLimitMB(plan.limits.redis_mb)}
-            pct={pctOf(usage.redis_mb, plan.limits.redis_mb)}
-            warn={isWarn(usage.redis_mb, plan.limits.redis_mb)}
-          />
-          <UsageRow
-            k="mongo"
-            used={formatMB(usage.mongodb_mb)}
-            limit={formatLimitMB(plan.limits.mongodb_mb)}
-            pct={pctOf(usage.mongodb_mb, plan.limits.mongodb_mb)}
-            warn={isWarn(usage.mongodb_mb, plan.limits.mongodb_mb)}
-          />
-          <UsageRow
-            k="deployments"
-            used={String(usage.deployments)}
-            limit={formatLimitCount(plan.limits.deployments)}
-            pct={pctOf(usage.deployments, plan.limits.deployments)}
-            warn={isWarn(usage.deployments, plan.limits.deployments)}
-          />
-          <UsageRow
-            k="webhooks"
-            used={String(usage.webhooks)}
-            limit={formatLimitCount(plan.limits.webhooks)}
-            pct={pctOf(usage.webhooks, plan.limits.webhooks)}
-            warn={isWarn(usage.webhooks, plan.limits.webhooks)}
-          />
-          <UsageRow
-            k="team seats"
-            used={String(usage.team_seats)}
-            limit={formatLimitCount(plan.limits.team_seats)}
-            pct={pctOf(usage.team_seats, plan.limits.team_seats)}
-            warn={isWarn(usage.team_seats, plan.limits.team_seats)}
-          />
-          {/* §10.20: visible eventual-consistency footnote. The Usage panel
-              is server-cached for 30s — render the freshness so users can
-              tell whether they're looking at a fresh read or a cached one
-              (and don't expect provision/delete to update instantly).
-              Hidden until the first fetch completes so we don't render
-              "as of —". */}
-          {billingUsage?.as_of && (
-            <div
-              data-testid="billing-usage-as-of"
-              style={{
-                marginTop: 10,
-                fontFamily: 'var(--font-mono)',
-                fontSize: 10.5,
-                color: 'var(--text-faint)',
-                letterSpacing: '0.04em',
-              }}
-            >
-              as of {formatAsOf(billingUsage.as_of)} · cached {billingUsage.freshness_seconds}s
-            </div>
-          )}
-        </div>
-      </div>
+      {/* Usage panel — driven by the server-side cached aggregate. Mirrors
+          the pre-redesign layout so existing tests still hit the same .skel
+          + .usage-row + as-of footnote contract. */}
+      <section className="plan-usage" style={{ marginTop: 28 }}>
+        <h4>Usage · this period</h4>
+        <UsageRow
+          k="postgres"
+          used={formatMB(usage.postgres_mb)}
+          limit={formatLimitMB(limitDef.limits.postgres_mb)}
+          pct={pctOf(usage.postgres_mb, limitDef.limits.postgres_mb)}
+          warn={isWarn(usage.postgres_mb, limitDef.limits.postgres_mb)}
+        />
+        <UsageRow
+          k="redis"
+          used={formatMB(usage.redis_mb)}
+          limit={formatLimitMB(limitDef.limits.redis_mb)}
+          pct={pctOf(usage.redis_mb, limitDef.limits.redis_mb)}
+          warn={isWarn(usage.redis_mb, limitDef.limits.redis_mb)}
+        />
+        <UsageRow
+          k="mongo"
+          used={formatMB(usage.mongodb_mb)}
+          limit={formatLimitMB(limitDef.limits.mongodb_mb)}
+          pct={pctOf(usage.mongodb_mb, limitDef.limits.mongodb_mb)}
+          warn={isWarn(usage.mongodb_mb, limitDef.limits.mongodb_mb)}
+        />
+        <UsageRow
+          k="deployments"
+          used={String(usage.deployments)}
+          limit={formatLimitCount(limitDef.limits.deployments)}
+          pct={pctOf(usage.deployments, limitDef.limits.deployments)}
+          warn={isWarn(usage.deployments, limitDef.limits.deployments)}
+        />
+        <UsageRow
+          k="webhooks"
+          used={String(usage.webhooks)}
+          limit={formatLimitCount(limitDef.limits.webhooks)}
+          pct={pctOf(usage.webhooks, limitDef.limits.webhooks)}
+          warn={isWarn(usage.webhooks, limitDef.limits.webhooks)}
+        />
+        <UsageRow
+          k="team seats"
+          used={String(usage.team_seats)}
+          limit={formatLimitCount(limitDef.limits.team_seats)}
+          pct={pctOf(usage.team_seats, limitDef.limits.team_seats)}
+          warn={isWarn(usage.team_seats, limitDef.limits.team_seats)}
+        />
+        {/* §10.20: visible eventual-consistency footnote. The Usage panel
+            is server-cached for 30s — render the freshness so users can
+            tell whether they're looking at a fresh read or a cached one
+            (and don't expect provision/delete to update instantly). */}
+        {billingUsage?.as_of && (
+          <div
+            data-testid="billing-usage-as-of"
+            style={{
+              marginTop: 10,
+              fontFamily: 'var(--font-mono)',
+              fontSize: 10.5,
+              color: 'var(--text-faint)',
+              letterSpacing: '0.04em',
+            }}
+          >
+            as of {formatAsOf(billingUsage.as_of)} · cached {billingUsage.freshness_seconds}s
+          </div>
+        )}
+      </section>
 
       <div style={{ marginTop: 28 }}>
         <div className="section-h">
@@ -676,316 +504,6 @@ export function BillingPage() {
       </div>
     </>
   )
-}
-
-/**
- * BillingFrequencyToggle — Monthly | Yearly chooser shown above the
- * plan card. Yearly shows the effective per-month price and a
- * "Save $X/yr" badge for the *next* tier the user can upgrade to.
- * Pure visual + state — the actual checkout call reads the same
- * `frequency` state via handleChangePlan.
- */
-function BillingFrequencyToggle({
-  frequency,
-  onChange,
-  nextTier,
-}: {
-  frequency: PlanFrequency
-  onChange: (f: PlanFrequency) => void
-  nextTier: string
-}) {
-  const yearly = YEARLY_PRICING[nextTier]
-  const planLabel = PLANS[nextTier]?.label ?? nextTier
-  return (
-    <div
-      data-testid="billing-frequency-toggle"
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 12,
-        margin: '18px 0 14px',
-        padding: '10px 14px',
-        border: '1px solid var(--border)',
-        borderRadius: 8,
-        background: 'var(--surface)',
-        flexWrap: 'wrap',
-      }}
-    >
-      <span
-        style={{
-          fontFamily: 'var(--font-mono)',
-          fontSize: 10.5,
-          letterSpacing: '0.06em',
-          textTransform: 'uppercase',
-          color: 'var(--text-faint)',
-        }}
-      >
-        billing cycle
-      </span>
-      <div
-        role="radiogroup"
-        aria-label="Billing cycle"
-        style={{
-          display: 'inline-flex',
-          border: '1px solid var(--border-hi, var(--border))',
-          borderRadius: 999,
-          padding: 2,
-          background: 'var(--elevated, var(--surface))',
-        }}
-      >
-        <button
-          type="button"
-          role="radio"
-          aria-checked={frequency === 'monthly'}
-          data-testid="frequency-monthly"
-          onClick={() => onChange('monthly')}
-          className={frequency === 'monthly' ? 'btn btn-primary btn-sm' : 'btn btn-ghost btn-sm'}
-          style={{
-            borderRadius: 999,
-            padding: '4px 14px',
-            fontSize: 12,
-            background: frequency === 'monthly' ? 'var(--accent)' : 'transparent',
-            color: frequency === 'monthly' ? 'var(--ink)' : 'var(--text)',
-            border: 'none',
-            cursor: 'pointer',
-          }}
-        >
-          Monthly
-        </button>
-        <button
-          type="button"
-          role="radio"
-          aria-checked={frequency === 'yearly'}
-          data-testid="frequency-yearly"
-          onClick={() => onChange('yearly')}
-          className={frequency === 'yearly' ? 'btn btn-primary btn-sm' : 'btn btn-ghost btn-sm'}
-          style={{
-            borderRadius: 999,
-            padding: '4px 14px',
-            fontSize: 12,
-            background: frequency === 'yearly' ? 'var(--accent)' : 'transparent',
-            color: frequency === 'yearly' ? 'var(--ink)' : 'var(--text)',
-            border: 'none',
-            cursor: 'pointer',
-          }}
-        >
-          Yearly
-        </button>
-      </div>
-      {yearly && (
-        <span
-          data-testid="frequency-save-badge"
-          style={{
-            fontFamily: 'var(--font-mono)',
-            fontSize: 11,
-            padding: '2px 8px',
-            borderRadius: 4,
-            border: '1px solid rgba(0,228,142,0.35)',
-            color: 'var(--accent)',
-            background: 'rgba(0,228,142,0.07)',
-            letterSpacing: '0.04em',
-          }}
-        >
-          save ${yearly.saveVsMonthly}/yr on {planLabel}
-        </span>
-      )}
-      {yearly && frequency === 'yearly' && (
-        <span
-          data-testid="frequency-effective-price"
-          style={{
-            marginLeft: 'auto',
-            fontFamily: 'var(--font-mono)',
-            fontSize: 11,
-            color: 'var(--text-dim)',
-          }}
-        >
-          {planLabel}: ${yearly.yearlyTotal}/yr · ~${yearly.effectiveMonthly.toFixed(2)}/mo
-        </span>
-      )}
-    </div>
-  )
-}
-
-// ─── PromoCodePanel (P3) ───────────────────────────────────────────────
-// Collapsed state: a small "Have a discount code?" link button.
-// Open + unapplied state: input + Apply button + (optional) error msg.
-// Open + applied state: green checkmark + applied description + Remove.
-//
-// Keeping this as a sub-component keeps BillingPage scannable — the
-// upgrade flow is the headline; this is a side rail. State lives in the
-// parent so the applied code can be passed into createCheckout.
-function PromoCodePanel({
-  open,
-  code,
-  validating,
-  err,
-  applied,
-  onOpen,
-  onChangeCode,
-  onApply,
-  onClear,
-}: {
-  open: boolean
-  code: string
-  validating: boolean
-  err: string | null
-  applied: Promotion | null
-  onOpen: () => void
-  onChangeCode: (s: string) => void
-  onApply: () => void
-  onClear: () => void
-}) {
-  // Applied state — small green chip with the discount description and a
-  // Remove action. Sits where the input was so the layout doesn't jump.
-  if (applied) {
-    return (
-      <div
-        data-testid="promo-applied"
-        style={{
-          marginBottom: 12,
-          padding: '8px 12px',
-          background: 'rgba(46, 160, 67, 0.08)',
-          border: '1px solid rgba(46, 160, 67, 0.3)',
-          borderLeft: '3px solid var(--green, #2ea043)',
-          borderRadius: 6,
-          display: 'flex',
-          alignItems: 'center',
-          gap: 10,
-          fontSize: 12.5,
-        }}
-      >
-        <span aria-hidden="true" style={{ color: 'var(--green, #2ea043)', fontSize: 14, lineHeight: 1 }}>✓</span>
-        <span data-testid="promo-applied-text">
-          <code style={{ fontFamily: 'var(--font-mono)', fontSize: 11.5, color: 'var(--text)' }}>{applied.code}</code>
-          {' '}applied: {formatDiscount(applied)}
-        </span>
-        <button
-          type="button"
-          data-testid="promo-clear"
-          onClick={onClear}
-          className="btn btn-ghost btn-sm"
-          style={{ marginLeft: 'auto', fontSize: 11 }}
-        >
-          Remove
-        </button>
-      </div>
-    )
-  }
-
-  // Collapsed state — single discreet link. Click expands the input.
-  if (!open) {
-    return (
-      <div style={{ marginBottom: 12 }}>
-        <button
-          type="button"
-          data-testid="promo-toggle"
-          onClick={onOpen}
-          className="btn btn-ghost btn-sm"
-          style={{
-            padding: '2px 0',
-            fontSize: 12,
-            color: 'var(--text-dim)',
-            background: 'transparent',
-            border: 'none',
-            textDecoration: 'underline',
-            textDecorationStyle: 'dotted',
-            textUnderlineOffset: 3,
-            cursor: 'pointer',
-          }}
-        >
-          Have a discount code?
-        </button>
-      </div>
-    )
-  }
-
-  // Open + unapplied state — input + Apply.
-  return (
-    <div data-testid="promo-input-row" style={{ marginBottom: 12 }}>
-      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-        <input
-          type="text"
-          data-testid="promo-input"
-          aria-label="Discount code"
-          placeholder="DISCOUNT CODE"
-          value={code}
-          onChange={(e) => onChangeCode(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              e.preventDefault()
-              if (!validating) onApply()
-            }
-          }}
-          autoFocus
-          disabled={validating}
-          style={{
-            flex: '1 1 auto',
-            maxWidth: 220,
-            padding: '6px 10px',
-            fontSize: 12,
-            fontFamily: 'var(--font-mono)',
-            textTransform: 'uppercase',
-            letterSpacing: '0.04em',
-            background: 'var(--surface)',
-            color: 'var(--text)',
-            border: '1px solid var(--border)',
-            borderRadius: 4,
-          }}
-        />
-        <button
-          type="button"
-          data-testid="promo-apply"
-          onClick={onApply}
-          disabled={validating || !code.trim()}
-          className="btn btn-secondary btn-sm"
-          style={{ fontSize: 12 }}
-        >
-          {validating ? 'Checking…' : 'Apply'}
-        </button>
-      </div>
-      {err && (
-        <div
-          data-testid="promo-error"
-          role="alert"
-          style={{
-            marginTop: 6,
-            fontSize: 11.5,
-            color: 'var(--danger, #c33)',
-            fontFamily: 'var(--font-mono)',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-          }}
-        >
-          <span aria-hidden="true">✗</span>
-          <span>{err}</span>
-        </div>
-      )}
-    </div>
-  )
-}
-
-// formatDiscount — turns a Promotion.discount object into a human-friendly
-// chip. Falls back to a generic "discount applied" for unknown kinds so the
-// UI is forward-compatible if the api ships a new discount shape.
-function formatDiscount(p: Promotion): string {
-  const d = p.discount
-  if (d.kind === 'percent_off') {
-    const span = d.applies_to && d.unit
-      ? ` first ${d.applies_to} ${d.unit}`
-      : d.applies_to === 1
-        ? ' first month'
-        : ''
-    return `${d.value}% off${span}`
-  }
-  if (d.kind === 'amount_off') {
-    return `$${(d.value / 100).toFixed(2)} off`
-  }
-  if (d.kind === 'free_period') {
-    const unit = d.unit ?? 'months'
-    return `${d.value} ${unit} free`
-  }
-  return 'discount applied'
 }
 
 function UsageRow({ k, used, limit, pct, warn = false }: { k: string; used: string; limit: string; pct: number; warn?: boolean }) {
