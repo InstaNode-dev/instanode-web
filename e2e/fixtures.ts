@@ -70,8 +70,11 @@ export async function installAPIFake(page: Page) {
     }),
   )
 
-  // GET /api/v1/resources
-  await page.route('**/api/v1/resources', (route: Route) => {
+  // GET /api/v1/resources (optional ?env=... query string — ResourcesPage
+  // calls listResources(ctx.env) which produces /api/v1/resources?env=production).
+  // A bare-glob `**/api/v1/resources` only matches the no-query path, so we
+  // use a regex anchored on the path + optional query string.
+  await page.route(/\/api\/v1\/resources(\?[^/]*)?$/, (route: Route) => {
     if (route.request().method() === 'GET') {
       return route.fulfill({
         status: 200,

@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react'
-import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom'
+import { BrowserRouter, Navigate, Route, Routes, useLocation, useParams } from 'react-router-dom'
 
 // Homepage — eagerly imported. It's the cold-load path and the most-visited
 // public surface, so it stays in the main entry chunk.
@@ -115,6 +115,19 @@ function AuthGate({ children }: { children: JSX.Element }) {
   return children
 }
 
+// LegacyRedirect — <Navigate to="/app/resources/:id"> sends a literal ":id"
+// string instead of the captured route param (Navigate is dumb — it doesn't
+// interpolate). This wrapper reads the param and constructs the real
+// destination so /resources/<token> → /app/resources/<token> works.
+function LegacyResourceRedirect() {
+  const { id = '' } = useParams()
+  return <Navigate to={`/app/resources/${id}`} replace />
+}
+function LegacyDeploymentRedirect() {
+  const { id = '' } = useParams()
+  return <Navigate to={`/app/deployments/${id}`} replace />
+}
+
 // AppLoadingFallback — shown while a lazy-loaded /app/* chunk is in flight.
 // Tiny inline style so it renders even before the page's own CSS resolves.
 // In practice this fallback is on screen for ~50-150ms on a warm cache.
@@ -209,12 +222,16 @@ export function AppRoutes() {
         </Route>
 
         {/* Back-compat: every legacy unprefixed path that used to be a
-            dashboard route now redirects under /app. */}
+            dashboard route now redirects under /app. Parameterized routes
+            use a wrapper that interpolates the captured param — see
+            LegacyResourceRedirect / LegacyDeploymentRedirect above
+            (Navigate's `to` is literal, not parameterized). */}
         <Route path="/resources" element={<Navigate to="/app/resources" replace />} />
-        <Route path="/resources/:id" element={<Navigate to="/app/resources/:id" replace />} />
+        <Route path="/resources/:id" element={<LegacyResourceRedirect />} />
         <Route path="/deployments" element={<Navigate to="/app/deployments" replace />} />
-        <Route path="/deployments/:id" element={<Navigate to="/app/deployments/:id" replace />} />
-        <Route path="/stacks" element={<Navigate to="/app/stacks" replace />} />
+        <Route path="/deployments/:id" element={<LegacyDeploymentRedirect />} />
+        {/* /stacks legacy path retired with the route (b13b8ee). Falls
+            through to the catch-all → /. */}
         <Route path="/vault" element={<Navigate to="/app/vault" replace />} />
         <Route path="/team" element={<Navigate to="/app/team" replace />} />
         <Route path="/billing" element={<Navigate to="/app/billing" replace />} />
