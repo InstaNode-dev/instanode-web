@@ -155,10 +155,12 @@ export function IncidentsPage() {
         )}
       </section>
 
+      {/* FIX-G (2026-05-14): the "Subscribe via RSS" link pointed at
+          /status.rss which 404s — no RSS endpoint exists on the API. Link
+          removed rather than shipping a stub feed; a real /status.rss is
+          tracked separately and will reintroduce the link when it lands. */}
       <section className="public-section incidents-links">
         <a href="/status" className="incidents-link">Live status</a>
-        <span className="incidents-link-sep">·</span>
-        <a href="/status.rss" className="incidents-link">Subscribe via RSS</a>
         <span className="incidents-link-sep">·</span>
         <a
           href="mailto:incidents@instanode.dev?subject=Report%20an%20incident"

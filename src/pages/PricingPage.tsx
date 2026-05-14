@@ -125,7 +125,13 @@ const ROWS: Row[] = [
   { label: 'Postgres', values: ['10 MB / 2 conn / 24h TTL', '1 GB / 8 conn',     '1 GB / 8 conn',     '5 GB / 20 conn', SOON] },
   { label: 'Redis',    values: ['5 MB / 24h TTL',           '50 MB',             '50 MB',             '256 MB',         SOON] },
   { label: 'MongoDB',  values: ['5 MB / 2 conn / 24h TTL',  '100 MB / 5 conn',   '1 GB / 5 conn',     '2 GB / 20 conn', SOON] },
-  { label: 'Queue',    sub: 'NATS', values: ['24 h TTL', '1 000 msg/d', '5 000 msg/d', '100k msg/d', SOON] },
+  // FIX-G (2026-05-14): the column used to advertise "1 000 / 5 000 / 100k
+  // msg/d" but there's no backing queue_messages_per_day field on the
+  // plans.yaml side — quota enforcement is on queue_storage_mb. Shipping
+  // a per-day-msg counter is real scope and not in flight, so the copy
+  // moves to the field we actually enforce. Numbers mirror plans.yaml
+  // queue_storage_mb (anonymous=1024, hobby/hobby_plus=5120, pro=10240).
+  { label: 'Queue',    sub: 'NATS storage', values: ['1 GB / 24h TTL', '5 GB', '5 GB', '10 GB', SOON] },
   { label: 'Storage',  values: [{ mark: 'dash' },              '512 MB',           '5 GB',             '10 GB',          SOON] },
   { label: 'Webhook stored', values: ['100',                   '1 000',            '5 000',            '10k',            SOON] },
   { label: 'Deploy apps', values: [{ mark: 'dash' },           '1 small',          '2 medium',         '10 medium',      SOON] },
