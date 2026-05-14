@@ -10,7 +10,21 @@ import * as api from '../api'
 import type { Resource, ActivityItem } from '../api'
 import { useDashboardCtx } from '../hooks/useDashboardCtx'
 
-const TIER_LIMIT_GB: Record<string, number> = { hobby: 0.5, pro: 5, team: 50 }
+// Storage limit per tier in GB, used for the Overview usage chart.
+// Source of truth: api/plans.yaml storage_storage_mb / 1024. -1 in plans.yaml
+// (team / growth) means "unlimited"; we surface 50 GB here as the visual
+// ceiling so the bar fills sensibly instead of going divide-by-zero.
+//
+// FIX-U15 (W11): added hobby_plus (5 GB) and growth (10 GB), which were
+// missing — a hobby_plus or growth user previously hit the `?? 5` fallback,
+// which is the same as Pro's bar and made the upgrade math look wrong.
+const TIER_LIMIT_GB: Record<string, number> = {
+  hobby: 0.5,
+  hobby_plus: 5,
+  pro: 5,
+  growth: 10,
+  team: 50,
+}
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000
 
 // stripHtmlTags — display helper, NOT a security control.

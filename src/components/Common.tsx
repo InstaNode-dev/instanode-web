@@ -76,6 +76,7 @@ const TIER_LABELS: Record<Tier, string> = {
   anonymous: 'anonymous',
   free: 'free',
   hobby: 'hobby',
+  hobby_plus: 'hobby+',
   pro: 'pro',
   team: 'team',
   growth: 'growth',

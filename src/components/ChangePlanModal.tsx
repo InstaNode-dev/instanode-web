@@ -30,11 +30,10 @@ import * as api from '../api'
 import type { ChangePlanTier, PlanFrequency, Tier } from '../api'
 
 // Ranks for "is this an upgrade?" math. Source of truth: api/plans.yaml.
-// `hobby_plus` lives between hobby and pro in case the api lights it up
-// later — the dashboard still hides it from the UI today (it's not in
-// plans.yaml yet). `growth` sits above pro but below team per the
-// existing TierChangeModal ranking; that's the founder console's
-// convention and we keep parity here so the two screens agree.
+// `hobby_plus` sits between hobby and pro at $19/mo (W11 mid-tier insertion,
+// 2026-05-13). The api enum on /billing/checkout + /billing/change-plan now
+// accepts it — see FIX-A6/R8/R9 — so the dashboard exposes it as a real
+// upgrade target alongside the legacy tiers.
 const TIER_RANK: Record<string, number> = {
   anonymous: 0,
   free: 1,
@@ -49,17 +48,19 @@ const TIER_RANK: Record<string, number> = {
 // translations / brand renames live in one place.
 const TIER_LABEL: Record<ChangePlanTier, string> = {
   hobby: 'Hobby',
-  hobby_plus: 'Hobby+',
+  hobby_plus: 'Hobby Plus',
   pro: 'Pro',
   team: 'Team',
   growth: 'Growth',
 }
 
-// Tiers we expose in the in-dashboard upgrade selector. `hobby_plus` is
-// type-supported but not yet a real plan on the server (api/plans.yaml has
-// no hobby_plus row), so we omit it from the default radio set. The day
-// it's added, append it here and the rest of the modal just works.
-const SELECTABLE_TIERS: ChangePlanTier[] = ['hobby', 'pro', 'team', 'growth']
+// Tiers we expose in the in-dashboard upgrade selector.
+//
+// FIX-R9 / FIX-190 (W11): include hobby_plus (now real in api/plans.yaml as
+// the $19/mo step between Hobby and Pro), drop growth — there is no real
+// growth row available through self-serve upgrade yet. Customers who need
+// growth-tier dedicated infra go through support / sales, not this modal.
+const SELECTABLE_TIERS: ChangePlanTier[] = ['hobby', 'hobby_plus', 'pro', 'team']
 
 export interface ChangePlanModalProps {
   /** The team's current tier — read from useDashboardCtx().me.team.tier on

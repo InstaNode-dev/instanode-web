@@ -32,9 +32,10 @@ const TIER_RANK: Record<Tier, number> = {
   anonymous: 0,
   free: 1,
   hobby: 2,
-  growth: 3,
-  pro: 4,
-  team: 5,
+  hobby_plus: 3,
+  growth: 4,
+  pro: 5,
+  team: 6,
 }
 
 export function confirmationWord(currentTier: Tier, nextTier: Tier): 'PROMOTE' | 'DEMOTE' {
