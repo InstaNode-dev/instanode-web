@@ -6,6 +6,7 @@ import {
 import { QuotaWallBanner } from '../components/QuotaWallBanner'
 import { IpAllowList, IP_ALLOW_LIST_MAX } from '../components/IpAllowList'
 import { UpgradePromptCard } from '../components/UpgradePromptCard'
+import { TtlBadge } from '../components/TtlBadge'
 import * as api from '../api'
 import type { DashboardDeployment, Tier } from '../api'
 import { useDashboardCtx } from '../hooks/useDashboardCtx'
@@ -79,12 +80,16 @@ export function DeploymentsPage() {
       </div>
 
       <div className="table">
-        <div className="table-row head" style={{ gridTemplateColumns: '1.5fr 1fr 100px 80px 100px 80px 28px' }}>
+        <div className="table-row head" style={{ gridTemplateColumns: '1.5fr 1fr 100px 80px 100px 110px 80px 28px' }}>
           <span>name</span>
           <span>url</span>
           <span>status</span>
           <span>env</span>
           <span>last deploy</span>
+          {/* Wave FIX-J: TTL column shows Permanent vs "Expires in Nh" so
+              the user can scan the list and identify which deploys are
+              about to be auto-cleaned. */}
+          <span>ttl</span>
           <span>build</span>
           <span></span>
         </div>
@@ -127,7 +132,7 @@ export function DeploymentsPage() {
             to={`/deployments/${d.app_id}`}
             key={d.id}
             className="table-row"
-            style={{ gridTemplateColumns: '1.5fr 1fr 100px 80px 100px 80px 28px', textDecoration: 'none', color: 'inherit' }}
+            style={{ gridTemplateColumns: '1.5fr 1fr 100px 80px 100px 110px 80px 28px', textDecoration: 'none', color: 'inherit' }}
           >
             <div className="res-name">
               <ResourceIcon type="deploy" />
@@ -157,6 +162,10 @@ export function DeploymentsPage() {
             <StatusPill status={d.status} />
             <EnvPill env={d.env} />
             <RelTime at={d.last_deploy_at} />
+            {/* Wave FIX-J: inline TTL badge. Click target is the row link,
+                so the badge is read-only here; the Make Permanent button
+                lives on the detail page banner variant. */}
+            <TtlBadge deployment={d} variant="inline" />
             <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: d.status === 'building' ? 'var(--blue)' : 'var(--text-dim)' }}>
               {d.build_duration_s ? `${d.build_duration_s}s${d.status === 'building' ? ' …' : ''}` : '—'}
             </span>

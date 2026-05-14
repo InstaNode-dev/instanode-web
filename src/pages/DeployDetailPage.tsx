@@ -7,6 +7,7 @@ import { AuditPanel } from '../components/AuditPanel'
 import { CustomDomainPanel } from '../components/CustomDomainPanel'
 import { UpgradePromptCard } from '../components/UpgradePromptCard'
 import { IpAllowList } from '../components/IpAllowList'
+import { TtlBadge } from '../components/TtlBadge'
 import { useDashboardCtx } from '../hooks/useDashboardCtx'
 import * as api from '../api'
 import type { DashboardStack, DashboardDeployment, Tier, StackFamilyMember } from '../api'
@@ -95,6 +96,10 @@ type DeployView =
       // inherits state from a stale payload.
       private: boolean
       allowed_ips: string[]
+      // Wave FIX-J: the full deployment payload kept around so the
+      // TtlBadge banner can render the lifecycle countdown + Make
+      // Permanent button without rebuilding a DashboardDeployment shape.
+      raw: DashboardDeployment
     }
   | {
       kind: 'stack'
@@ -138,6 +143,7 @@ export function DeployDetailPage() {
             slug: d.app_id,
             private: d.private ?? false,
             allowed_ips: d.allowed_ips ?? [],
+            raw: d,
           })
           setLoaded(true)
           return
@@ -230,6 +236,22 @@ export function DeployDetailPage() {
       <ROBanner>
         Logs and status stream live, but mutations go through the agent. <strong>Common prompts:</strong> redeploy · rollback · stop · update env-vars · scale replicas.
       </ROBanner>
+
+      {/* Wave FIX-J: TTL banner. Shows the auto-expire countdown + a
+          single Keep button on auto_24h / custom deploys; renders nothing
+          on permanent deploys. Lives above the tab content so the user
+          can't navigate away without seeing the countdown. */}
+      {view.kind === 'deployment' && (
+        <TtlBadge
+          deployment={view.raw}
+          variant="banner"
+          onPermanent={(updated) => {
+            // Replace the local raw payload so the banner re-renders as
+            // "Permanent" without a refetch. setView triggers a re-render.
+            setView({ ...view, raw: updated })
+          }}
+        />
+      )}
 
 
       <div className="tabs">

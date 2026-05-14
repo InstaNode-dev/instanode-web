@@ -111,6 +111,26 @@ export interface DashboardDeployment {
   /** IPv4 addresses or CIDR blocks (max 32) permitted to reach the
    *  deployment when `private=true`. Empty / undefined when public. */
   allowed_ips?: string[]
+  /** Wave FIX-J. Lifecycle policy for this deploy:
+   *  - 'auto_24h' (default): expires 24h after creation; six reminder
+   *    emails fire over the final 12h before deletion.
+   *  - 'permanent': no TTL — user opted in to keeping it forever.
+   *  - 'custom': user set a non-24h TTL via POST /deployments/:id/ttl.
+   *  Anonymous tier is FORCED to auto_24h. */
+  ttl_policy?: 'auto_24h' | 'permanent' | 'custom'
+  /** Wave FIX-J. When the deploy auto-expires. Omitted by the server
+   *  when ttl_policy='permanent'. */
+  expires_at?: string
+  /** Wave FIX-J. Count of reminder emails dispatched (0..6). Present
+   *  when ttl_policy != 'permanent'. */
+  reminders_sent?: number
+  /** Wave FIX-J. Absolute URL the dashboard "Keep this deployment"
+   *  button POSTs to. Server-supplied so the dashboard never has to
+   *  hand-construct it. */
+  make_permanent_url?: string
+  /** Wave FIX-J. Absolute URL the dashboard "Extend TTL" form POSTs
+   *  to with { hours: N }. */
+  extend_ttl_url?: string
 }
 
 export interface DashboardTeam {

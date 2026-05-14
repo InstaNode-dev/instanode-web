@@ -711,6 +711,12 @@ type DeploymentRespItem = {
   // privacy state when the backend hasn't shipped yet.
   private?: boolean
   allowed_ips?: string[]
+  // Wave FIX-J TTL fields (migration 045 + handlers/deploy_ttl.go).
+  ttl_policy?: string
+  expires_at?: string
+  reminders_sent?: number
+  make_permanent_url?: string
+  extend_ttl_url?: string
 }
 
 type DeploymentsListResp = {
@@ -771,6 +777,15 @@ function adaptDeployment(d: DeploymentRespItem): DashboardDeployment {
     // state from a stale payload.
     private: d.private ?? false,
     allowed_ips: d.allowed_ips ?? [],
+    // Wave FIX-J TTL fields. The server returns them on every deploy
+    // payload; older builds omit them and the dashboard renders as
+    // ttl_policy='auto_24h' (the documented default) so the UI never
+    // shows a stale "no TTL" state.
+    ttl_policy: d.ttl_policy as DashboardDeployment['ttl_policy'],
+    expires_at: d.expires_at,
+    reminders_sent: typeof d.reminders_sent === 'number' ? d.reminders_sent : undefined,
+    make_permanent_url: d.make_permanent_url,
+    extend_ttl_url: d.extend_ttl_url,
   }
 }
 
@@ -1005,6 +1020,82 @@ export async function cancelStackDeletion(
     `/api/v1/stacks/${encodeURIComponent(slug)}/confirm-deletion`,
     { method: 'DELETE' },
   )
+}
+
+// ─── Deploy TTL keepers — Wave FIX-J ─────────────────────────────────────
+//
+// Two POST endpoints back the "Keep this deployment" + "Extend TTL"
+// buttons on DeploymentsPage / DeployDetailPage. The server returns the
+// updated deployment row so we adapt it through the same adaptDeployment
+// path the list/get endpoints use — guarantees the response shape stays
+// identical across all four code paths.
+
+export async function makeDeploymentPermanent(
+  id: string,
+): Promise<{ ok: true; deployment: DashboardDeployment }> {
+  const r = await call<DeploymentGetResp>(
+    `/api/v1/deployments/${encodeURIComponent(id)}/make-permanent`,
+    { method: 'POST', body: '{}' },
+  )
+  if (!r.item) {
+    throw new APIError(500, 'invalid_response', 'POST /deployments/:id/make-permanent returned no item')
+  }
+  return { ok: true, deployment: adaptDeployment(r.item) }
+}
+
+export async function setDeploymentTTL(
+  id: string,
+  hours: number,
+): Promise<{ ok: true; deployment: DashboardDeployment }> {
+  const r = await call<DeploymentGetResp>(
+    `/api/v1/deployments/${encodeURIComponent(id)}/ttl`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ hours }),
+    },
+  )
+  if (!r.item) {
+    throw new APIError(500, 'invalid_response', 'POST /deployments/:id/ttl returned no item')
+  }
+  return { ok: true, deployment: adaptDeployment(r.item) }
+}
+
+// ─── Team settings — Wave FIX-J ──────────────────────────────────────────
+//
+// GET / PATCH /api/v1/team/settings. PATCH is owner/admin only on the
+// server; the dashboard hides the toggle for non-admin sessions, but the
+// server is the source of truth.
+
+export interface TeamSettings {
+  team_id: string
+  default_deployment_ttl_policy: 'auto_24h' | 'permanent'
+  default_deployment_ttl_hours: number
+}
+
+type TeamSettingsResp = {
+  ok: boolean
+  settings?: TeamSettings
+}
+
+export async function getTeamSettings(): Promise<{ ok: true; settings: TeamSettings }> {
+  const r = await call<TeamSettingsResp>('/api/v1/team/settings')
+  if (!r.settings) {
+    throw new APIError(500, 'invalid_response', 'GET /team/settings returned no settings')
+  }
+  return { ok: true, settings: r.settings }
+}
+
+export async function updateTeamSettings(
+  patch: Partial<Pick<TeamSettings, 'default_deployment_ttl_policy'>>,
+): Promise<{ ok: true; settings: TeamSettings }> {
+  const r = await call<TeamSettingsResp>('/api/v1/team/settings', {
+    method: 'PATCH',
+    body: JSON.stringify(patch),
+  })
+  if (!r.settings) {
+    throw new APIError(500, 'invalid_response', 'PATCH /team/settings returned no settings')
+  }
+  return { ok: true, settings: r.settings }
 }
 
 // ─── Stack family — env-sibling grid ─────────────────────────────────────
