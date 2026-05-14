@@ -5,7 +5,7 @@
  *   - Annual is the default frequency on first render
  *   - The Annual position copy reads "2 months free"
  *   - The monthly equivalent is visible when Annual is selected
- *   - "Most Popular" badge renders only on Pro
+ *   - "Most Popular" badge renders only on Hobby Plus (FIX-G, 2026-05-14)
  *   - Current tier shows "Your plan" pill, not a CTA
  *   - Promo UI is gone — Razorpay's hosted checkout handles codes
  *
@@ -329,31 +329,35 @@ describe('BillingPage — 5-tier pricing grid', () => {
     expect(grid.querySelector('[data-tier="team"]')).toBeTruthy()
   })
 
-  it('renders the Most Popular badge only on the Pro card', async () => {
+  // FIX-G (2026-05-14): the "Most Popular" badge moved from Pro to
+  // Hobby Plus to align with the W12 tier-intro story (Hobby Plus is the
+  // conversion sweet-spot — see PricingGrid.tsx for the rationale).
+  it('renders the Most Popular badge only on the Hobby Plus card', async () => {
     mockTier = 'hobby'
     mockHappyBilling()
     render(<BillingPage />)
     await waitForLoaded()
     const badges = screen.getAllByTestId('tier-most-popular-badge')
     expect(badges.length).toBe(1)
-    // The badge lives inside the Pro card.
-    const proCard = screen.getByTestId('tier-card-pro')
-    expect(proCard.contains(badges[0])).toBe(true)
-    // No badge on the other cards (including the new hobby_plus middle tier).
+    // The badge lives inside the Hobby Plus card.
+    const hobbyPlusCard = screen.getByTestId('tier-card-hobby_plus')
+    expect(hobbyPlusCard.contains(badges[0])).toBe(true)
+    // No badge on the other cards (including Pro, which previously carried it).
     expect(screen.getByTestId('tier-card-hobby').querySelector('[data-testid="tier-most-popular-badge"]')).toBeNull()
-    expect(screen.getByTestId('tier-card-hobby_plus').querySelector('[data-testid="tier-most-popular-badge"]')).toBeNull()
+    expect(screen.getByTestId('tier-card-pro').querySelector('[data-testid="tier-most-popular-badge"]')).toBeNull()
     expect(screen.getByTestId('tier-card-free').querySelector('[data-testid="tier-most-popular-badge"]')).toBeNull()
     expect(screen.getByTestId('tier-card-team').querySelector('[data-testid="tier-most-popular-badge"]')).toBeNull()
   })
 
-  it('marks the Pro card with data-highlight="true" (raised + thicker border)', async () => {
+  it('marks the Hobby Plus card with data-highlight="true" (raised + thicker border)', async () => {
     mockTier = 'hobby'
     mockHappyBilling()
     render(<BillingPage />)
     await waitForLoaded()
-    expect(screen.getByTestId('tier-card-pro').getAttribute('data-highlight')).toBe('true')
+    // FIX-G: highlight now lives on hobby_plus (was pro).
+    expect(screen.getByTestId('tier-card-hobby_plus').getAttribute('data-highlight')).toBe('true')
+    expect(screen.getByTestId('tier-card-pro').getAttribute('data-highlight')).toBe('false')
     expect(screen.getByTestId('tier-card-hobby').getAttribute('data-highlight')).toBe('false')
-    expect(screen.getByTestId('tier-card-hobby_plus').getAttribute('data-highlight')).toBe('false')
     expect(screen.getByTestId('tier-card-free').getAttribute('data-highlight')).toBe('false')
     expect(screen.getByTestId('tier-card-team').getAttribute('data-highlight')).toBe('false')
   })
@@ -478,11 +482,12 @@ describe('BillingPage — Annual mode price display', () => {
     render(<BillingPage />)
     await waitForLoaded()
     const hobbyPrice = screen.getByTestId('tier-price-hobby')
-    // W11: hobby yearly is $99/yr ($8.25/mo) — "save 1 month" framing.
-    // Was $90/yr ($7.50/mo) before hobby_plus inserted the mid-discount.
-    expect(hobbyPrice.textContent).toContain('$8.25')
+    // FIX-G (2026-05-14): hobby yearly is $90/yr ($7.50/mo) — 17%-off ladder
+    // mirroring api/plans.yaml hobby_yearly.price_monthly_cents=9000. The
+    // prior W11 expectation ($8.25 / $99/yr) had drifted from plans.yaml.
+    expect(hobbyPrice.textContent).toContain('$7.50')
     // Subtext makes clear this is the monthly equivalent of the yearly
-    // bill ("$8.25/mo, billed yearly").
+    // bill ("$7.50/mo, billed yearly").
     expect(hobbyPrice.textContent?.toLowerCase()).toContain('billed yearly')
   })
 
@@ -501,9 +506,11 @@ describe('BillingPage — Annual mode price display', () => {
     mockHappyBilling()
     render(<BillingPage />)
     await waitForLoaded()
-    // W11 savings ladder: Hobby $99/yr · save $9  ;
-    // Hobby Plus $199/yr · save $29  ;  Pro $490/yr · save $98.
-    expect(screen.getByTestId('tier-savings-hobby').textContent).toMatch(/\$99\/yr.*save \$9/)
+    // FIX-G savings ladder (mirrors api/plans.yaml *_yearly entries):
+    //   Hobby      $90/yr · save $18 (17%)
+    //   Hobby Plus $199/yr · save $29
+    //   Pro        $490/yr · save $98
+    expect(screen.getByTestId('tier-savings-hobby').textContent).toMatch(/\$90\/yr.*save \$18/)
     expect(screen.getByTestId('tier-savings-hobby_plus').textContent).toMatch(/\$199\/yr.*save \$29/)
     expect(screen.getByTestId('tier-savings-pro').textContent).toMatch(/\$490\/yr.*save \$98/)
   })
@@ -559,16 +566,16 @@ describe('BillingPage — CTA copy', () => {
     expect(proCta.textContent).toContain('$49/mo')
   })
 
-  it('Free user sees "Start Hobby — $8.25/mo" on the Hobby card in Annual mode', async () => {
+  it('Free user sees "Start Hobby — $7.50/mo" on the Hobby card in Annual mode', async () => {
     mockTier = 'free'
     mockHappyBilling()
     render(<BillingPage />)
     await waitForLoaded()
     const hobbyCta = screen.getByTestId('tier-cta-hobby') as HTMLButtonElement
     expect(hobbyCta.textContent).toContain('Start Hobby')
-    // W11: hobby yearly is $99/yr = $8.25/mo (was $7.50/mo before
-    // hobby_plus took the mid-discount slot).
-    expect(hobbyCta.textContent).toContain('$8.25/mo')
+    // FIX-G (2026-05-14): hobby yearly = $90/yr = $7.50/mo (plans.yaml
+    // hobby_yearly.price_monthly_cents = 9000).
+    expect(hobbyCta.textContent).toContain('$7.50/mo')
   })
 
   it('Pro user sees the "Upgrade to Team"/Contact sales button on the Team card', async () => {

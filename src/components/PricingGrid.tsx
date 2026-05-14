@@ -59,12 +59,21 @@ interface TierDefinition {
 
 // Numbers are USD and come from api/plans.yaml. "2 months free" framing
 // is enforced visually for Pro/Team: yearly price = monthly * 10,
-// savings = monthly * 2. Hobby uses "save 1 month" (yearly = monthly * 11)
-// and Hobby Plus sits mid-discount (yearly = monthly * 10.47).
-//   Hobby      $9/mo →   $99/yr ($8.25/mo)   · save $9
+// savings = monthly * 2 (~17% off). Hobby + Hobby Plus follow the same
+// "~17% off / 2 months free" ladder so the savings story is consistent
+// across every paid tier.
+//   Hobby      $9/mo →   $90/yr ($7.50/mo)   · save $18  (plans.yaml hobby_yearly = 9000 cents)
 //   Hobby Plus $19/mo →  $199/yr ($16.58/mo) · save $29
 //   Pro        $49/mo →  $490/yr ($40.83/mo) · save $98
 //   Team       $199/mo → $1990/yr ($165.83/mo) · save $398
+//
+// FIX-G (2026-05-14): Hobby yearly was showing $99/yr · save $9 which
+// drifted from plans.yaml hobby_yearly.price_monthly_cents = 9000 ($90/yr).
+// Numbers below now mirror plans.yaml. If pricing changes again, edit
+// plans.yaml first then this comment + the hobby block below — the
+// PricingGrid is a static marketing display, not a /api/v1/capabilities
+// reader (that's a follow-up worth doing once the pricing surface has
+// more than two consumers).
 export const PRICING_GRID_TIERS: TierDefinition[] = [
   {
     key: 'free',
@@ -86,10 +95,10 @@ export const PRICING_GRID_TIERS: TierDefinition[] = [
     label: 'Hobby',
     monthly: { price: '$9', sub: '/mo' },
     yearly: {
-      price: '$8.25',
+      price: '$7.50',
       sub: '/mo, billed yearly',
-      savings: '$99/yr · save $9',
-      yearlyTotal: '$99/yr',
+      savings: '$90/yr · save $18 (17%)',
+      yearlyTotal: '$90/yr',
     },
     features: [
       { text: '1 GB Postgres · 8 conn' },
@@ -123,6 +132,12 @@ export const PRICING_GRID_TIERS: TierDefinition[] = [
       { text: '14-day backups · 1-click restore' },
     ],
     upgradesTo: 'pro',
+    // FIX-G (2026-05-14): "Most Popular" badge moved here from Pro. The W12
+    // tier intro positioned Hobby Plus as the conversion sweet-spot (the
+    // mid-tier decoy that lifts $9→$19 upgrades and frames Pro as the
+    // power-user step), so flagging it as the popular pick keeps that story
+    // consistent across the pricing surface and the marketing copy.
+    highlight: true,
   },
   {
     key: 'pro',
@@ -143,7 +158,6 @@ export const PRICING_GRID_TIERS: TierDefinition[] = [
       { text: 'custom domain · 10k stored webhooks' },
     ],
     upgradesTo: 'team',
-    highlight: true,
   },
   {
     key: 'team',

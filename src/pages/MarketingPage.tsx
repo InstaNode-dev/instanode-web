@@ -429,9 +429,15 @@ export function MarketingPage() {
               Self-serve at every tier. <span className="mkt-accent">No sales call.</span>
             </h2>
             <p className="mkt-section-sub">
-              Anonymous is the funnel. Hobby pays for the side project. Pro unlocks the
-              multi-env workflow. Team is for the company that ships every day — talk to us
-              about your needs.
+              {/* FIX-G (2026-05-14): softened "Pro unlocks the multi-env
+                  workflow" — previously implied agency-scale (multiple
+                  products, multiple environments per product). Today's Pro
+                  is one product across dev/staging/prod, which is the
+                  honest framing and still differentiates from Hobby's
+                  prod-only flow. */}
+              Anonymous is the funnel. Hobby pays for the side project. Pro lets one
+              product run in production + staging + development. Team is for the company
+              that ships every day — talk to us about your needs.
             </p>
           </div>
 

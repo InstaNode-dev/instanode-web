@@ -290,7 +290,14 @@ export function OverviewPage() {
             </div>
           </div>
 
-          <Card title="Recent activity" right="last 1h" className="" style={{ padding: 0 }}>
+          {/* FIX-G (2026-05-14): right="last 1h" was a lie — fetchActivity()
+              calls /api/v1/audit?limit=20 with no `since` filter, so the
+              feed actually shows the last 20 events regardless of age.
+              Either the label or the fetch had to change; this is the
+              honest, smaller-blast-radius fix. Switching to a since-filter
+              would change visible-row counts for users with a quiet account
+              and is out of scope for FIX-G. */}
+          <Card title="Recent activity" right="last 20 events" className="" style={{ padding: 0 }}>
             <div className="feed">
               {activity.map((a) => (
                 <div key={a.id} className="feed-row">
