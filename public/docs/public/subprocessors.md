@@ -1,6 +1,6 @@
 # Subprocessors
 
-Last updated: 2026-05-13.
+Last updated: 2026-05-14.
 
 This page lists the sub-processors instanode.dev engages to provide the Service. It is the authoritative record referenced by the [Data Processing Agreement](./dpa.md) and by Cloud Security Alliance CAIQ Section H responses.
 
@@ -17,6 +17,10 @@ This page lists the sub-processors instanode.dev engages to provide the Service.
 | Google | OAuth sign-in | Email address; given name; family name | United States | Yes | Yes — EU-US Data Privacy Framework certified |
 | New Relic | Observability — logs, traces, metrics | Operational telemetry; may incidentally include customer identifiers (account UUIDs, email addresses) in error contexts | United States | Yes | Yes — EU-US Data Privacy Framework certified |
 | Amazon Web Services (SES bounce handling) | Email-deliverability webhooks (bounce, complaint, suppression) | Masked recipient addresses; delivery status codes | United States | Yes | Yes — EU-US Data Privacy Framework certified |
+| Resend | Transactional email — account verification, magic-link sign-in, billing notifications | Email address; auth-token payload contained in the message body during the validity window | United States | Yes | Yes — EU-US Data Privacy Framework certified |
+| Cloudflare | CDN + DNS for marketing and dashboard hosts (instanode.dev apex, *.instanode.dev) | HTTP request metadata; payload bytes are visible at the edge because Cloudflare terminates TLS before forwarding to origin | Global edge network | Yes | Yes — EU-US Data Privacy Framework certified |
+| Fastly + GitHub Pages | Marketing site and `/docs/public/*` SSG hosting (instanode.dev static assets) | Public marketing content + the dashboard SPA bundle; no PII transits this path | United States + EU edges | Yes | Yes — EU-US Data Privacy Framework certified |
+| Loops | Lifecycle email forwarder — onboarding drip, churn-prevention, win-back; sees the same audit event stream the backend emits under the `Loops forwarder` audit kind | Customer email address; tagged lifecycle event metadata (signup, upgrade, downgrade, deletion request) | United States | Yes | Yes — EU-US Data Privacy Framework certified |
 
 ---
 
