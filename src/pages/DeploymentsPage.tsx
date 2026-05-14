@@ -55,6 +55,29 @@ export function DeploymentsPage() {
           for paid-tier consideration. */}
       <QuotaWallBanner teamId={ctx.me?.team?.id} />
 
+      {/* W9: human-driven "Create stack" entry-point. The dashboard
+          stays read-only everywhere else, but POST /stacks/new is
+          multipart-only — agents can't tar up source either, so this
+          form is the one place we drive a write ourselves. */}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+        <Link
+          to="/app/stacks/new"
+          data-testid="create-stack-link"
+          style={{
+            padding: '8px 14px',
+            fontSize: 12,
+            fontWeight: 500,
+            background: 'var(--blue, #4488ff)',
+            color: 'white',
+            border: 0,
+            borderRadius: 4,
+            textDecoration: 'none',
+          }}
+        >
+          + Create stack
+        </Link>
+      </div>
+
       <div className="table">
         <div className="table-row head" style={{ gridTemplateColumns: '1.5fr 1fr 100px 80px 100px 80px 28px' }}>
           <span>name</span>

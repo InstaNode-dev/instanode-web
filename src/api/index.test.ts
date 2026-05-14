@@ -34,6 +34,8 @@ import {
   updateDeploymentAccess,
   reportExperimentConverted,
   validatePromotion,
+  createStack,
+  fetchStackStatus,
 } from './index'
 // §10.21: FIXTURE_BILLING / FIXTURE_INVOICES imports retired. The 503
 // fallback paths in fetchBilling() and listInvoices() were removed —
@@ -1388,5 +1390,168 @@ describe('Admin URL prefix wiring', () => {
     // bounded by slashes. A prefix containing "admin" as substring must
     // NOT produce that exact path.
     expect(url).not.toContain('/api/v1/admin/customers')
+  })
+})
+
+// ─── createStack() — POST /stacks/new multipart upload ───────────────────
+// W9: the human-driven "Create stack" form. The api endpoint is multipart-
+// only; this helper builds the FormData body. We lock the field names
+// because the api parser is strict about them.
+describe('createStack()', () => {
+  function fakeFile(name: string, size: number): File {
+    const f = new File([new ArrayBuffer(size)], name, { type: 'application/gzip' })
+    return f
+  }
+
+  it('POSTs to /stacks/new with a multipart body containing the tarball', async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse({
+      ok: true, slug: 'sunny-cat-9', status: 'building', url: null, name: 'sunny-cat-9', env: 'development',
+    }))
+    const f = fakeFile('app.tar.gz', 2048)
+    const r = await createStack(f, {
+      name: 'my-app',
+      port: 3000,
+      env: 'staging',
+      env_vars: { API_KEY: 'secret' },
+    })
+    expect(r.ok).toBe(true)
+    expect(r.stack.slug).toBe('sunny-cat-9')
+    expect(r.stack.status).toBe('building')
+
+    const [url, init] = m.mock.calls[0]
+    expect(String(url)).toContain('/stacks/new')
+    expect(init?.method).toBe('POST')
+    // Body is a FormData instance; assert the fields we appended.
+    const body = init!.body as FormData
+    expect(body).toBeInstanceOf(FormData)
+    expect(body.get('name')).toBe('my-app')
+    expect(body.get('port')).toBe('3000')
+    expect(body.get('env')).toBe('staging')
+    expect(body.get('env_vars')).toBe(JSON.stringify({ API_KEY: 'secret' }))
+    expect(body.get('tarball')).toBe(f)
+    // CRITICAL — Content-Type must NOT be set on the request headers; the
+    // browser generates a multipart boundary automatically. Set it
+    // ourselves and the api parser bails.
+    const headers = init?.headers as Headers
+    expect(headers.has('Content-Type')).toBe(false)
+  })
+
+  it('defaults env to "development" when caller omits it (matches platform memory 2026-05-13)', async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse({
+      ok: true, slug: 's', status: 'building', url: null,
+    }))
+    await createStack(fakeFile('a.tar.gz', 100), {})
+    const body = m.mock.calls[0][1]!.body as FormData
+    expect(body.get('env')).toBe('development')
+  })
+
+  it('omits name + port + env_vars from the body when not provided', async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse({
+      ok: true, slug: 's', status: 'building', url: null,
+    }))
+    await createStack(fakeFile('a.tar.gz', 100), {})
+    const body = m.mock.calls[0][1]!.body as FormData
+    expect(body.has('name')).toBe(false)
+    expect(body.has('port')).toBe(false)
+    expect(body.has('env_vars')).toBe(false)
+    // env always lands (defaults to 'development').
+    expect(body.has('env')).toBe(true)
+  })
+
+  it('sends an Authorization: Bearer header when a token is present', async () => {
+    const m = installFetch()
+    setToken('test-token-xyz')
+    m.mockResolvedValueOnce(jsonResponse({ ok: true, slug: 's', status: 'building', url: null }))
+    await createStack(fakeFile('a.tar.gz', 100), {})
+    const headers = m.mock.calls[0][1]?.headers as Headers
+    expect(headers.get('Authorization')).toBe('Bearer test-token-xyz')
+  })
+
+  it('propagates 402 (tier wall) so the page can show the upgrade banner', async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse(
+      { error: 'tier_limit', message: 'upgrade to pro for more stacks', agent_action: 'upgrade_to_pro' },
+      { status: 402 },
+    ))
+    await expect(createStack(fakeFile('a.tar.gz', 100), {}))
+      .rejects.toMatchObject({ status: 402 })
+  })
+
+  it('propagates 400 (invalid_tarball) so the form can render the message inline', async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse(
+      { error: 'invalid_tarball', message: 'missing Dockerfile' },
+      { status: 400 },
+    ))
+    await expect(createStack(fakeFile('a.tar.gz', 100), {}))
+      .rejects.toMatchObject({ status: 400, message: 'missing Dockerfile' })
+  })
+
+  it('propagates 413 (payload too large)', async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse({ error: 'too_large' }, { status: 413 }))
+    await expect(createStack(fakeFile('a.tar.gz', 100), {}))
+      .rejects.toMatchObject({ status: 413 })
+  })
+
+  it('returns slug + status from the 202 response shape', async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse({
+      ok: true,
+      slug: 'rainy-tree-3',
+      status: 'building',
+      url: null,
+      name: 'rainy-tree-3',
+      env: 'production',
+    }, { status: 202 }))
+    const r = await createStack(fakeFile('a.tar.gz', 100), {})
+    expect(r.stack.slug).toBe('rainy-tree-3')
+    expect(r.stack.status).toBe('building')
+    expect(r.stack.url).toBeNull()
+  })
+})
+
+// ─── fetchStackStatus() — GET /api/v1/stacks/:slug polling helper ───────
+describe('fetchStackStatus()', () => {
+  it('GETs /api/v1/stacks/:slug and adapts the response shape', async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse({
+      ok: true,
+      stack: {
+        stack_id: 's1', slug: 's1', name: 'my-stack', status: 'running',
+        url: 'https://s1.deployment.instanode.dev', env: 'production', tier: 'pro',
+        created_at: '2026-05-13T00:00:00Z',
+      },
+    }))
+    const r = await fetchStackStatus('s1')
+    expect(r.ok).toBe(true)
+    expect(r.stack?.slug).toBe('s1')
+    expect(r.stack?.status).toBe('running')
+    expect(r.stack?.url).toBe('https://s1.deployment.instanode.dev')
+    expect(String(m.mock.calls[0][0])).toContain('/api/v1/stacks/s1')
+  })
+
+  it('returns stack=null on 404 instead of throwing', async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse({ error: 'not_found' }, { status: 404 }))
+    const r = await fetchStackStatus('missing')
+    expect(r.ok).toBe(true)
+    expect(r.stack).toBeNull()
+  })
+
+  it('URI-encodes the slug', async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse({ ok: true, stack: { slug: 'a b', status: 'building' } }))
+    await fetchStackStatus('a b')
+    expect(String(m.mock.calls[0][0])).toContain('/api/v1/stacks/a%20b')
+  })
+
+  it('propagates 5xx (not 404) so the polling caller can decide to retry', async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse({ error: 'internal' }, { status: 500 }))
+    await expect(fetchStackStatus('s1')).rejects.toMatchObject({ status: 500 })
   })
 })
