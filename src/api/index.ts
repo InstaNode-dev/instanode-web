@@ -73,10 +73,17 @@ class APIError extends Error {
   }
 }
 
-// Paths where a 401 should NOT trigger the auto-redirect to /login. The
-// LoginPage uses fetchMe() to verify a freshly-pasted PAT and wants to
-// surface the 401 inline; the ClaimPage handles its own auth flow.
-const AUTH_REDIRECT_SKIP_PREFIXES = ['/login', '/claim']
+// Paths where a 401 SHOULD auto-redirect to /login. Only the gated `/app/*`
+// subtree warrants kicking the user out — every other route (marketing `/`,
+// `/pricing`, `/docs`, `/blog`, `/use-cases`, `/status`, `/incidents`,
+// `/login`, `/claim`, …) must render even when the api rejects a stray
+// call. The previous SKIP-list approach was inverted: any public page that
+// happened to fire a 401-producing api call (stale NR ping, deferred
+// fetch, a re-mounted hook from cached navigation) would bounce the
+// visitor to /login. That was the root cause of "homepage automatically
+// redirects to /login" — fixed by gating the redirect to the path we
+// actually want to protect.
+const AUTH_REDIRECT_REQUIRED_PREFIXES = ['/app']
 const RETURN_TO_KEY = 'instanode.return_to'
 
 /**
@@ -84,13 +91,15 @@ const RETURN_TO_KEY = 'instanode.return_to'
  *   1. clears the stored token,
  *   2. saves the current pathname+search under `instanode.return_to` so the
  *      user can be sent back after re-login,
- *   3. redirects to `/login` via `window.location.replace` (so the back
- *      button doesn't loop), and
+ *   3. redirects to `/login` via `window.location.replace` ONLY if the
+ *      caller is already inside the gated `/app/*` subtree,
  *   4. still throws the `APIError` so callers see a rejected promise.
  *
- * The redirect is suppressed when the current path already starts with
- * `/login` or `/claim` — those pages render the 401 inline. The function
- * is also a no-op outside a browser environment (SSR / unit tests).
+ * The redirect is intentionally limited to `/app/*`. On any public page
+ * (marketing, pricing, docs, login, claim) we clear the token and surface
+ * the error to the caller without navigation — the page stays renderable
+ * for an anonymous visitor. The function is also a no-op outside a
+ * browser environment (SSR / unit tests).
  */
 async function call<T>(
   path: string,
@@ -118,15 +127,19 @@ async function call<T>(
   const body: any = ct.includes('application/json') ? await res.json().catch(() => null) : await res.text()
   if (!res.ok) {
     if (res.status === 401) {
-      let onAuthPage = false
+      let inGatedAppArea = false
       try {
         const p = location.pathname
-        onAuthPage = AUTH_REDIRECT_SKIP_PREFIXES.some((prefix) => p.startsWith(prefix))
+        inGatedAppArea = AUTH_REDIRECT_REQUIRED_PREFIXES.some(
+          (prefix) => p === prefix || p.startsWith(prefix + '/'),
+        )
       } catch {
-        /* non-browser env (jsdom-less tests) — treat as not on auth page */
+        /* non-browser env (jsdom-less tests) — treat as not in /app */
       }
-      if (!onAuthPage) {
-        clearToken()
+      // Always clear the stale token so subsequent calls don't re-attach
+      // it. Only navigate when we're already inside the gated area.
+      clearToken()
+      if (inGatedAppArea) {
         try {
           localStorage.setItem(RETURN_TO_KEY, location.pathname + location.search)
         } catch {

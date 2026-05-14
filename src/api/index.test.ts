@@ -554,6 +554,23 @@ describe('claim()', () => {
     })
   })
 
+  it('does NOT redirect on 401 from the marketing homepage (regression for "homepage auto-redirects to /login")', async () => {
+    // Root cause of the homepage-redirect bug: the previous SKIP-list only
+    // excluded /login + /claim. Any other public page (marketing /, /pricing,
+    // /docs, /blog, /use-cases, /status, /incidents) would, on a 401 from a
+    // stray api call, get bounced to /login. Fix: redirect only when in
+    // /app/*. Pin pathname stability on / as the regression guard.
+    window.history.pushState({}, '', '/')
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse(
+      { error: 'unauthorized' },
+      { status: 401, statusText: 'Unauthorized' },
+    ))
+    await expect(fetchMe()).rejects.toMatchObject({ status: 401 })
+    expect(window.location.pathname).toBe('/')
+    window.history.pushState({}, '', '/')
+  })
+
   it('does NOT redirect on 401 when the current path starts with /claim', async () => {
     // Navigate jsdom to /claim/abc via history.pushState so the auth-skip
     // prefix matches. We can't spy on window.location.replace in jsdom 24
