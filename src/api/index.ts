@@ -8,7 +8,8 @@
 // real error banner instead of lying with mock data.
 
 import type {
-  Resource, DashboardStack, DashboardDeployment, DeploymentStatus,
+  Resource, DashboardStack, StackStatus,
+  DashboardDeployment, DeploymentStatus,
   DashboardTeam, BillingDetails, Invoice,
   TeamMember, TeamInvitation, AuthMeResponse, VaultEntry, ActivityItem,
   AdminCustomerListResponse, AdminCustomerDetailResponse,
@@ -837,6 +838,174 @@ export async function getStack(slug: string): Promise<{ ok: true; stack: Dashboa
     return { ok: true as const, stack }
   } catch {
     return { ok: true as const, stack: null }
+  }
+}
+
+// ─── createStack — POST /stacks/new (multipart tarball upload) ───────────
+//
+// W9: the StackCreatePage at /app/stacks/new lets a human upload a
+// .tar.gz (Dockerfile + source) and ship it without touching curl. The
+// agent API endpoint is multipart-only — fields ride alongside the
+// `tarball` file part.
+//
+// Tarball size limit: 50 MB (per platform CLAUDE.md). Validated on the
+// caller side too so the user sees an inline error before the upload
+// starts; the api enforces the same limit at the edge.
+//
+// Response shape (synchronous: 202 Accepted on success):
+//   { ok: true, slug, status: "building", url?, name?, env? }
+// The dashboard polls GET /api/v1/stacks/:slug afterwards (via
+// fetchStackStatus) until status flips to running / healthy / failed.
+//
+// Tier-wall: anonymous gets 0 stacks, hobby gets 1, pro+ gets more. The
+// api returns 402 with agent_action; the caller surfaces an upgrade prompt.
+export interface CreateStackInput {
+  /** Optional human-readable name (max 32, lowercase + hyphens). Empty →
+   *  server auto-generates a slug like `tender-sky-9421`. */
+  name?: string
+  /** Container HTTP port. Default 8080. */
+  port?: number
+  /** Env scope (production / staging / development). Default 'development'
+   *  per the 2026-05-13 platform memory (default env flipped). */
+  env?: string
+  /** Map of env vars handed to the container. Keys must be uppercase +
+   *  underscore + alphanumeric — validated by the form. */
+  env_vars?: Record<string, string>
+}
+
+export interface CreateStackResponse {
+  /** Stack slug — used in /api/v1/stacks/:slug polling and the final URL. */
+  slug: string
+  /** Current build status. 'building' on synchronous 202; the caller polls
+   *  until this flips to 'running' / 'failed'. */
+  status: StackStatus
+  /** Final live URL once status is 'running'. May be null while building. */
+  url: string | null
+  /** Echoed name (server-generated if input.name was empty). */
+  name?: string
+  /** Echoed env scope. */
+  env?: string
+}
+
+/**
+ * Upload a tarball + metadata to POST /stacks/new. The body is multipart;
+ * env_vars (a JS object) is serialized to JSON for the matching form field.
+ *
+ * Authentication: pulls the bearer token from localStorage (same as call()).
+ * 401 propagates so AuthGate redirects — we don't replicate the redirect
+ * logic here because the route is auth-gated already and the caller's page
+ * mount has already passed the gate.
+ *
+ * Errors:
+ *   - 400 with { error: 'invalid_tarball', message }: surface inline
+ *   - 402 with { error: 'tier_limit', message, agent_action }: tier wall
+ *   - 413: tarball too large (the api enforces ≤ 50 MB)
+ *   - any other 4xx/5xx: propagate as APIError so the page renders a banner
+ */
+export async function createStack(
+  file: File,
+  opts: CreateStackInput = {},
+): Promise<{ ok: true; stack: CreateStackResponse }> {
+  const fd = new FormData()
+  fd.append('tarball', file)
+  if (opts.name) fd.append('name', opts.name)
+  if (opts.port !== undefined) fd.append('port', String(opts.port))
+  // Default env: 'development' per the 2026-05-13 platform memory. Caller
+  // can override to production / staging / custom.
+  fd.append('env', opts.env ?? 'development')
+  if (opts.env_vars && Object.keys(opts.env_vars).length > 0) {
+    fd.append('env_vars', JSON.stringify(opts.env_vars))
+  }
+
+  const headers = new Headers()
+  const tok = getToken()
+  if (tok) headers.set('Authorization', `Bearer ${tok}`)
+  // CRITICAL: do NOT set Content-Type for FormData — the browser must
+  // generate its own boundary. Setting it here would break the upload at
+  // the multipart parser.
+
+  const base = getAPIBaseURL()
+  const url = new URL(
+    '/stacks/new',
+    base || (typeof window !== 'undefined' ? window.location.origin : 'http://localhost'),
+  )
+  const res = await fetch(url.toString(), { method: 'POST', headers, body: fd })
+  const ct = res.headers.get('content-type') ?? ''
+  const body: any = ct.includes('application/json')
+    ? await res.json().catch(() => null)
+    : await res.text()
+
+  if (!res.ok) {
+    const code = (body && body.error) || `http_${res.status}`
+    const msg = (body && (body.message || body.error_description)) || res.statusText
+    throw new APIError(res.status, code, msg)
+  }
+
+  // Synchronous 202 / 200 — the server hands back the slug + initial state.
+  // Fields tolerated as optional because the api may add/drop them across
+  // versions; the page polls /api/v1/stacks/:slug for the canonical state.
+  const stack: CreateStackResponse = {
+    slug: body?.slug ?? body?.stack_id ?? '',
+    status: (body?.status as StackStatus) ?? 'building',
+    url: body?.url ?? null,
+    name: body?.name,
+    env: body?.env ?? body?.environment,
+  }
+  return { ok: true as const, stack }
+}
+
+/**
+ * Poll a single stack's current state. Returns null when the slug is not
+ * found (server returns 404 if the stack was deleted mid-poll, or if the
+ * caller doesn't own it). Other errors propagate so the page can show a
+ * real banner instead of pretending the build is still in flight.
+ */
+export async function fetchStackStatus(
+  slug: string,
+): Promise<{ ok: true; stack: DashboardStack | null }> {
+  try {
+    type StackGetResp = {
+      ok: boolean
+      stack?: {
+        stack_id?: string
+        slug?: string
+        name?: string
+        status?: string
+        tier?: string
+        url?: string | null
+        env?: string
+        created_at?: string
+      }
+      // Some api builds return the row at the top level under `item`.
+      item?: {
+        stack_id?: string
+        slug?: string
+        name?: string
+        status?: string
+        tier?: string
+        url?: string | null
+        env?: string
+        created_at?: string
+      }
+    }
+    const r = await call<StackGetResp>(`/api/v1/stacks/${encodeURIComponent(slug)}`)
+    const s = r.stack ?? r.item
+    if (!s) return { ok: true as const, stack: null }
+    const stack: DashboardStack = {
+      id: s.stack_id ?? s.slug ?? slug,
+      slug: s.slug ?? s.stack_id ?? slug,
+      name: s.name ?? '',
+      status: (s.status as DashboardStack['status']) ?? 'building',
+      url: s.url ?? null,
+      created_at: s.created_at ?? '',
+      team_id: '',
+      env: (s.env as DashboardStack['env']) ?? 'production',
+      tier: (s.tier as DashboardStack['tier']) ?? 'free',
+    }
+    return { ok: true as const, stack }
+  } catch (e: any) {
+    if (e?.status === 404) return { ok: true as const, stack: null }
+    throw e
   }
 }
 

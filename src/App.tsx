@@ -91,6 +91,15 @@ const DeployDetailPage = lazy(() =>
 // StacksPage retired 2026-05-12 — duplicate of DeploymentsPage. UI says
 // "Deployments" (user language); the API stays /api/v1/stacks (existing
 // data model). One page, one route.
+//
+// StackCreatePage (W9) — human-driven /stacks/new wizard. Lives behind
+// /app/stacks/new because POST /stacks/new is a multipart-only endpoint
+// that's hostile to curl-shy customers. This is the one place the
+// dashboard intentionally drives a write itself (vs. the agent-driven
+// PromptCard pattern) because agents can't tar up source either.
+const StackCreatePage = lazy(() =>
+  import('./pages/StackCreatePage').then((m) => ({ default: m.StackCreatePage })),
+)
 const VaultPage = lazy(() =>
   import('./pages/VaultPage').then((m) => ({ default: m.VaultPage })),
 )
@@ -222,6 +231,12 @@ export function AppRoutes() {
           <Route path="resources/:id" element={<ResourceDetailPage />} />
           <Route path="deployments" element={<DeploymentsPage />} />
           <Route path="deployments/:id" element={<DeployDetailPage />} />
+          {/* W9: /app/stacks/new is the human-driven "Create stack"
+              wizard. We deliberately keep the path under /stacks/ (not
+              /deployments/) because the underlying api endpoint is
+              POST /stacks/new — preserving the user→api vocabulary
+              parity helps when someone hits the "open in curl" path. */}
+          <Route path="stacks/new" element={<StackCreatePage />} />
           <Route path="vault" element={<VaultPage />} />
           <Route path="team" element={<TeamPage />} />
           <Route path="billing" element={<BillingPage />} />
