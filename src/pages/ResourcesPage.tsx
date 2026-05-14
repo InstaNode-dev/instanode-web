@@ -6,6 +6,7 @@ import {
 } from '../components/Common'
 import { QuotaWallBanner } from '../components/QuotaWallBanner'
 import { UpgradePromptCard } from '../components/UpgradePromptCard'
+import { PauseResumeButton } from '../components/PauseResumeButton'
 import * as api from '../api'
 import type { Resource, ResourceType, Tier } from '../api'
 import { useDashboardCtx } from '../hooks/useDashboardCtx'
@@ -53,6 +54,13 @@ export function ResourcesPage() {
     () => items.filter((r) => type === 'all' || r.resource_type === type),
     [items, type]
   )
+
+  // Replace one row in-place after pause/resume so the row's status pill +
+  // button label flip without a full refetch. Keyed by id; we keep object
+  // identity for every other row so React doesn't re-render the whole table.
+  function handleResourceUpdated(next: Resource) {
+    setItems((prev) => prev.map((r) => (r.id === next.id ? next : r)))
+  }
 
   const totalGB = items.reduce((s, r) => s + r.storage_bytes, 0) / 1_000_000_000
 
@@ -154,7 +162,7 @@ export function ResourcesPage() {
       </div>
 
       <div className="table">
-        <div className="table-row head" style={{ gridTemplateColumns: '1.6fr 70px 80px 1fr 80px 90px 28px' }}>
+        <div className="table-row head" style={{ gridTemplateColumns: '1.6fr 70px 80px 1fr 80px 90px 80px' }}>
           <span>resource</span>
           <span>tier</span>
           <span>env</span>
@@ -165,7 +173,7 @@ export function ResourcesPage() {
         </div>
         {loading
           ? Array.from({ length: 4 }).map((_, i) => (
-              <div key={i} className="table-row" style={{ gridTemplateColumns: '1.6fr 70px 80px 1fr 80px 90px 28px' }}>
+              <div key={i} className="table-row" style={{ gridTemplateColumns: '1.6fr 70px 80px 1fr 80px 90px 80px' }}>
                 <span className="skel" style={{ width: 180, height: 18 }} />
                 <span className="skel" style={{ width: 40, height: 14 }} />
                 <span className="skel" style={{ width: 50, height: 14 }} />
@@ -180,7 +188,7 @@ export function ResourcesPage() {
                 to={`/resources/${r.id}`}
                 key={r.id}
                 className="table-row"
-                style={{ gridTemplateColumns: '1.6fr 70px 80px 1fr 80px 90px 28px', textDecoration: 'none', color: 'inherit' }}
+                style={{ gridTemplateColumns: '1.6fr 70px 80px 1fr 80px 90px 80px', textDecoration: 'none', color: 'inherit' }}
               >
                 <div className="res-name">
                   <ResourceIcon type={r.resource_type} />
@@ -222,7 +230,13 @@ export function ResourcesPage() {
                   {r.connections_in_use ?? '—'} / {r.connections_limit ?? '—'}
                 </span>
                 <RelTime at={r.created_at} />
-                <span />
+                <span onClick={(e) => e.preventDefault()}>
+                  <PauseResumeButton
+                    resource={r}
+                    onUpdated={handleResourceUpdated}
+                    size="sm"
+                  />
+                </span>
               </Link>
             ))}
       </div>

@@ -329,27 +329,6 @@ export async function inviteMember(_body: { email: string; role: string }): Prom
   return { ok: true }
 }
 
-// ─── Resource pause / resume (LIVE — Pro+ tier) ────────────────────────
-// Pause keeps the data + connection_url but stops counting the resource
-// against the per-team count quota; storage still counts. Resume flips
-// status back to active. 402 means the team is on a tier that doesn't
-// include pause/resume; surface the agent_action upgrade copy.
-export async function pauseResource(id: string): Promise<{ ok: true; resource: Resource }> {
-  const r = await call<{ ok: boolean; resource: any }>(
-    `/api/v1/resources/${encodeURIComponent(id)}/pause`,
-    { method: 'POST' },
-  )
-  return { ok: true, resource: adaptResource(r.resource) }
-}
-
-export async function resumeResource(id: string): Promise<{ ok: true; resource: Resource }> {
-  const r = await call<{ ok: boolean; resource: any }>(
-    `/api/v1/resources/${encodeURIComponent(id)}/resume`,
-    { method: 'POST' },
-  )
-  return { ok: true, resource: adaptResource(r.resource) }
-}
-
 // ─── Resources (LIVE) ───────────────────────────────────────────────────
 type ResourceListResp = { ok: boolean; items: any[]; total: number }
 type ResourceGetResp = { ok: boolean; item: any }
@@ -399,6 +378,35 @@ export async function getResource(id: string): Promise<{ ok: true; resource: Res
 
 export async function deleteResource(id: string): Promise<void> {
   await call(`/api/v1/resources/${id}`, { method: 'DELETE' })
+}
+
+// ─── Pause / resume (Pro+ feature) ──────────────────────────────────────
+//
+// Pause stops the resource counting against quota while preserving every
+// byte of data. Resume flips it back to 'active' so it counts again and is
+// reachable. Both are idempotent on the server: pausing an already-paused
+// resource returns the current row unchanged; same for resume.
+//
+// Tier gate: the agent API returns 402 with `agent_action` on
+// anonymous/free/hobby. The callers (PauseResumeButton) trap that status
+// and render the upgrade CTA inline instead of throwing. Other errors
+// (5xx, network) propagate so the UI can surface a real banner.
+//
+// Status semantics:
+//   POST /api/v1/resources/:id/pause   → { ok, item: <resource with status='paused'> }
+//   POST /api/v1/resources/:id/resume  → { ok, item: <resource with status='active'> }
+//
+// We re-use the existing GetResp adapter so the returned Resource mirrors
+// what GET /:id would have produced — callers can replace state directly
+// without a second fetch.
+export async function pauseResource(id: string): Promise<{ ok: true; resource: Resource }> {
+  const r = await call<ResourceGetResp>(`/api/v1/resources/${id}/pause`, { method: 'POST' })
+  return { ok: true, resource: adaptResource(r.item) }
+}
+
+export async function resumeResource(id: string): Promise<{ ok: true; resource: Resource }> {
+  const r = await call<ResourceGetResp>(`/api/v1/resources/${id}/resume`, { method: 'POST' })
+  return { ok: true, resource: adaptResource(r.item) }
 }
 
 export async function rotateResource(id: string): Promise<{ ok: true; connection_url: string; resource: Resource }> {
