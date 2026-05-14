@@ -404,4 +404,34 @@ describe('OverviewPage — Stat sparklines (no fake trend data)', () => {
       expect(tiles.length).toBe(6)
     })
   })
+
+  // W11 honesty patch (2026-05-14): the brief calls this out explicitly —
+  // pin that none of the legacy hardcoded sparkline arrays appear in the
+  // shipped source. We assert against the source-file text rather than the
+  // rendered DOM because a regression could easily *not* render them yet
+  // still ship them in a code path that a tile mounts later (think:
+  // tier-conditional fake series). The arrays the P3 persona caught:
+  //   [22, 20, 18, 15, 13, 11, 10, 8]
+  //   [12, 12, 12, 12, ...]
+  //   [18, 15, 8, 16, 4, 12, 6, 14, 9, 7, 11]
+  it('source file does NOT contain the legacy hardcoded sparkline arrays', async () => {
+    const fs = await import('node:fs')
+    const path = await import('node:path')
+    const src = fs.readFileSync(
+      path.resolve(__dirname, 'OverviewPage.tsx'),
+      'utf8',
+    )
+    // Strip comments (`// ...` and `/* ... */`) before the substring check
+    // so the historical reference to "[22,20,18,...]" in the JSDoc on Stat
+    // doesn't trip the regex. We only care about code-level literals.
+    const code = src
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/^[ \t]*\/\/.*$/gm, '')
+    // Normalise spaces inside arrays — `[22,20,18,15,13,11,10,8]` and
+    // `[22, 20, 18, 15, 13, 11, 10, 8]` both must trip the check.
+    const normalised = code.replace(/\s+/g, '')
+    expect(normalised).not.toContain('[22,20,18,15,13,11,10,8]')
+    expect(normalised).not.toContain('[12,12,12,12,12,12,12,12]')
+    expect(normalised).not.toContain('[18,15,8,16,4,12,6,14,9,7,11]')
+  })
 })
