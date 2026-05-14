@@ -108,8 +108,11 @@ describe('ResourceDetailPage — API contract panel', () => {
       expect(screen.getByText('API contract')).toBeTruthy()
     })
 
-    // Four rows with status="live" — GET, POST rotate, DELETE, GET metrics.
+    // Eight rows with status="live": GET resource, POST rotate-credentials,
+    // POST pause, POST resume, POST provision-twin, GET credentials, DELETE,
+    // GET metrics (W8 surfaces the full per-resource contract; metrics
+    // upgraded from gap to live in W7-F).
     const liveNodes = container.querySelectorAll('.meta.ok')
-    expect(liveNodes.length).toBe(4)
+    expect(liveNodes.length).toBe(8)
   })
 })
