@@ -17,6 +17,9 @@
  *   - Nine `.meta.ok` rows (the existing eight + /audit).
  *   - The Audit tab renders <AuditPanel /> on click — pinned via the
  *     `audit-loading` / `audit-empty` testids depending on mock state.
+ *   - The PauseResumeButton renders inside the right-rail Pause card —
+ *     pinned via the `pause-resume-button` testid (P3 #58 regression
+ *     would have shipped the contract line without the actual button).
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
@@ -253,3 +256,29 @@ describe('ResourceDetailPage — Audit tab wiring (W11 honesty)', () => {
   })
 })
 
+describe('ResourceDetailPage — PauseResumeButton presence (W11 regression pin)', () => {
+  // P3 #58 regression: the PR claimed pause/resume support but no
+  // PauseResumeButton component file shipped — grep confirmed zero
+  // `pause|resume` references in dashboard/src/ at the time. The
+  // component DID ship in W9-B1 (PR #58 follow-up), but a page-level
+  // pin keeps the surface from silently going missing again: a future
+  // refactor that drops the import would break this test, not a user.
+  //
+  // The presence test lives at the page level (not just on
+  // PauseResumeButton.test.tsx) because the failure mode the persona
+  // hit was "the component isn't mounted", not "the component is
+  // broken" — only an integration-level assertion catches that.
+  it('renders the PauseResumeButton on the Overview tab', async () => {
+    mockGetResource.mockResolvedValueOnce({ ok: true, resource: makeResource() })
+    renderAt('res_abc')
+
+    await waitFor(() => {
+      expect(screen.getByText('API contract')).toBeTruthy()
+    })
+    // The PauseResumeButton lives in the right-rail "Pause this
+    // resource" card on the Overview tab. It self-renders nothing for
+    // terminal statuses but our makeResource() fixture has
+    // status='active', so the button is expected to be present.
+    expect(screen.getByTestId('pause-resume-button')).toBeTruthy()
+  })
+})
