@@ -169,6 +169,42 @@ async function main() {
   await writeFile(appShellPath, template, 'utf-8')
   console.log('prerender: wrote dist/app/index.html SPA shell (P3 fix)')
 
+  // Step 4.6: emit SPA shells for the OAuth + magic-link entry paths.
+  //
+  // 2026-05-14: user reported GitHub OAuth login broken. Root cause: the
+  // api side mints the JWT correctly and 302-redirects to
+  // https://instanode.dev/login/callback?session_token=<jwt>. But the GH
+  // Pages host had no file under dist/login/ — 404. The SPA shell never
+  // boots, React Router never runs, LoginCallbackPage never stores the
+  // session_token. Same break hits anyone who refreshes /login or visits
+  // /claim from a magic-link email.
+  //
+  // Same logic as Step 4.5 above for /app: these routes need localStorage
+  // (so they can't be SSR'd through render(route)) but they MUST return
+  // 200 with the SPA shell so the client takes over and reads the query
+  // string. Write the unrendered template to each.
+  const authShellRoutes = ['/login', '/login/callback', '/claim']
+  for (const route of authShellRoutes) {
+    const p = resolve(DIST, route.replace(/^\//, ''), 'index.html')
+    await mkdir(dirname(p), { recursive: true })
+    await writeFile(p, template, 'utf-8')
+  }
+  console.log(`prerender: wrote ${authShellRoutes.length} auth SPA shells`)
+
+  // Step 4.7: emit dist/404.html as the SPA shell so any unknown route
+  // (bookmarks, shared links, search-engine deep links into auth-gated
+  // pages, magic-link recipients clicking into a path we haven't enumerated)
+  // boots the React app instead of seeing GH Pages's stock 404 page.
+  //
+  // GH Pages returns HTTP 404 with the body content of 404.html for any
+  // unmatched path. Status code is suboptimal for crawlers, but the
+  // browser renders the body anyway and the SPA hydrates against the
+  // requested URL via window.location — so /login/callback?t=... works
+  // even from a cold magic-link click.
+  const notFoundPath = resolve(DIST, '404.html')
+  await writeFile(notFoundPath, template, 'utf-8')
+  console.log('prerender: wrote dist/404.html SPA fallback')
+
   // Step 5: copy /llms.txt from the content repo to dist root. The
   // llms.txt convention (https://llmstxt.org) expects the file at the
   // domain root.
