@@ -1,17 +1,16 @@
-/* ResourceDetailPage.test.tsx — pin the API-contract panel does NOT advertise
- * unbuilt endpoints as status="gap".
+/* ResourceDetailPage.test.tsx — API-contract panel.
  *
- * Before this fix (P3 founder persona, 2026-05-13) the page rendered two
- * <ContractLine> rows with status="gap" pointing at
- * /api/v1/resources/:id/metrics and /api/v1/resources/:id/audit — endpoints
- * that don't exist on the agent API yet. The literal word "gap" leaked into
- * the rendered HTML (via the data-status attribute on ContractLine) and
- * read to customers as a missing surface they should worry about. The fix
- * removes those rows and replaces them with a "request early access" CTA.
+ * History:
+ *   - 2026-05-13 (P3 founder persona, PR #54): both /metrics and /audit
+ *     advertised as status="gap"; replaced with an early-access CTA.
+ *   - 2026-05-14 (W7-F): /metrics shipped (status="live"). Audit remains
+ *     gap; CTA testid renamed to `audit-early-access`.
  *
- * The W7-F api side will add the real /metrics endpoint. When it lands the
- * dashboard should re-add a ContractLine with status="live" and remove the
- * CTA — at which point this test should be updated, not deleted.
+ * Pins:
+ *   - Only /audit may remain gap; metrics + the three Resource endpoints
+ *     are live.
+ *   - audit-early-access CTA renders with a mailto.
+ *   - Four live ContractLines: GET resource, POST rotate, DELETE, GET metrics.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
@@ -70,7 +69,7 @@ beforeEach(() => {
 afterEach(() => cleanup())
 
 describe('ResourceDetailPage — API contract panel', () => {
-  it('does NOT render any contract line with status="gap"', async () => {
+  it('only renders /audit as the remaining gap row', async () => {
     mockGetResource.mockResolvedValueOnce({ ok: true, resource: makeResource() })
     const { container } = renderAt('res_abc')
 
@@ -80,28 +79,20 @@ describe('ResourceDetailPage — API contract panel', () => {
       expect(screen.getByText('API contract')).toBeTruthy()
     })
 
-    // Hard guarantee: no ContractLine renders with the "gap" status. The
-    // ContractLine helper (Common.tsx) renders the status string into a
-    // <span class="meta gap">…</span> and also splats the status word as
-    // the visible text inside that span. Either signal failing here means
-    // a regression brought the placeholder rows back.
+    // After W7-F shipped (2026-05-14), only /audit remains gap. The
+    // other gap row (/metrics) is now live.
     const gapBadges = container.querySelectorAll('.meta.gap')
-    expect(gapBadges.length).toBe(0)
-
-    // And the literal "gap" word must not appear as a status indicator
-    // inside the contract panel.
-    const html = container.innerHTML
-    expect(html).not.toMatch(/>gap</)
+    expect(gapBadges.length).toBe(1)
   })
 
-  it('renders the "request early access" CTA in place of the gap rows', async () => {
+  it('renders the audit "request early access" CTA', async () => {
     mockGetResource.mockResolvedValueOnce({ ok: true, resource: makeResource() })
     renderAt('res_abc')
 
     await waitFor(() => {
-      expect(screen.getByTestId('metrics-early-access')).toBeTruthy()
+      expect(screen.getByTestId('audit-early-access')).toBeTruthy()
     })
-    const cta = screen.getByTestId('metrics-early-access')
+    const cta = screen.getByTestId('audit-early-access')
     expect(cta.textContent).toMatch(/coming in Pro/i)
     // The CTA must include a mailto so the customer can actually reach us.
     const mailto = cta.querySelector('a[href^="mailto:"]') as HTMLAnchorElement
@@ -109,7 +100,7 @@ describe('ResourceDetailPage — API contract panel', () => {
     expect(mailto.href).toContain('enterprise@instanode.dev')
   })
 
-  it('still renders the live contract lines for the real endpoints', async () => {
+  it('renders the live contract lines for the real endpoints', async () => {
     mockGetResource.mockResolvedValueOnce({ ok: true, resource: makeResource() })
     const { container } = renderAt('res_abc')
 
@@ -117,8 +108,8 @@ describe('ResourceDetailPage — API contract panel', () => {
       expect(screen.getByText('API contract')).toBeTruthy()
     })
 
-    // Three rows with status="live" — GET, POST rotate, DELETE.
+    // Four rows with status="live" — GET, POST rotate, DELETE, GET metrics.
     const liveNodes = container.querySelectorAll('.meta.ok')
-    expect(liveNodes.length).toBe(3)
+    expect(liveNodes.length).toBe(4)
   })
 })
