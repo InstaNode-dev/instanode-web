@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useState } from 'react'
 import { PromptCard, copyToClipboard } from '../components/Common'
 import * as api from '../api'
-import type { APIKey, APIKeyCreated } from '../api'
+import type { APIKey, APIKeyCreated, TeamSettings } from '../api'
 import { useDashboardCtx } from '../hooks/useDashboardCtx'
 
 // PAT creation stays clickable here because it's the bootstrap surface:
@@ -38,6 +38,9 @@ export function SettingsPage() {
       <p style={{ color: 'var(--text-dim)', marginBottom: 24 }}>
         Personal Access Tokens for agents and CI · scoped to your team
       </p>
+
+      {/* Wave FIX-J: per-team default deploy TTL policy. */}
+      <DeployTtlPolicyCard />
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 24 }}>
         <div className="card">
@@ -229,3 +232,103 @@ function fmtRel(iso: string) {
   if (s < 86400) return `${Math.floor(s / 3600)}h ago`
   return `${Math.floor(s / 86400)}d ago`
 }
+
+// DeployTtlPolicyCard — Wave FIX-J. Lets owner/admin flip the team-wide
+// default for POST /deploy/new between auto_24h (default — every new
+// deploy auto-expires in 24h) and permanent (deploys never auto-expire).
+//
+// Per-request ttl_policy on /deploy/new always overrides this default,
+// so this toggle is the "what does the agent get when it doesn't pass
+// ttl_policy?" knob. Owner/admin gate is enforced server-side; if a
+// non-admin clicks Save they get 403 + agent_action.
+function DeployTtlPolicyCard() {
+  const [settings, setSettings] = useState<TeamSettings | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  const [ok, setOk] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    api
+      .getTeamSettings()
+      .then((r) => {
+        if (cancelled) return
+        setSettings(r.settings)
+        setLoading(false)
+      })
+      .catch((e: any) => {
+        if (cancelled) return
+        // 401 will trigger AuthGate redirect higher up; other errors
+        // render an honest error state — never silently default.
+        setErr(e?.message ?? 'load failed')
+        setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const save = async (policy: 'auto_24h' | 'permanent') => {
+    setBusy(true)
+    setErr(null)
+    setOk(false)
+    try {
+      const r = await api.updateTeamSettings({ default_deployment_ttl_policy: policy })
+      setSettings(r.settings)
+      setOk(true)
+    } catch (e: any) {
+      setErr(e?.message ?? 'update failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="card" style={{ marginBottom: 20 }} data-testid="deploy-ttl-policy-card">
+      <h3 style={{ fontSize: 14, fontWeight: 500, marginBottom: 12 }}>Deploy default TTL</h3>
+      <p style={{ fontSize: 12.5, color: 'var(--text-dim)', marginBottom: 16, lineHeight: 1.5 }}>
+        Every new <code>POST /deploy/new</code> auto-expires after 24h by default — six
+        reminder emails fire over the final 12h, and the agent can keep a deploy with
+        a single <code>POST /api/v1/deployments/&lt;id&gt;/make-permanent</code> call.
+        Flip the team default to <strong>Permanent</strong> if you want new deploys
+        to skip the countdown by default. Per-request <code>ttl_policy</code> still
+        wins.
+      </p>
+      {loading && (
+        <div style={{ fontSize: 12, color: 'var(--text-dim)' }}>loading…</div>
+      )}
+      {!loading && settings && (
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <button
+            data-testid="ttl-policy-auto-24h"
+            className={`btn btn-sm ${settings.default_deployment_ttl_policy === 'auto_24h' ? 'btn-primary' : 'btn-ghost'}`}
+            disabled={busy || settings.default_deployment_ttl_policy === 'auto_24h'}
+            onClick={() => save('auto_24h')}
+          >
+            Auto-expire (24h)
+          </button>
+          <button
+            data-testid="ttl-policy-permanent"
+            className={`btn btn-sm ${settings.default_deployment_ttl_policy === 'permanent' ? 'btn-primary' : 'btn-ghost'}`}
+            disabled={busy || settings.default_deployment_ttl_policy === 'permanent'}
+            onClick={() => save('permanent')}
+          >
+            Permanent
+          </button>
+          {ok && (
+            <span style={{ fontSize: 11.5, color: 'var(--accent, #00e48e)', marginLeft: 8 }}>
+              saved
+            </span>
+          )}
+        </div>
+      )}
+      {err && (
+        <div role="alert" style={{ marginTop: 10, color: 'var(--rose)', fontSize: 11.5 }}>
+          {err}
+        </div>
+      )}
+    </div>
+  )
+}
+
