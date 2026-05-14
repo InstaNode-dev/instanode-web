@@ -69,6 +69,10 @@ async function loadRoutes() {
     '/docs',
     '/blog',
     '/use-cases',
+    // W12 B4: /changelog ships as a real pre-rendered HTML so crawlers
+    // and a procurement reviewer pasting the URL into a browser both
+    // see the actual entries on first byte.
+    '/changelog',
     ...blogSlugs.map((s) => `/blog/${s}`),
     ...useCaseSlugs.map((s) => `/use-cases/${s}`),
   ]

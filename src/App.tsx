@@ -55,6 +55,15 @@ const UseCasesPage = lazy(() =>
 const UseCaseDetailPage = lazy(() =>
   import('./pages/UseCaseDetailPage').then((m) => ({ default: m.UseCaseDetailPage })),
 )
+// ChangelogPage (W12 B4) — public /changelog. The DPA, subprocessor list,
+// and trust-residency egress section all reference /changelog as the
+// contractual change-notice channel; before this route existed every doc
+// that linked to it 404'd. Lazy-loaded for parity with the other
+// secondary marketing surfaces (Blog, Docs, Use cases) — a homepage
+// visitor doesn't pay for these bytes.
+const ChangelogPage = lazy(() =>
+  import('./pages/ChangelogPage').then((m) => ({ default: m.ChangelogPage })),
+)
 
 // Authenticated dashboard surfaces — lazy-loaded. These pages only render
 // behind AuthGate (token must be present), so a marketing visitor never
@@ -205,6 +214,10 @@ export function AppRoutes() {
         <Route path="/docs" element={<DocsPage />} />
         <Route path="/use-cases" element={<UseCasesPage />} />
         <Route path="/use-cases/:slug" element={<UseCaseDetailPage />} />
+        {/* W12 B4: /changelog — referenced by DPA §6 (sub-processor
+            change notification), subprocessors.md, and trust-residency
+            egress section. Used to 404 because no route existed. */}
+        <Route path="/changelog" element={<ChangelogPage />} />
 
         {/* ─── auth surfaces (no chrome, dedicated layout) ───────── */}
         <Route path="/login" element={<LoginPage />} />

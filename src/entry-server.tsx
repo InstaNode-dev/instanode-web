@@ -43,6 +43,7 @@ import { BlogPostPage } from './pages/BlogPostPage'
 import { DocsPage } from './pages/DocsPage'
 import { UseCasesPage } from './pages/UseCasesPage'
 import { UseCaseDetailPage } from './pages/UseCaseDetailPage'
+import { ChangelogPage } from './pages/ChangelogPage'
 
 // SSRRoutes — the SSG-only route tree. Mirrors the public surface of the
 // client AppRoutes (everything reachable without auth). The /app/* subtree
@@ -61,6 +62,7 @@ function SSRRoutes() {
       <Route path="/docs" element={<DocsPage />} />
       <Route path="/use-cases" element={<UseCasesPage />} />
       <Route path="/use-cases/:slug" element={<UseCaseDetailPage />} />
+      <Route path="/changelog" element={<ChangelogPage />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   )
