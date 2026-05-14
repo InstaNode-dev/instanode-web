@@ -128,12 +128,17 @@ export function OverviewPage() {
       </ROBanner>
 
       <div className="stats">
-        <Stat k="resources" v={loading ? '—' : resources.length.toString()} d={newThisWeek === 0 ? '—' : `+${newThisWeek} this week`} spark="m" />
-        <Stat k={`storage / ${tierLimitGB} GB`} v={loading ? '—' : (totalStorageMB / 1000).toFixed(1)} unit="GB" d={storageSub} dCls="dim" spark="up" sparkColor="rgba(108,206,255,0.45)" />
-        <Stat k={`conn / ${connLim}`} v={loading ? '—' : conn.toString()} d={connSub} dCls="dim" spark="bumpy" sparkColor="rgba(255,192,105,0.4)" />
-        <Stat k="deployments" v={loading ? '—' : deployCount.toString()} d={deploySub} spark="flat" sparkColor="rgba(183,148,246,0.4)" />
-        <Stat k="webhooks · 24h" v={loading ? '—' : webhookCount.toString()} d="" spark="up" sparkColor="rgba(0,228,142,0.45)" />
-        <Stat k="vault entries" v={vaultCount.toString()} d={vaultSub} dCls="dim" spark="flat" sparkColor="rgba(255,122,138,0.4)" />
+        {/* Sparkline series intentionally omitted — there's no real
+            time-series source for these metrics yet. The component
+            renders the number tile honestly without a fake trend.
+            Wire up real series in a follow-up (W7-G) once /api/v1/
+            stats/series is live. */}
+        <Stat k="resources" v={loading ? '—' : resources.length.toString()} d={newThisWeek === 0 ? '—' : `+${newThisWeek} this week`} series={undefined} />
+        <Stat k={`storage / ${tierLimitGB} GB`} v={loading ? '—' : (totalStorageMB / 1000).toFixed(1)} unit="GB" d={storageSub} dCls="dim" series={undefined} />
+        <Stat k={`conn / ${connLim}`} v={loading ? '—' : conn.toString()} d={connSub} dCls="dim" series={undefined} />
+        <Stat k="deployments" v={loading ? '—' : deployCount.toString()} d={deploySub} series={undefined} />
+        <Stat k="webhooks · 24h" v={loading ? '—' : webhookCount.toString()} d="" series={undefined} />
+        <Stat k="vault entries" v={vaultCount.toString()} d={vaultSub} dCls="dim" series={undefined} />
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr', gap: 16, minWidth: 0 }}>
@@ -266,28 +271,34 @@ export function OverviewPage() {
 }
 
 // ---------- helpers ----------
+// Stat — a number tile with a label, value, unit, sub-line and optional
+// sparkline trend.
+//
+// IMPORTANT: `series` must be REAL data when provided. The component
+// used to synthesize hardcoded series like [22,20,18,...] from a `spark`
+// shape hint, which presented as a real trend to users (P3 founder
+// persona caught this on 2026-05-13). If you don't have real series data
+// for the metric, omit the prop and the sparkline simply doesn't render.
+// The number tile alone is still useful.
+//
+// `sparkColor` only affects the sparkline; ignored when `series` is undefined.
 function Stat({
   k,
   v,
   unit,
   d,
   dCls = '',
-  spark,
-  sparkColor
+  series,
+  sparkColor,
 }: {
   k: string
   v: string
   unit?: string
   d: string
   dCls?: string
-  spark?: 'up' | 'flat' | 'bumpy' | 'm'
+  series?: number[]
   sparkColor?: string
 }) {
-  const series =
-    spark === 'up'   ? [22, 20, 18, 15, 13, 11, 10, 8] :
-    spark === 'flat' ? [12, 12, 12, 12, 12, 12, 12, 12] :
-    spark === 'bumpy' ? [18, 15, 8, 16, 4, 12, 6, 14, 9, 7, 11] :
-    /* m */            [18, 16, 17, 12, 13, 8, 10, 4]
   return (
     <div className="stat">
       <div className="k">{k}</div>
@@ -296,7 +307,9 @@ function Stat({
         {unit && <span className="unit">{unit}</span>}
       </div>
       <div className={`d ${dCls}`}>{d}</div>
-      <Sparkline points={series} color={sparkColor} />
+      {series && series.length > 0 ? (
+        <Sparkline points={series} color={sparkColor} />
+      ) : null}
     </div>
   )
 }

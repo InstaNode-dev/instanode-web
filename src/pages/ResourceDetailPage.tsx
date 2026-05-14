@@ -175,8 +175,35 @@ export function ResourceDetailPage() {
               <ContractLine method="GET"    path="/api/v1/resources/:id" status="live" />
               <ContractLine method="POST"   path="/api/v1/resources/:id/rotate" status="live" />
               <ContractLine method="DELETE" path="/api/v1/resources/:id" status="live" />
-              <ContractLine method="GET"    path="/api/v1/resources/:id/metrics" status="gap" />
-              <ContractLine method="GET"    path="/api/v1/resources/:id/audit" status="gap" />
+              {/* Metrics + Audit endpoints intentionally omitted (P3 persona
+                  feedback 2026-05-13). The previous build advertised them
+                  as status="gap" — placeholders for unbuilt features that
+                  read to customers as missing contracts on a live surface.
+                  Replaced with the early-access CTA below. The real
+                  contracts will land via W7-F (api side) and W7-G
+                  (dashboard wiring); when those ship, re-add ContractLine
+                  rows with status="live". */}
+              <div
+                data-testid="metrics-early-access"
+                style={{
+                  marginTop: 10,
+                  padding: '10px 12px',
+                  border: '1px dashed var(--border)',
+                  borderRadius: 6,
+                  fontSize: 12.5,
+                  color: 'var(--text-dim)',
+                  lineHeight: 1.55,
+                }}
+              >
+                <strong style={{ color: 'var(--text)' }}>Per-resource metrics & audit</strong>
+                {' — '}coming in Pro.{' '}
+                <a
+                  href="mailto:enterprise@instanode.dev?subject=Early%20access%3A%20resource%20metrics%20%26%20audit"
+                  style={{ color: 'var(--accent)', textDecoration: 'underline', textUnderlineOffset: 3 }}
+                >
+                  Request early access →
+                </a>
+              </div>
             </Card>
 
             <PromptCard

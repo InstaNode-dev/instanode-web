@@ -65,6 +65,7 @@ async function loadRoutes() {
     '/pricing',
     '/for-agents',
     '/status',
+    '/incidents',
     '/docs',
     '/blog',
     '/use-cases',
@@ -132,6 +133,33 @@ async function main() {
     await writeFile(outPath, rendered, 'utf-8')
     written++
   }
+
+  // Step 4.5: emit empty SPA shells for every authenticated /app/* entry.
+  //
+  // P3 founder persona caught instanode.dev/app returning 404 on 2026-05-13.
+  // Cause: the GH Pages SPA pattern (cp dist/index.html dist/404.html)
+  // serves 404.html with HTTP status 404 for any path that doesn't have a
+  // matching file under dist/. For SEO routes (/pricing, /blog/...) we
+  // emit dist/<route>/index.html via SSG above, which fixes the status to
+  // 200 for crawlers. The /app/* tree is intentionally NOT SSG'd (it needs
+  // localStorage, would crash in renderToString, and has no SEO value
+  // anyway because it's auth-gated). But the entry path /app must still
+  // return 200 so a customer who types instanode.dev/app into a browser
+  // sees the SPA boot, not a 404 page.
+  //
+  // Fix: write the unrendered SPA template (the same one Vite emits as
+  // dist/index.html before our prerender step overwrites it for the
+  // homepage) to dist/app/index.html. The file has an empty
+  // <div id="root"></div>; React Router mounts in the browser, sees URL
+  // /app, runs through AuthGate, and either renders the overview or
+  // redirects to /login. Status 200 either way.
+  //
+  // The dist/index.html template variable above still has the unrendered
+  // SPA shell because we read it BEFORE the homepage was overwritten.
+  const appShellPath = resolve(DIST, 'app', 'index.html')
+  await mkdir(dirname(appShellPath), { recursive: true })
+  await writeFile(appShellPath, template, 'utf-8')
+  console.log('prerender: wrote dist/app/index.html SPA shell (P3 fix)')
 
   // Step 5: copy /llms.txt from the content repo to dist root. The
   // llms.txt convention (https://llmstxt.org) expects the file at the
