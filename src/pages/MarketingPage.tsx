@@ -13,8 +13,36 @@
  * so we don't pollute the global token sheet.
  */
 
+import { useState } from 'react'
 import { Brand } from '../components/Common'
 import { USE_CASES } from '../content/useCases'
+
+// The "paste this into your AI" starter prompt. Kept as a module-level
+// constant so the JSX render, the Copy button's clipboard write, and the
+// unit tests all read the same source of truth — if the prose drifts in
+// one place the others stay aligned.
+//
+// Constraints (per the brief):
+//   1. Must include the literal URL https://instanode.dev/llms.txt so the
+//      LLM has somewhere to fetch the full API contract.
+//   2. Must include the [describe what you're building] placeholder so the
+//      user understands this is a starter, not a finished prompt.
+//   3. Must show at least one concrete endpoint (/db/new is the canonical
+//      one) so the user sees the shape before the agent reads llms.txt.
+export const AI_STARTER_PROMPT = `I want to build [describe what you're building]. Use instanode.dev as the backend.
+
+First, read https://instanode.dev/llms.txt — it has the full API contract: every endpoint, response shape, tier limit, and convention.
+
+Then provision exactly what you need with single curl calls (no signup, no key):
+
+  curl -X POST https://api.instanode.dev/db/new        # Postgres
+  curl -X POST https://api.instanode.dev/cache/new     # Redis
+  curl -X POST https://api.instanode.dev/storage/new   # S3-compatible storage
+  curl -X POST https://api.instanode.dev/deploy/new -F tarball=@app.tar.gz   # container deploy
+
+Each response returns a connection_url ready for any standard driver, plus an upgrade_jwt I can use to claim the resource past its 24h TTL.
+
+When you're done, list the exact commands you ran and the URLs you provisioned so I can claim them.`
 
 /* Curated subset of cases for the homepage showcase — one strong exemplar
  * per major archetype so a visitor sees the catalogue's range without
@@ -42,6 +70,7 @@ const ROUTES = {
   changelog: '/changelog',
   forAgents: '#for-agents',
   playground: '#playground',
+  aiStarter: '#ai-starter',
 } as const
 
 type Service = {
@@ -159,6 +188,28 @@ const PLANS: Plan[] = [
 ]
 
 export function MarketingPage() {
+  // "Copied ✓" affordance for the AI starter-prompt block. We toggle on
+  // successful clipboard write and snap back to "Copy" after ~1.5s — long
+  // enough to register visually, short enough that a second click reads
+  // as a fresh action. We don't gate the copy on the result of the
+  // clipboard call: navigator.clipboard.writeText returns a promise, but
+  // jsdom in unit tests resolves it synchronously while real browsers
+  // resolve it within a microtask, so we await it and only flip state
+  // when it succeeds. Failures (e.g. iframe without focus, permissions-
+  // policy block) silently leave the button label alone — the prompt is
+  // still selectable so the user can fall back to manual copy.
+  const [copied, setCopied] = useState(false)
+
+  async function handleCopyPrompt() {
+    try {
+      await navigator.clipboard.writeText(AI_STARTER_PROMPT)
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 1500)
+    } catch {
+      // intentional no-op — see comment above
+    }
+  }
+
   return (
     <div className="mkt">
       <style>{MKT_CSS}</style>
@@ -258,6 +309,74 @@ export function MarketingPage() {
           </div>
         </div>
       </header>
+
+      {/* ---------- AI starter prompt ---------- *
+       *
+       * Placement: between hero and services. The hero answers "what is
+       * this", and the very next scroll-stop answers "what do I do next"
+       * with a single copy-pasteable artifact. Burying this inside
+       * #for-agents (further down the page) makes anonymous visitors
+       * miss the platform's strongest value prop: "your agent can build
+       * on us in one paste."
+       *
+       * The Copy button writes AI_STARTER_PROMPT to the clipboard. We
+       * deliberately also expose /llms.txt as a separate visible link
+       * below the codeblock, so an advanced reader can bypass the prompt
+       * entirely and point their own agent straight at the contract.
+       */}
+      <section className="mkt-section mkt-ai-starter" id="ai-starter">
+        <div className="mkt-wrap">
+          <div className="mkt-section-head">
+            <div className="mkt-section-tag">Try it · 30 seconds</div>
+            <h2 className="mkt-section-title">
+              Want to try?{' '}
+              <span className="mkt-accent">Paste this into your AI.</span>
+            </h2>
+            <p className="mkt-section-sub">
+              Drop this prompt into Claude, ChatGPT, Cursor, Aider, or Claude Code.
+              Your agent reads the full API contract from{' '}
+              <a href="https://instanode.dev/llms.txt" className="mkt-link-inline">
+                instanode.dev/llms.txt
+              </a>{' '}
+              and starts provisioning. No signup, no SDK.
+            </p>
+          </div>
+
+          <div className="mkt-ai-card">
+            <div className="mkt-ai-card-head">
+              <span className="mkt-ai-card-label">starter prompt</span>
+              <button
+                type="button"
+                className="mkt-ai-copy-btn"
+                onClick={handleCopyPrompt}
+                aria-label="Copy starter prompt"
+              >
+                {copied ? 'Copied ✓' : 'Copy'}
+              </button>
+            </div>
+            <pre
+              className="mkt-codeblock mkt-ai-prompt"
+              data-testid="ai-starter-prompt"
+            >
+              {AI_STARTER_PROMPT}
+            </pre>
+            <p className="mkt-ai-footnote">
+              Or skip the prompt — your agent can read{' '}
+              <a
+                href="https://instanode.dev/llms.txt"
+                className="mkt-link-inline"
+                data-testid="ai-starter-llms-link"
+              >
+                https://instanode.dev/llms.txt
+              </a>{' '}
+              directly.
+            </p>
+            <p className="mkt-ai-tested">
+              Tested with: Claude, ChatGPT, Cursor, Aider, Cline.
+            </p>
+          </div>
+        </div>
+      </section>
 
       {/* ---------- seven services row ---------- */}
       <section className="mkt-section" id="services">
@@ -1415,6 +1534,88 @@ const MKT_CSS = `
 .mkt-codeblock .dim { color: var(--text-faint); }
 .mkt-codeblock .key { color: var(--blue); }
 .mkt-codeblock .str { color: var(--accent); }
+
+/* ---------- AI starter prompt ---------- */
+.mkt-ai-starter .mkt-section-head { max-width: 760px; }
+.mkt-link-inline {
+  color: var(--violet);
+  border-bottom: 1px dashed rgba(183,148,246,0.35);
+  transition: color 150ms, border-color 150ms;
+}
+.mkt-link-inline:hover {
+  color: var(--text);
+  border-bottom-color: var(--violet);
+}
+.mkt-ai-card {
+  max-width: 880px;
+  margin: 32px auto 0;
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px;
+  position: relative;
+  z-index: 1;
+}
+.mkt-ai-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+  gap: 12px;
+}
+.mkt-ai-card-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-faint);
+}
+.mkt-ai-copy-btn {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text);
+  background: rgba(183,148,246,0.10);
+  border: 1px solid rgba(183,148,246,0.30);
+  border-radius: 6px;
+  padding: 6px 14px;
+  cursor: pointer;
+  transition: background 150ms, border-color 150ms, color 150ms;
+}
+.mkt-ai-copy-btn:hover {
+  background: rgba(183,148,246,0.18);
+  border-color: var(--violet);
+}
+.mkt-ai-copy-btn:focus-visible {
+  outline: 2px solid var(--violet);
+  outline-offset: 2px;
+}
+.mkt-ai-prompt {
+  font-size: 12.5px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 0;
+  max-height: none;
+  background: transparent;
+  border: 1px dashed var(--border-soft);
+}
+.mkt-ai-footnote {
+  font-size: 13px;
+  color: var(--text-dim);
+  margin: 16px 0 0;
+  line-height: 1.55;
+}
+.mkt-ai-tested {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-faint);
+  margin: 10px 0 0;
+}
+@media (max-width: 720px) {
+  .mkt-ai-card { padding: 14px; margin-top: 24px; }
+  .mkt-ai-prompt { font-size: 12px; }
+  .mkt-ai-card-head { flex-wrap: wrap; }
+}
 
 /* ---------- footer ---------- */
 .mkt-footer {
