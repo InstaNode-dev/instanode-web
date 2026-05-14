@@ -6,7 +6,11 @@ import { useEffect, useState } from 'react'
 import { PublicShell } from '../layout/PublicShell'
 import { copyToClipboard } from '../components/Common'
 
-type TierKey = 'anonymous' | 'hobby' | 'pro' | 'team'
+// TierKey — the local-to-this-page tier enum. Marketing /pricing uses
+// `anonymous` (the public-facing label for the no-signup free curl tier),
+// not `free` — the marketing CTA goes through the agent flow rather than
+// the dashboard signup. W11 inserted `hobby_plus` between hobby and pro.
+type TierKey = 'anonymous' | 'hobby' | 'hobby_plus' | 'pro' | 'team'
 
 // P2: monthly vs yearly pricing. The toggle on this page is purely
 // presentational — the CTA passes the chosen cycle through as
@@ -40,10 +44,23 @@ const TIERS: {
     key: 'hobby',
     name: 'Hobby',
     monthly: { price: '$9', sub: '/ mo' },
-    yearly: { price: '$7.50', sub: '/ mo billed yearly', saveLabel: 'save $18/yr' },
+    yearly: { price: '$8.25', sub: '/ mo billed yearly', saveLabel: 'save $9/yr' },
     cta: 'Start hobby →',
     ctaHrefMonthly: '/checkout?plan=hobby&frequency=monthly',
     ctaHrefYearly: '/checkout?plan=hobby&frequency=yearly',
+  },
+  // hobby_plus (W11) — $19/mo mid-step. Sits between Hobby and Pro to
+  // anchor the decoy effect: research shows triple-tier $9/$19/$49 lifts
+  // conversion ~22% vs $9/$49. The CTA points at /checkout which routes
+  // to /api/v1/billing/checkout with plan=hobby_plus.
+  {
+    key: 'hobby_plus',
+    name: 'Hobby Plus',
+    monthly: { price: '$19', sub: '/ mo' },
+    yearly: { price: '$16.58', sub: '/ mo billed yearly', saveLabel: 'save $29/yr' },
+    cta: 'Start hobby plus →',
+    ctaHrefMonthly: '/checkout?plan=hobby_plus&frequency=monthly',
+    ctaHrefYearly: '/checkout?plan=hobby_plus&frequency=yearly',
   },
   {
     key: 'pro',
@@ -80,7 +97,9 @@ type Cell =
   | string
   | { mark: 'check' | 'dash' }
   | { text: string; comingSoon?: boolean }
-type Row = { label: string; sub?: string; values: [Cell, Cell, Cell, Cell] }
+// Row values are a 5-tuple in column order: Anonymous, Hobby, Hobby Plus,
+// Pro, Team. The order MUST stay in lock-step with the TIERS array above.
+type Row = { label: string; sub?: string; values: [Cell, Cell, Cell, Cell, Cell] }
 
 // Team-tier values use { text: '', comingSoon: true } across the board because
 // the tier isn't shipped — claiming "unlimited" for capacity we haven't
@@ -88,26 +107,33 @@ type Row = { label: string; sub?: string; values: [Cell, Cell, Cell, Cell] }
 // real numbers from plans.yaml.
 const SOON: Cell = { text: '', comingSoon: true }
 
+// W11 (2026-05-13): added the Hobby Plus column (third position). Each row
+// now has 5 cells: [Anonymous, Hobby, Hobby Plus, Pro, Team]. Numbers come
+// from api/plans.yaml. Hobby Plus shares Postgres/Redis with Hobby and
+// bumps MongoDB, storage, webhooks, deployments, and unlocks multi-env
+// + custom domain + 1-click restore.
 const ROWS: Row[] = [
-  { label: 'Postgres', values: ['10 MB / 2 conn / 24h TTL', '1 GB / 8 conn', '5 GB / 20 conn', SOON] },
-  { label: 'Redis',    values: ['5 MB / 24h TTL', '50 MB',           '256 MB',         SOON] },
-  { label: 'MongoDB',  values: ['5 MB / 2 conn / 24h TTL',  '100 MB / 5 conn', '2 GB / 20 conn', SOON] },
-  { label: 'Queue',    sub: 'NATS', values: ['24 h TTL', '1 000 msg/d', '100k msg/d', SOON] },
-  { label: 'Storage',  values: [{ mark: 'dash' }, '1 bucket',  '5 buckets',  SOON] },
-  { label: 'Webhook stored', values: ['100', '1 000', '10k', SOON] },
-  { label: 'Deploy apps', values: [{ mark: 'dash' }, '1 small', '10 medium', SOON] },
-  { label: 'Domains',  values: [{ mark: 'dash' }, '*.deployment.instanode.dev', 'custom domain', SOON] },
+  { label: 'Postgres', values: ['10 MB / 2 conn / 24h TTL', '1 GB / 8 conn',     '1 GB / 8 conn',     '5 GB / 20 conn', SOON] },
+  { label: 'Redis',    values: ['5 MB / 24h TTL',           '50 MB',             '50 MB',             '256 MB',         SOON] },
+  { label: 'MongoDB',  values: ['5 MB / 2 conn / 24h TTL',  '100 MB / 5 conn',   '1 GB / 5 conn',     '2 GB / 20 conn', SOON] },
+  { label: 'Queue',    sub: 'NATS', values: ['24 h TTL', '1 000 msg/d', '5 000 msg/d', '100k msg/d', SOON] },
+  { label: 'Storage',  values: [{ mark: 'dash' },              '512 MB',           '5 GB',             '10 GB',          SOON] },
+  { label: 'Webhook stored', values: ['100',                   '1 000',            '5 000',            '10k',            SOON] },
+  { label: 'Deploy apps', values: [{ mark: 'dash' },           '1 small',          '2 medium',         '10 medium',      SOON] },
+  { label: 'Domains',  values: [{ mark: 'dash' }, '*.deployment.instanode.dev', 'custom domain', 'custom domain', SOON] },
   // Multi-env workflows (stack promotion + vault copy across envs) is a
   // shipped Pro-tier feature: POST /api/v1/stacks/:slug/promote and
   // POST /api/v1/vault/copy are live (RETRO-2026-05-12 §10.17). Hobby is
-  // single-env (production only); Pro / Team unlock dev / staging / prod
-  // with parent_stack_id linkage.
-  { label: 'Multi-env workflows', sub: 'stack promotion + vault copy', values: [{ mark: 'dash' }, { mark: 'dash' }, 'dev / staging / prod', SOON] },
-  { label: 'RBAC + audit', values: [{ mark: 'dash' }, { mark: 'dash' }, { mark: 'dash' }, SOON] },
-  { label: 'Vault entries', values: [{ mark: 'dash' }, '20', '200', SOON] },
-  { label: 'Vault envs',    values: [{ mark: 'dash' }, 'production only', 'multi-env', SOON] },
-  { label: 'SSO / SAML', values: [{ mark: 'dash' }, { mark: 'dash' }, { mark: 'dash' }, SOON] },
-  { label: '99.9% SLA',  values: [{ mark: 'dash' }, { mark: 'dash' }, { mark: 'dash' }, SOON] }
+  // single-env (production only). W11: Hobby Plus also unlocks multi-env
+  // — it's the marquee differentiator vs Hobby alongside custom domains
+  // and the 2-deployment cap bump.
+  { label: 'Multi-env workflows', sub: 'stack promotion + vault copy', values: [{ mark: 'dash' }, { mark: 'dash' }, 'dev / staging / prod', 'dev / staging / prod', SOON] },
+  { label: 'RBAC + audit', values: [{ mark: 'dash' }, { mark: 'dash' }, { mark: 'dash' }, { mark: 'dash' }, SOON] },
+  { label: 'Vault entries', values: [{ mark: 'dash' }, '20', '50', '200', SOON] },
+  { label: 'Vault envs',    values: [{ mark: 'dash' }, 'production only', 'multi-env', 'multi-env', SOON] },
+  { label: 'Backups',       values: [{ mark: 'dash' }, '7-day · no restore', '14-day · 1-click restore', '30-day · 1-click restore', SOON] },
+  { label: 'SSO / SAML', values: [{ mark: 'dash' }, { mark: 'dash' }, { mark: 'dash' }, { mark: 'dash' }, SOON] },
+  { label: '99.9% SLA',  values: [{ mark: 'dash' }, { mark: 'dash' }, { mark: 'dash' }, { mark: 'dash' }, SOON] }
 ]
 
 const FAQ: { q: string; a: string }[] = [
@@ -476,7 +502,11 @@ function PricingStyles() {
       }
       .pricing-row {
         display: grid;
-        grid-template-columns: 1.4fr 1fr 1fr 1fr 1fr;
+        /* W11: bumped to 1 feature col + 5 tier cols (anonymous, hobby,
+           hobby_plus, pro, team). Keep the feature column 1.3fr (down
+           from 1.4fr) so the extra tier column doesn't squeeze the
+           tier prices into a single line on a 1440px laptop screen. */
+        grid-template-columns: 1.3fr 1fr 1fr 1fr 1fr 1fr;
         align-items: stretch;
         border-bottom: 1px solid var(--border);
       }

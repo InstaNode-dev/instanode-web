@@ -21,7 +21,10 @@
 
 import type { ReactNode } from 'react'
 
-export type TierKey = 'free' | 'hobby' | 'pro' | 'team'
+// TierKey — every grid tier the dashboard renders. W11 added `hobby_plus`
+// as the $19/mo mid-step between Hobby ($9) and Pro ($49); see
+// PricingGrid.tsx for the per-tier feature list.
+export type TierKey = 'free' | 'hobby' | 'hobby_plus' | 'pro' | 'team'
 export type Frequency = 'monthly' | 'yearly'
 
 export interface TierPricing {
