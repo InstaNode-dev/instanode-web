@@ -1,5 +1,5 @@
 import { useEffect, useState, type MouseEvent as ReactMouseEvent } from 'react'
-import { ROBanner, TierPill } from '../components/Common'
+import { TierPill } from '../components/Common'
 import { UpgradeButton } from '../components/UpgradeButton'
 import { PricingGrid } from '../components/PricingGrid'
 import { ChangePlanModal } from '../components/ChangePlanModal'
