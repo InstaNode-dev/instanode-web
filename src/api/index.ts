@@ -1576,13 +1576,20 @@ export async function fetchActivity(): Promise<{ ok: true; items: ActivityItem[]
     if (e?.status === 401) throw e
     // Fall back to synthesising from resources so the dashboard still
     // renders something honest (real resources, real timestamps).
+    //
+    // W12 XSS hardening (2026-05-14): this synth previously embedded
+    // <strong>/<code> tags AND interpolated res.name directly — which,
+    // because OverviewPage rendered the text via dangerouslySetInnerHTML,
+    // meant any resource whose name slipped past server-side sanitizeName
+    // would execute as HTML. We now emit plain text; the consumer
+    // (OverviewPage) also renders as a text node. Defence in depth.
     try {
       const r = await listResources()
       const items: ActivityItem[] = r.items.slice(0, 8).map((res) => ({
         id: `act_${res.id}`,
         at: res.created_at,
         level: 'info' as const,
-        text: `<strong>${res.cloud_vendor ?? 'agent'}</strong> provisioned <strong>${res.resource_type}</strong> <code>${(res.name ?? res.token).slice(0, 16)}</code>`,
+        text: `${res.cloud_vendor ?? 'agent'} provisioned ${res.resource_type} ${(res.name ?? res.token).slice(0, 16)}`,
         actor: res.cloud_vendor ?? 'agent',
         kind: 'provision',
       } as unknown as ActivityItem))

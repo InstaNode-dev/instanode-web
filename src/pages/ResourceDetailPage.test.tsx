@@ -282,3 +282,79 @@ describe('ResourceDetailPage — PauseResumeButton presence (W11 regression pin)
     expect(screen.getByTestId('pause-resume-button')).toBeTruthy()
   })
 })
+
+// ─── W12 XSS hardening — connection_url renders as plain text ─────────────
+// Retro-4 (2026-05-14) flagged the Connection URL panel as the second of two
+// dangerouslySetInnerHTML sites in the dashboard. The mask effect used to
+// concatenate `<span class="mask">••••••••</span>` into the URL string and
+// pump the result through dangerouslySetInnerHTML — which meant any future
+// server path that returned a connection_url containing user-controlled
+// bytes (today: not possible; tomorrow: one PR away) would execute as HTML
+// in the user's browser. We now render the URL as plain JSX with a real
+// <span> for the mask. Pin: hostile bytes in connection_url surface as a
+// text node, never as an <img>/<script>/etc. element.
+describe('ResourceDetailPage — W12 XSS hardening (connection URL is plain text)', () => {
+  it('renders connection_url containing hostile HTML as a text node — no <img> materialises', async () => {
+    const hostile = 'postgres://u:p@host.example.com/<img src=x onerror=alert(1)>'
+    mockGetResource.mockResolvedValueOnce({
+      ok: true,
+      resource: { ...makeResource(), connection_url: hostile },
+    })
+    const { container } = renderAt('res_abc')
+
+    await waitFor(() => {
+      expect(screen.getByText('Connection URL')).toBeTruthy()
+    })
+
+    // The URL renders inside <span class="url">. Pin that the hostile
+    // substring landed there as a text node, not as a parsed <img>.
+    const urlEl = container.querySelector('.conn .url') as HTMLElement
+    expect(urlEl).not.toBeNull()
+    expect(urlEl.querySelector('img')).toBeNull()
+    expect(urlEl.querySelector('script')).toBeNull()
+    // The visible text contains the literal hostile substring
+    // (the password segment is masked by default, so we look for the
+    // pieces that survive the mask).
+    expect(urlEl.textContent).toContain('<img src=x onerror=alert(1)>')
+  })
+
+  it('reveal toggle still works on the safe-JSX path (mask span hides without dangerouslySetInnerHTML)', async () => {
+    mockGetResource.mockResolvedValueOnce({ ok: true, resource: makeResource() })
+    const { container } = renderAt('res_abc')
+
+    await waitFor(() => {
+      expect(screen.getByText('Connection URL')).toBeTruthy()
+    })
+
+    // Default state: masked. The mask <span> exists and contains the
+    // visual bullets.
+    const masked = container.querySelector('.conn .url .mask') as HTMLElement
+    expect(masked).not.toBeNull()
+    expect(masked.textContent).toContain('••••••••')
+
+    // Click "reveal" — the mask span should disappear and the full URL
+    // (password included) should render as plain text.
+    fireEvent.click(screen.getByRole('button', { name: /reveal/i }))
+
+    await waitFor(() => {
+      const urlEl = container.querySelector('.conn .url') as HTMLElement
+      expect(urlEl.querySelector('.mask')).toBeNull()
+      expect(urlEl.textContent).toBe('postgres://u:p@pg.instanode.dev:5432/db')
+    })
+  })
+
+  it('source file does NOT use dangerouslySetInnerHTML', async () => {
+    const fs = await import('node:fs')
+    const path = await import('node:path')
+    const src = fs.readFileSync(
+      path.resolve(__dirname, 'ResourceDetailPage.tsx'),
+      'utf8',
+    )
+    // Strip comments — the W12 fix comment explicitly mentions the API name
+    // by way of explanation; the code itself must not contain it.
+    const code = src
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/^[ \t]*\/\/.*$/gm, '')
+    expect(code).not.toContain('dangerouslySetInnerHTML')
+  })
+})
