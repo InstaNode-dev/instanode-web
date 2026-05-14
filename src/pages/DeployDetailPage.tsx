@@ -21,16 +21,22 @@ const PRIVATE_DEPLOY_EDIT_TIERS: ReadonlySet<Tier> = new Set(['pro', 'team', 'gr
 // upsell card; everyone else sees the live panel. Source of truth: the
 // /api/v1/stacks/:slug/domains endpoint returns 402 upgrade_required
 // for anything outside this set.
-const CUSTOM_DOMAIN_TIERS: ReadonlySet<Tier> = new Set(['pro', 'team', 'growth'])
+//
+// FIX-U11 (W11): hobby_plus has features.custom_domains: true in
+// api/plans.yaml — the api unlocks it, the dashboard must mirror or
+// hobby_plus users see the upsell card instead of the real panel.
+const CUSTOM_DOMAIN_TIERS: ReadonlySet<Tier> = new Set(['hobby_plus', 'pro', 'team', 'growth'])
 
 // Tiers that have access to multi-env workflows (stack promotion + vault
 // copy). Matches the API-side allowlist in handlers/stack.go:
 // multiEnvTierAllowed — anything outside this set gets 402 + agent_action
 // from POST /api/v1/stacks/:slug/promote and POST /api/v1/vault/copy.
 //
-// Hobby is intentionally excluded: multi-env is the differentiator that
-// justifies the Pro tier (RETRO-2026-05-12 §4 / §10.17).
-const MULTI_ENV_TIERS: ReadonlySet<Tier> = new Set(['pro', 'team', 'growth'])
+// FIX-A6 / FIX-Q23 (W11): hobby_plus is now multi-env-enabled because
+// plans.yaml gives it vault_envs_allowed: [development, staging,
+// production]. The dashboard must match the api's allowlist or hobby_plus
+// users see the upsell instead of the live promote/copy flow.
+const MULTI_ENV_TIERS: ReadonlySet<Tier> = new Set(['hobby_plus', 'pro', 'team', 'growth'])
 
 // Target env the "Promote staging → production" PromptCard defaults to.
 // Matches the convention in the vault env-allowlist and the API-side

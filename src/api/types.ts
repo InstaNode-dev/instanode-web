@@ -3,7 +3,7 @@
 // Source of truth: /InstaNode/api/internal/handlers/*
 // ------------------------------------------------------------------
 
-export type Tier = 'anonymous' | 'free' | 'hobby' | 'pro' | 'team' | 'growth'
+export type Tier = 'anonymous' | 'free' | 'hobby' | 'hobby_plus' | 'pro' | 'team' | 'growth'
 export type Role = 'owner' | 'admin' | 'developer' | 'viewer'
 export type Env = 'production' | 'staging' | 'development' | string
 

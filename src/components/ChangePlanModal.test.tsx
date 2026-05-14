@@ -90,17 +90,39 @@ describe('ChangePlanModal — target tier rendering', () => {
     expect(screen.queryByTestId('change-plan-target-hobby')).toBeNull()
   })
 
-  it('exposes pro / team / growth as upgrade targets for a hobby user', () => {
+  it('exposes hobby_plus / pro / team as upgrade targets for a hobby user', () => {
+    // FIX-R9 (W11): hobby_plus is now a real plan in api/plans.yaml ($19/mo)
+    // and must show up between Hobby and Pro in the upgrade picker.
     render(<ChangePlanModal currentTier="hobby" onClose={() => {}} />)
+    expect(screen.queryByTestId('change-plan-target-hobby_plus')).toBeTruthy()
     expect(screen.queryByTestId('change-plan-target-pro')).toBeTruthy()
     expect(screen.queryByTestId('change-plan-target-team')).toBeTruthy()
-    expect(screen.queryByTestId('change-plan-target-growth')).toBeTruthy()
   })
 
-  it('hides hobby/growth as downgrades for a pro user — only team remains', () => {
+  it('hides growth from the upgrade picker (FIX-190 — no real self-serve growth row)', () => {
+    // Growth is operator-only / sales-only — there is no real growth row
+    // reachable via this modal. Asserted on a hobby user (where every
+    // higher tier would otherwise have shown) and on the no-upgrade team
+    // ceiling (covered separately below).
+    render(<ChangePlanModal currentTier="hobby" onClose={() => {}} />)
+    expect(screen.queryByTestId('change-plan-target-growth')).toBeNull()
+  })
+
+  it('hides hobby/hobby_plus as downgrades for a pro user — only team remains', () => {
     render(<ChangePlanModal currentTier="pro" onClose={() => {}} />)
     expect(screen.queryByTestId('change-plan-target-hobby')).toBeNull()
+    expect(screen.queryByTestId('change-plan-target-hobby_plus')).toBeNull()
     expect(screen.queryByTestId('change-plan-target-growth')).toBeNull()
+    expect(screen.queryByTestId('change-plan-target-team')).toBeTruthy()
+  })
+
+  it('shows pro + team but hides hobby as downgrade for a hobby_plus user', () => {
+    // FIX-R9: hobby_plus users upgrading should see Pro and Team only —
+    // hobby is below them and growth is not self-serve.
+    render(<ChangePlanModal currentTier="hobby_plus" onClose={() => {}} />)
+    expect(screen.queryByTestId('change-plan-target-hobby')).toBeNull()
+    expect(screen.queryByTestId('change-plan-target-hobby_plus')).toBeNull()
+    expect(screen.queryByTestId('change-plan-target-pro')).toBeTruthy()
     expect(screen.queryByTestId('change-plan-target-team')).toBeTruthy()
   })
 

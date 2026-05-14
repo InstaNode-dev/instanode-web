@@ -1815,7 +1815,7 @@ export interface ListAdminCustomersInput {
   /** Free-text search (email, name, team_id substring). */
   q?: string
   /** Filter pill — undefined or 'all' returns every tier. */
-  tier?: 'all' | 'anonymous' | 'free' | 'hobby' | 'pro' | 'team' | 'growth'
+  tier?: 'all' | 'anonymous' | 'free' | 'hobby' | 'hobby_plus' | 'pro' | 'team' | 'growth'
   /** Track A sort keys: mrr | last_active | created_at | storage | deployments. */
   sort_by?: string
   /** Page size — Track A clamps to 200; default 50. */
