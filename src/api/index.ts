@@ -554,6 +554,77 @@ export async function getResourceMetrics(
   return r
 }
 
+// ─── Resource audit ─────────────────────────────────────────────────────
+//
+// W7-C/W11: the team-level audit log (GET /api/v1/audit) returns rows
+// scoped to either `team_id = caller_team` OR `metadata.resource_id`
+// pointing at a resource the caller owns. There is no per-resource
+// endpoint yet — instead we fetch the team window and filter client-side
+// for rows whose metadata.resource_id matches the resource we're looking
+// at. The endpoint enforces a tier-derived hard lookback floor (Hobby
+// 30d, Pro 90d, Team unlimited; anonymous/free 402s), so this surface
+// renders an "upgrade required" state on 402 rather than throwing.
+//
+// Wire shape (from auditEventToMap):
+//   { id, kind, created_at, metadata, actor_user_id, actor_email_masked }
+//
+// `metadata` is unmarshalled JSON or null. We surface metadata.resource_id
+// and metadata.summary when present; everything else lands in the raw
+// metadata JSON column on the table for transparency.
+export interface ResourceAuditEvent {
+  id: string
+  kind: string
+  created_at: string
+  actor_user_id: string | null
+  actor_email_masked: string | null
+  metadata: Record<string, unknown> | null
+}
+
+export interface ResourceAuditResponse {
+  ok: true
+  items: ResourceAuditEvent[]
+  total_returned: number
+  next_cursor: string | null
+  lookback_days: number
+  tier: string
+}
+
+/**
+ * Fetch audit rows scoped to a single resource over the last `sinceHours`
+ * hours. Implementation: call GET /api/v1/audit?since=<iso>&limit=200 and
+ * filter client-side for rows whose metadata.resource_id matches. The
+ * team-level endpoint already enforces ownership (rows are returned only
+ * if `team_id = caller_team` OR the metadata.resource_id points at a
+ * resource the caller owns), so the client-side filter is a precision
+ * cut, not a security boundary.
+ *
+ * On 402 (anonymous/free tier) the call propagates so the caller can
+ * render an upgrade prompt instead of an error banner.
+ */
+export async function fetchResourceAudit(
+  resourceId: string,
+  sinceHours: number = 24,
+  limit: number = 200,
+): Promise<ResourceAuditResponse> {
+  const sinceIso = new Date(Date.now() - sinceHours * 60 * 60 * 1000).toISOString()
+  const path = `/api/v1/audit?since=${encodeURIComponent(sinceIso)}&limit=${limit}`
+  const r = await call<ResourceAuditResponse>(path)
+  const items = (r.items ?? []).filter((ev) => {
+    if (!ev.metadata || typeof ev.metadata !== 'object') return false
+    const ridRaw = (ev.metadata as Record<string, unknown>).resource_id
+    if (typeof ridRaw !== 'string') return false
+    return ridRaw === resourceId
+  })
+  return {
+    ok: true,
+    items,
+    total_returned: items.length,
+    next_cursor: r.next_cursor ?? null,
+    lookback_days: r.lookback_days ?? 0,
+    tier: r.tier ?? '',
+  }
+}
+
 // ─── Stacks / deployments ───
 // GET /api/v1/stacks returns one row per stack including the real env
 // (production / staging / dev / ...) and parent_stack_id linkage. We adapt
