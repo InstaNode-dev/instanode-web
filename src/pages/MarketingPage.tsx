@@ -332,8 +332,8 @@ export function MarketingPage() {
               <div className="mkt-step-num">STEP 02 · PROVISION</div>
               <h3>Real infra spins up.</h3>
               <p>
-                Managed Postgres, Redis, or Mongo — encryption at rest, automatic backups, a
-                connection string in 1.4 s. 24 h TTL on the free tier.
+                Managed Postgres, Redis, or Mongo — encryption at rest for vault secrets and
+                stored credentials, a connection string in 1.4 s. 24 h TTL on the free tier.
               </p>
               <div className="mkt-how-visual" aria-hidden="true">
                 <div className="r"><span className="k">service</span><span className="v">postgres 16.2</span></div>
