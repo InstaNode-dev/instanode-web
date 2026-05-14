@@ -473,7 +473,7 @@ export function ClaimPage() {
         </button>
 
         <p style={{ marginTop: 18, fontSize: 11, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)', lineHeight: 1.5 }}>
-          POST /claim · atomic · single-use · returns session_token + trial_ends_at
+          POST /claim · atomic · single-use · returns session_token
         </p>
       </div>
     </div>

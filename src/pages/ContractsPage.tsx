@@ -154,22 +154,22 @@ data: {}`}</>}
         />
       </div>
 
-      <SectionH label="NEEDS LOCK" badgeBg="var(--amber)" title="5 contradictions or partial implementations" sub="FE/BE will diverge until these resolve" />
+      <SectionH label="NEEDS LOCK" badgeBg="var(--amber)" title="4 contradictions or partial implementations" sub="FE/BE will diverge until these resolve" />
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {/* The "Trial vs. immediate Hobby" banner was removed on 2026-05-14
+            per policy memory project_no_trial_pay_day_one.md — the platform
+            has no trial period; hobby/pro/team are paid from day one. */}
         <ContractBanner kind="warning" badge="#1">
-          <strong>Trial vs. immediate Hobby.</strong> <code>plans.yaml</code> declares <code>trial_days: 14</code>; <code>auth.go:151</code> assigns <code>hobby</code> with no trial fields. Brief journey 1 assumes a trial. <strong>Lock:</strong> add <code>teams.trial_ends_at</code> + worker, OR drop trial language from copy.
-        </ContractBanner>
-        <ContractBanner kind="warning" badge="#2">
           <strong>"Deployments" vs "Stacks".</strong> Brief uses "Deployments"; the API uses "Stacks". <strong>Lock:</strong> dashboard URL is <code>/deployments</code> (user language), API stays <code>/stacks</code> (existing).
         </ContractBanner>
-        <ContractBanner kind="warning" badge="#3">
+        <ContractBanner kind="warning" badge="#2">
           <strong>Multi-env scoping.</strong> Resource shape includes <code>env</code> but list endpoint has no <code>?env=</code> filter. <strong>Lock:</strong> add server-side filter param + <code>teams.default_env</code> in PATCH body.
         </ContractBanner>
-        <ContractBanner kind="warning" badge="#4">
+        <ContractBanner kind="warning" badge="#3">
           <strong>Role changes.</strong> Members are invited with a role; there's no <code>PATCH /members/:id</code> for promotion/demotion. <strong>Lock:</strong> add <code>PATCH /api/v1/team/members/:user_id</code> with body <code>{`{role}`}</code> + audit row.
         </ContractBanner>
-        <ContractBanner kind="warning" badge="#5">
+        <ContractBanner kind="warning" badge="#4">
           <strong>Multi-service stacks.</strong> Brief separates <em>Deployments</em> (single service) from <em>Stacks</em> (multi-service compose). <code>DashboardStack</code> has no <code>services[]</code> field.
         </ContractBanner>
       </div>
@@ -200,7 +200,7 @@ data: {}`}</>}
           If we lock these in sequence, FE and BE can ship without merge-day surprises.
         </p>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
-          <Week n={1} title="Lock the contradictions" body="Trial decision · /deployments mapping · multi-env filter param." />
+          <Week n={1} title="Lock the contradictions" body="/deployments mapping · multi-env filter param." />
           <Week n={2} title="Vault contract" body="5 endpoints · schema · sudo flow. Largest single chunk." />
           <Week n={3} title="Logs SSE + actions" body="Redeploy / rollback / stop · SSE event format. Build view depends." />
           <Week n={4} title="Metrics + audit" body="Last to lock — design works without them on day one." />
