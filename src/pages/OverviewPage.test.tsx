@@ -435,3 +435,89 @@ describe('OverviewPage — Stat sparklines (no fake trend data)', () => {
     expect(normalised).not.toContain('[18,15,8,16,4,12,6,14,9,7,11]')
   })
 })
+
+// ─── W12 XSS hardening — activity feed renders user-controllable bytes safely ───
+// Retro-4 (2026-05-14) flagged this site as the platform's most likely stored-XSS
+// path. activity[i].text used to render via dangerouslySetInnerHTML so an
+// activity-feed row whose text contained hostile HTML (via a resource name that
+// slipped past server-side sanitizeName, or via the client-side synth fallback
+// in api/index.ts that interpolated res.name into <strong>/<code> tags) would
+// execute that HTML at render time. Pin the new contract: feed renders as a
+// text node — hostile bytes become literal characters, never an <img> or
+// <script> element. If a future PR reintroduces dangerouslySetInnerHTML on
+// this site, this test fails loudly.
+describe('OverviewPage — W12 XSS hardening (activity feed is plain text)', () => {
+  it('renders an activity row with hostile HTML as a text node — no <img> element materialises', async () => {
+    const hostile = '<img src=x onerror=alert(1)>'
+    ;(api.listResources as any).mockResolvedValueOnce({ ok: true, total: 0, items: [] })
+    ;(api.fetchActivity as any).mockResolvedValueOnce({
+      ok: true,
+      items: [
+        {
+          id: 'act_hostile',
+          at: new Date().toISOString(),
+          level: 'info' as const,
+          text: hostile,
+        },
+      ],
+    })
+
+    const { container } = render(withRouter(<OverviewPage />))
+
+    // Wait for the feed row to mount.
+    await waitFor(() => {
+      const feedRow = container.querySelector('.feed .feed-row .text')
+      expect(feedRow).not.toBeNull()
+    })
+
+    // Pin: NO <img> element anywhere on the page. If hostile bytes were
+    // rendered as HTML, the <img> would exist (whether or not its onerror
+    // fired under jsdom).
+    expect(container.querySelector('img')).toBeNull()
+    expect(container.querySelector('script')).toBeNull()
+  })
+
+  it('strips presentational tags from server-emitted summaries (cosmetic, not security)', async () => {
+    ;(api.listResources as any).mockResolvedValueOnce({ ok: true, total: 0, items: [] })
+    ;(api.fetchActivity as any).mockResolvedValueOnce({
+      ok: true,
+      items: [
+        {
+          id: 'act_pg',
+          at: new Date().toISOString(),
+          level: 'info' as const,
+          text: 'agent provisioned <strong>postgres</strong> <code>tok_abcd</code>',
+        },
+      ],
+    })
+
+    const { container } = render(withRouter(<OverviewPage />))
+    await waitFor(() => {
+      const feedRow = container.querySelector('.feed .feed-row .text')
+      expect(feedRow).not.toBeNull()
+    })
+
+    // <strong> and <code> tags don't render as elements (would mean
+    // dangerouslySetInnerHTML is back) AND don't render as visible text
+    // characters either (the helper strips them so the row reads cleanly).
+    const feedRow = container.querySelector('.feed .feed-row .text')!
+    expect(feedRow.querySelector('strong')).toBeNull()
+    expect(feedRow.querySelector('code')).toBeNull()
+    expect(feedRow.textContent).toBe('agent provisioned postgres tok_abcd')
+  })
+
+  it('source file does NOT use dangerouslySetInnerHTML', async () => {
+    const fs = await import('node:fs')
+    const path = await import('node:path')
+    const src = fs.readFileSync(
+      path.resolve(__dirname, 'OverviewPage.tsx'),
+      'utf8',
+    )
+    // Strip comments before checking — the file has a comment explaining the
+    // history of this fix, which legitimately mentions the API name.
+    const code = src
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/^[ \t]*\/\/.*$/gm, '')
+    expect(code).not.toContain('dangerouslySetInnerHTML')
+  })
+})
