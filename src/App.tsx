@@ -144,6 +144,17 @@ const ContractsPage = lazy(() =>
 const CheckoutPage = lazy(() =>
   import('./pages/CheckoutPage').then((m) => ({ default: m.CheckoutPage })),
 )
+// ConfirmDeletionPage (Wave FIX-I) — landing page for the email-link
+// /auth/email/confirm-deletion → /app/confirm-deletion redirect. The
+// API 302s the click here with ?t=<token>&id=<resource_id>&kind={deploy|stack}
+// on the query string; the page renders "Are you sure?" and on confirm
+// POSTs to /api/v1/{deployments|stacks}/:id/confirm-deletion. Lives
+// inside /app so AuthGate kicks unauthenticated users to /login first
+// (the email is sent to the team's owner — they must be the one
+// confirming).
+const ConfirmDeletionPage = lazy(() =>
+  import('./pages/ConfirmDeletionPage').then((m) => ({ default: m.ConfirmDeletionPage })),
+)
 // AdminCustomersPage — founder console at /app/admin/customers. The page
 // itself reads ctx.me.is_platform_admin and renders a Navigate when the
 // caller isn't an admin, so non-admins never see the route exists. We
@@ -285,6 +296,12 @@ export function AppRoutes() {
               checkout endpoint, and redirects to Razorpay. AuthGate above
               kicks anonymous visitors to /login first. */}
           <Route path="checkout" element={<CheckoutPage />} />
+          {/* Wave FIX-I — email-confirmed deletion landing surface. The
+              API's /auth/email/confirm-deletion endpoint 302s every email
+              click to this page with the plaintext token + resource id on
+              the query string. AuthGate above ensures only the signed-in
+              owner can complete the POST. */}
+          <Route path="confirm-deletion" element={<ConfirmDeletionPage />} />
           {/* Admin-only — the page itself renders <Navigate to="/" /> for
               non-admin users so the route 404s instead of 403s. */}
           <Route path="admin/customers" element={<AdminCustomersPage />} />
