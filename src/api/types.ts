@@ -16,7 +16,7 @@ export type ResourceType =
   | 'webhook'
   | 'deploy'
 
-export type ResourceStatus = 'active' | 'expired' | 'tombstoned' | 'deleted'
+export type ResourceStatus = 'active' | 'paused' | 'expired' | 'tombstoned' | 'deleted' | 'reaped'
 
 export interface Resource {
   id: string
