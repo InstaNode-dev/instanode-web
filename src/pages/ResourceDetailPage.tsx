@@ -6,6 +6,7 @@ import {
   expiryLevel, formatTimeUntil, useExpiryTick, copyToClipboard
 } from '../components/Common'
 import { MetricsPanel } from '../components/MetricsPanel'
+import { PauseResumeButton } from '../components/PauseResumeButton'
 import * as api from '../api'
 import type { Resource } from '../api'
 
@@ -58,7 +59,7 @@ export function ResourceDetailPage() {
               // Customer-visible "this resource is paused" signal — the
               // /resources list view shows a chip too. Connection_url still
               // works but the resource doesn't count against the per-team
-              // resource quota. Resume via the agent.
+              // resource quota. Resume via the agent or the right-column card.
               <span
                 data-testid="resource-paused-pill"
                 style={{
@@ -235,6 +236,38 @@ export function ResourceDetailPage() {
                   Request early access →
                 </a>
               </div>
+            </Card>
+
+            <Card
+              title={r.status === 'paused' ? 'Resume this resource' : 'Pause this resource'}
+              right={<span style={{ fontSize: 11, color: 'var(--text-faint)' }}>Pro feature</span>}
+            >
+              <div
+                style={{
+                  fontSize: 12.5,
+                  color: 'var(--text-dim)',
+                  lineHeight: 1.55,
+                  marginBottom: 12,
+                }}
+              >
+                {r.status === 'paused' ? (
+                  <>
+                    This resource is currently <strong>paused</strong> — it
+                    isn&apos;t counting against your quota and isn&apos;t
+                    reachable. Resume to bring it back online.
+                  </>
+                ) : (
+                  <>
+                    Pausing stops this resource from counting against your
+                    plan quota. Your data is preserved. Resume any time to
+                    bring it back.
+                  </>
+                )}
+              </div>
+              <PauseResumeButton
+                resource={r}
+                onUpdated={(next) => setR(next)}
+              />
             </Card>
 
             <PromptCard
