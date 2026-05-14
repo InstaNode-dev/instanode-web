@@ -124,6 +124,15 @@ const SettingsPage = lazy(() =>
 const ContractsPage = lazy(() =>
   import('./pages/ContractsPage').then((m) => ({ default: m.ContractsPage })),
 )
+// CheckoutPage (W12) — landing page for the /pricing CTA. Lives at
+// /app/checkout so the AuthGate kicks unauthenticated users to /login first
+// (with state.from preserved so they land back here post-login). The page
+// reads ?plan= + ?frequency= from the URL, POSTs to /api/v1/billing/checkout,
+// then either redirects to Razorpay's short_url or renders a friendly
+// fallback when Razorpay isn't configured for the requested tier.
+const CheckoutPage = lazy(() =>
+  import('./pages/CheckoutPage').then((m) => ({ default: m.CheckoutPage })),
+)
 // AdminCustomersPage — founder console at /app/admin/customers. The page
 // itself reads ctx.me.is_platform_admin and renders a Navigate when the
 // caller isn't an admin, so non-admins never see the route exists. We
@@ -255,6 +264,11 @@ export function AppRoutes() {
           <Route path="billing" element={<BillingPage />} />
           <Route path="settings" element={<SettingsPage />} />
           <Route path="contracts" element={<ContractsPage />} />
+          {/* W12 C1: /app/checkout is the landing point for /pricing CTAs.
+              The page reads ?plan= + ?frequency=, POSTs to the billing
+              checkout endpoint, and redirects to Razorpay. AuthGate above
+              kicks anonymous visitors to /login first. */}
+          <Route path="checkout" element={<CheckoutPage />} />
           {/* Admin-only — the page itself renders <Navigate to="/" /> for
               non-admin users so the route 404s instead of 403s. */}
           <Route path="admin/customers" element={<AdminCustomersPage />} />
