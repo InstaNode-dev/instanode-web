@@ -885,3 +885,84 @@ describe('BillingPage — promo codes flow through Razorpay (no in-product input
     expect(container.textContent?.toLowerCase()).toContain('razorpay')
   })
 })
+
+// ─── Change-plan modal entry point ──────────────────────────────────────
+describe('BillingPage — Change plan button', () => {
+  it('shows the Change plan button for Hobby users (have a subscription + a tier above)', async () => {
+    mockTier = 'hobby'
+    mockHappyBilling()
+    render(<BillingPage />)
+    await waitForLoaded()
+    expect(screen.queryByTestId('open-change-plan-modal')).toBeTruthy()
+  })
+
+  it('shows the Change plan button for Pro users', async () => {
+    mockTier = 'pro'
+    mockHappyBilling()
+    render(<BillingPage />)
+    await waitForLoaded()
+    expect(screen.queryByTestId('open-change-plan-modal')).toBeTruthy()
+  })
+
+  it('hides the Change plan button for anonymous (no subscription)', async () => {
+    mockTier = 'anonymous'
+    mockHappyBilling()
+    render(<BillingPage />)
+    await waitForLoaded()
+    expect(screen.queryByTestId('open-change-plan-modal')).toBeNull()
+  })
+
+  it('hides the Change plan button for free tier (no subscription)', async () => {
+    mockTier = 'free'
+    mockHappyBilling()
+    render(<BillingPage />)
+    await waitForLoaded()
+    expect(screen.queryByTestId('open-change-plan-modal')).toBeNull()
+  })
+
+  it('hides the Change plan button for team tier (no in-place upgrade target)', async () => {
+    mockTier = 'team'
+    mockHappyBilling()
+    render(<BillingPage />)
+    await waitForLoaded()
+    expect(screen.queryByTestId('open-change-plan-modal')).toBeNull()
+  })
+
+  it('opens the modal when the Change plan button is clicked', async () => {
+    mockTier = 'hobby'
+    mockHappyBilling()
+    render(<BillingPage />)
+    await waitForLoaded()
+    fireEvent.click(screen.getByTestId('open-change-plan-modal'))
+    expect(screen.getByTestId('change-plan-modal')).toBeTruthy()
+  })
+
+  it('the opened modal defaults to pro for a hobby user', async () => {
+    mockTier = 'hobby'
+    mockHappyBilling()
+    render(<BillingPage />)
+    await waitForLoaded()
+    fireEvent.click(screen.getByTestId('open-change-plan-modal'))
+    const proRadio = screen.getByTestId('change-plan-target-pro') as HTMLInputElement
+    expect(proRadio.checked).toBe(true)
+  })
+
+  it('refetches billing after an immediate change (onChanged → setRefreshNonce)', async () => {
+    mockTier = 'hobby'
+    mockHappyBilling()
+    ;(api.createCheckout as any).mockResolvedValue({ ok: true, short_url: 'x' })
+    // Stub changePlan via the same api mock surface — we need to add it
+    // to the module-level mock above (the existing mock doesn't enumerate
+    // changePlan, but the spread of `actual` falls through to the real
+    // function, which would call fetch). Inject it lazily here.
+    ;(api as any).changePlan = vi.fn().mockResolvedValue({ ok: true, immediate: true })
+    render(<BillingPage />)
+    await waitForLoaded()
+    const initialFetchCount = (api.fetchBilling as any).mock.calls.length
+    fireEvent.click(screen.getByTestId('open-change-plan-modal'))
+    fireEvent.click(screen.getByTestId('change-plan-confirm'))
+    await waitFor(() => {
+      expect((api.fetchBilling as any).mock.calls.length).toBeGreaterThan(initialFetchCount)
+    })
+  })
+})

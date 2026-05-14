@@ -15,6 +15,7 @@ import {
   fetchBilling,
   listInvoices,
   createCheckout,
+  changePlan,
   cancelSubscription,
   claim,
   getAPIBaseURL,
@@ -392,6 +393,81 @@ describe('createCheckout()', () => {
     const init = m.mock.calls[0][1]
     const body = JSON.parse(init.body as string)
     expect('promotion_code' in body).toBe(false)
+  })
+})
+
+// ─── changePlan() — in-place tier swap on an existing subscription ──────
+describe('changePlan()', () => {
+  it('POSTs target_plan + plan_frequency to /api/v1/billing/change-plan', async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse({ ok: true, new_plan: 'pro', short_url: '' }))
+    await changePlan('pro', 'monthly')
+    const [url, init] = m.mock.calls[0]
+    expect(String(url)).toContain('/api/v1/billing/change-plan')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(init.body as string)).toEqual({
+      target_plan: 'pro',
+      plan_frequency: 'monthly',
+    })
+  })
+
+  it('forwards yearly plan_frequency when the caller picks annual', async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse({ ok: true, new_plan: 'pro', short_url: '' }))
+    await changePlan('pro', 'yearly')
+    const body = JSON.parse(m.mock.calls[0][1].body as string)
+    expect(body.plan_frequency).toBe('yearly')
+  })
+
+  it('returns short_url and immediate:false when the server hands off to Razorpay', async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse({
+      ok: true,
+      new_plan: 'pro',
+      short_url: 'https://rzp.io/i/upg',
+    }))
+    const r = await changePlan('pro', 'monthly')
+    expect(r.short_url).toBe('https://rzp.io/i/upg')
+    expect(r.immediate).toBe(false)
+  })
+
+  it('returns immediate:true when short_url is empty (in-place plan swap)', async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse({ ok: true, new_plan: 'pro', short_url: '' }))
+    const r = await changePlan('pro', 'monthly')
+    expect(r.short_url).toBeUndefined()
+    expect(r.immediate).toBe(true)
+  })
+
+  it('returns immediate:true when short_url is omitted from the response', async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse({ ok: true, new_plan: 'pro' }))
+    const r = await changePlan('pro', 'monthly')
+    expect(r.immediate).toBe(true)
+  })
+
+  it('propagates a 400 same_plan error as APIError', async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse(
+      { error: 'same_plan', message: 'Already on requested plan' },
+      { status: 400, statusText: 'Bad Request' },
+    ))
+    await expect(changePlan('pro', 'monthly')).rejects.toMatchObject({
+      status: 400,
+      code: 'same_plan',
+    })
+  })
+
+  it('propagates a 502 razorpay_error so the modal can surface support fallback', async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse(
+      { error: 'razorpay_error', message: 'upstream timeout' },
+      { status: 502, statusText: 'Bad Gateway' },
+    ))
+    await expect(changePlan('team', 'yearly')).rejects.toMatchObject({
+      status: 502,
+      code: 'razorpay_error',
+    })
   })
 })
 

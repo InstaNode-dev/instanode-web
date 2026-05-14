@@ -2,10 +2,30 @@ import { useEffect, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { ROBanner, TierPill } from '../components/Common'
 import { UpgradeButton } from '../components/UpgradeButton'
 import { PricingGrid } from '../components/PricingGrid'
+import { ChangePlanModal } from '../components/ChangePlanModal'
 import type { TierKey } from '../components/TierCard'
 import * as api from '../api'
-import type { BillingDetails, BillingUsage, Invoice, PlanFrequency } from '../api'
+import type { BillingDetails, BillingUsage, ChangePlanTier, Invoice, PlanFrequency, Tier } from '../api'
 import { useDashboardCtx } from '../hooks/useDashboardCtx'
+
+// Tiers eligible for the in-dashboard Change-plan modal. Anonymous + free
+// users have no active subscription to swap, so the /api/v1/billing/change-
+// plan endpoint returns 400 no_subscription for them — they upgrade through
+// the regular createCheckout grid below instead. Showing the button for
+// those tiers would be a dead click.
+const TIERS_WITH_SUBSCRIPTION = new Set<string>(['hobby', 'pro', 'team', 'growth'])
+
+// Next-tier-up suggestion the Change-plan modal opens onto. Mirrors the
+// LIMITS.nextTier values further down but typed as ChangePlanTier — the
+// PricingGrid tier set ('free' included) is narrower than the change-plan
+// tier set, so we keep them separate to avoid coercion.
+const NEXT_CHANGE_PLAN_TIER: Record<string, ChangePlanTier> = {
+  hobby: 'pro',
+  pro: 'team',
+  growth: 'team',
+  // team has no next tier — the button won't render for team users
+  // anyway (modal handles the empty-upgrades case as a fallback).
+}
 
 // 2026-05-13 billing redesign: frequency now defaults to **annual**.
 //
@@ -128,6 +148,20 @@ export function BillingPage() {
     writeStoredFrequency(f)
   }
 
+  // Change-plan modal state — open/closed plus a small refresh nonce that
+  // bumps after a successful immediate change so the page refetches /billing.
+  // Stored as a number rather than a boolean so unrelated effect deps stay
+  // stable (incrementing on every change rather than toggling avoids the
+  // "two consecutive changes don't retrigger" footgun).
+  const [changePlanOpen, setChangePlanOpen] = useState(false)
+  const [refreshNonce, setRefreshNonce] = useState(0)
+
+  // Compute whether to surface the Change-plan button. Hidden for anon/free
+  // users (no active subscription) and for the highest tier we self-serve
+  // upgrades to (team — there's nowhere further to go).
+  const hasUpgradeTarget = !!NEXT_CHANGE_PLAN_TIER[tier]
+  const showChangePlanButton = TIERS_WITH_SUBSCRIPTION.has(tier) && hasUpgradeTarget
+
   useEffect(() => {
     // Independent reads — each guarded individually so a failure on one
     // doesn't blank the whole page. Billing error → banner. Invoices
@@ -147,7 +181,7 @@ export function BillingPage() {
       .then((u) => { if (alive) setBillingUsage(u) })
       .catch(() => { /* usage panel reads 0 — non-fatal */ })
     return () => { alive = false }
-  }, [])
+  }, [refreshNonce])
 
   // §10.20: Derive Usage panel inputs from the server-side cached payload.
   // The server returns storage in bytes (with `limit_bytes`) — convert to
@@ -311,9 +345,33 @@ export function BillingPage() {
           >
             choose a plan
           </div>
-          <h2 style={{ fontSize: 20, fontWeight: 400, letterSpacing: '-0.02em', margin: '4px 0 0' }}>
-            You're on {limitDef.label} today.
-          </h2>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'baseline',
+              gap: 12,
+              flexWrap: 'wrap',
+              marginTop: 4,
+            }}
+          >
+            <h2 style={{ fontSize: 20, fontWeight: 400, letterSpacing: '-0.02em', margin: 0 }}>
+              You're on {limitDef.label} today.
+            </h2>
+            {/* "Change plan" — opens the in-dashboard tier-swap modal that
+                calls /api/v1/billing/change-plan. Hidden for anonymous /
+                free / team because those have no in-place upgrade path
+                (anon+free have no subscription; team is the ceiling). */}
+            {showChangePlanButton && (
+              <button
+                type="button"
+                className="btn btn-sm"
+                data-testid="open-change-plan-modal"
+                onClick={() => setChangePlanOpen(true)}
+              >
+                Change plan
+              </button>
+            )}
+          </div>
         </div>
         <PricingGrid
           currentTier={currentGridTier}
@@ -459,6 +517,21 @@ export function BillingPage() {
           </div>
         )}
       </section>
+
+      {changePlanOpen && (
+        <ChangePlanModal
+          currentTier={tier as Tier}
+          defaultTargetTier={NEXT_CHANGE_PLAN_TIER[tier]}
+          defaultFrequency={frequency}
+          onClose={() => setChangePlanOpen(false)}
+          onChanged={() => {
+            // Bump the nonce so the useEffect refetches billing + invoices
+            // + usage. The modal closes itself shortly after firing this
+            // (it holds open briefly to show the success indicator).
+            setRefreshNonce((n) => n + 1)
+          }}
+        />
+      )}
 
       <div style={{ marginTop: 28 }}>
         <div className="section-h">

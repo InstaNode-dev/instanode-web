@@ -1287,6 +1287,57 @@ export async function updatePaymentMethod(): Promise<{ ok: true; short_url: stri
   return { ok: true, short_url: r.short_url }
 }
 
+// ChangePlanTier — the subset of Tier values the agent API's change-plan
+// handler currently accepts. The server hard-codes this list in
+// api/internal/handlers/billing.go:razorpayPlanIDs() — it's intentionally
+// narrower than the full `Tier` union because anonymous / free / growth /
+// (and 'team' until it launches) can't be reached through a self-serve
+// subscription swap. Kept here as a local type so api/index.ts has no
+// dependency on src/components/TierCard.tsx (which restricts TierKey to
+// the grid's four columns for an unrelated UI reason).
+export type ChangePlanTier = 'hobby' | 'hobby_plus' | 'pro' | 'team' | 'growth'
+
+// changePlan — LIVE. POST /api/v1/billing/change-plan upgrades an *existing*
+// Razorpay subscription to a different plan tier in-place, rather than
+// creating a fresh subscription via the checkout flow. Used by the
+// in-dashboard Change-plan modal so an existing subscriber upgrading
+// Hobby → Pro keeps their subscription (no double-billing during the
+// transition, no orphaned monthly cancellations).
+//
+// Request body shape the agent handler actually accepts today
+// (api/internal/handlers/billing.go: changePlanBody / ChangePlanAPI):
+//   { target_plan: "hobby" | "pro" | "team" }
+// The handler ignores `plan_frequency` for now (monthly-only plan swap;
+// yearly changes still route through createCheckout per the inline comment
+// on razorpayPlanIDs()). We forward `plan_frequency` regardless so the
+// field is wired the day the api accepts it — Go's strict-decoded body
+// parser ignores unknown fields, so this is safe today and forward-
+// compatible tomorrow. If the contract turns out to be stricter than
+// that, this is the surface to fix.
+//
+// Server returns: { ok, new_plan, effective_date, short_url? }
+//   - When Razorpay can swap the plan immediately without a fresh checkout,
+//     `short_url` is empty and we treat that as `immediate: true` so the
+//     dashboard can refetch billing inline. When Razorpay requires a
+//     human checkout (e.g. tier-bump that triggers a new auth), `short_url`
+//     points at Razorpay's hosted portal and the caller redirects.
+export async function changePlan(
+  targetTier: ChangePlanTier,
+  frequency: PlanFrequency,
+): Promise<{ ok: true; short_url?: string; immediate?: boolean }> {
+  const r = await call<{
+    ok: boolean
+    short_url?: string
+    new_plan?: string
+    effective_date?: string
+  }>('/api/v1/billing/change-plan', {
+    method: 'POST',
+    body: JSON.stringify({ target_plan: targetTier, plan_frequency: frequency }),
+  })
+  const short = r.short_url && r.short_url.length > 0 ? r.short_url : undefined
+  return { ok: true, short_url: short, immediate: !short }
+}
+
 // ─── Vault (LIVE — listing keys works, value reveal lives on detail) ────
 type VaultListResp = { ok: boolean; keys: string[] }
 
