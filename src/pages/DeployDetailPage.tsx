@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom'
 import {
   ROBanner, ContractBanner, EnvPill, StatusPill, TierPill, ResourceIcon, PromptCard, RelTime
 } from '../components/Common'
+import { AuditPanel } from '../components/AuditPanel'
 import { CustomDomainPanel } from '../components/CustomDomainPanel'
 import { UpgradePromptCard } from '../components/UpgradePromptCard'
 import { IpAllowList } from '../components/IpAllowList'
@@ -230,7 +231,12 @@ export function DeployDetailPage() {
           <button key={t} className={`tab ${tab === t ? 'active' : ''}`} onClick={() => setTab(t)}>
             {t}
             {(t === 'Logs') && <span className="tag">live</span>}
-            {(t === 'Metrics' || t === 'Audit') && <span className="tag">blocked</span>}
+            {/* W12 H12: Metrics tab still ships as a soft "soon" surface
+                because deploy-specific metrics live behind a design
+                review. Audit now renders the real AuditPanel — drop the
+                stale "blocked" tag so users aren't told a working surface
+                is unavailable. */}
+            {t === 'Metrics' && <span className="tag">soon</span>}
           </button>
         ))}
       </div>
@@ -239,6 +245,8 @@ export function DeployDetailPage() {
       {tab === 'Logs' && <LiveBuild d={d} view={view} />}
       {tab === 'Env vars' && <EnvVars view={view} />}
       {tab === 'Resources' && <BoundResources view={view} />}
+      {tab === 'Metrics' && <DeployMetricsEmpty view={view} />}
+      {tab === 'Audit' && <DeployAudit view={view} /> }
       {/* Custom domains panel is stack-scoped; deployments don't expose a
           stack slug. Hide the panel entirely for deployment view; legacy
           stacks keep the tier-gated panel/upsell pair. */}
@@ -1218,6 +1226,96 @@ function DeploymentBoundResources({
           </Link>
         ))}
       </div>
+    </div>
+  )
+}
+
+// ─── Metrics tab — empty state (W12 H12) ─────────────────────────────────
+//
+// Pre-W12 this tab rendered nothing — the tab header carried a "blocked"
+// pill and clicking it surfaced an empty page body. Deploy-specific
+// metrics are still in design (per-deploy CPU/mem/RPS aren't wired
+// through to the dashboard yet), but pointing users at the per-resource
+// metrics surface on /app/resources/:id is better than a blank screen.
+//
+// The empty state is intentionally honest: it states what's coming, what
+// works today, and gives a deep link to the working surface. No fake
+// charts. No mocked "your metrics will appear here once data is
+// collected" hand-wave.
+function DeployMetricsEmpty({ view }: { view: DeployView }) {
+  // For deployments we know the resource_id (when the deployer bound one);
+  // for legacy stacks we don't have a single resource to link to, so we
+  // fall back to the general /app/resources list.
+  const resourceLink =
+    view.kind === 'deployment' && view.resource_id
+      ? `/app/resources/${view.resource_id}`
+      : '/app/resources'
+  return (
+    <div
+      data-testid="deploy-metrics-empty"
+      style={{
+        padding: 24,
+        color: 'var(--text-dim)',
+        fontSize: 13,
+        lineHeight: 1.7,
+      }}
+    >
+      <strong style={{ color: 'var(--text)', fontWeight: 500 }}>
+        Deploy metrics coming soon.
+      </strong>
+      <div style={{ marginTop: 8 }}>
+        Per-deploy CPU / memory / RPS panels are in design. In the
+        meantime, per-resource metrics are already wired up — see{' '}
+        <Link to={resourceLink} style={{ color: 'var(--blue)' }}>
+          {resourceLink}
+        </Link>
+        .
+      </div>
+    </div>
+  )
+}
+
+// ─── Audit tab (W12 H12) ─────────────────────────────────────────────────
+//
+// Pre-W12 the Audit tab rendered nothing. We now reuse the same
+// AuditPanel that lives on ResourceDetailPage. For /deploy/new deployments
+// we route the panel at the bound resource_id when one is set —
+// resources are what the audit log actually tracks, so that's the row
+// the user wants to see. When no resource is bound (legacy stack-mode
+// deploys, or a deploy with no resource_id), we render an honest empty
+// state pointing at the team-level audit log under /app/audit (currently
+// surfaced via the Settings page).
+function DeployAudit({ view }: { view: DeployView }) {
+  // Stacks don't surface a bound resource_id — neither does a deployment
+  // that wasn't created with one. Render the empty state instead of
+  // calling AuditPanel with a fake/empty id.
+  if (view.kind !== 'deployment' || !view.resource_id) {
+    return (
+      <div
+        data-testid="deploy-audit-empty"
+        style={{
+          padding: 24,
+          color: 'var(--text-dim)',
+          fontSize: 13,
+          lineHeight: 1.7,
+        }}
+      >
+        <strong style={{ color: 'var(--text)', fontWeight: 500 }}>
+          No bound resource for this deploy.
+        </strong>
+        <div style={{ marginTop: 8 }}>
+          The audit log scopes by resource. Bind a resource via{' '}
+          <code>POST /deploy/new</code>'s <code>resource_id</code>{' '}
+          parameter to see deploy-related audit events here, or use the
+          team-wide audit query:{' '}
+          <code>GET /api/v1/audit?resource_id=&lt;id&gt;</code>.
+        </div>
+      </div>
+    )
+  }
+  return (
+    <div data-testid="deploy-audit-panel" style={{ padding: '12px 0' }}>
+      <AuditPanel resourceId={view.resource_id} />
     </div>
   )
 }

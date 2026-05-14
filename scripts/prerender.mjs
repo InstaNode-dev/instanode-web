@@ -73,6 +73,10 @@ async function loadRoutes() {
     // and a procurement reviewer pasting the URL into a browser both
     // see the actual entries on first byte.
     '/changelog',
+    // W12 H15: privacy / terms ship as pre-rendered placeholder pages so
+    // the marketing footer links don't 404 for crawlers or direct hits.
+    '/privacy',
+    '/terms',
     ...blogSlugs.map((s) => `/blog/${s}`),
     ...useCaseSlugs.map((s) => `/use-cases/${s}`),
   ]

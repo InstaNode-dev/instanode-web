@@ -67,6 +67,11 @@ vi.mock('../api', async () => {
     listStacks: vi.fn(),
     listResources: vi.fn(),
     updateDeploymentAccess: vi.fn(),
+    // W12 H12: Audit tab on DeployDetailPage now reuses the
+    // ResourceDetailPage AuditPanel, which calls fetchResourceAudit.
+    // Mocked here so the audit-tab tests can drive load/empty states
+    // without firing a real network call.
+    fetchResourceAudit: vi.fn(),
   }
 })
 
@@ -77,6 +82,7 @@ const mockGetDeployment = api.getDeployment as unknown as ReturnType<typeof vi.f
 const mockListStacks = api.listStacks as unknown as ReturnType<typeof vi.fn>
 const mockListResources = api.listResources as unknown as ReturnType<typeof vi.fn>
 const mockUpdateAccess = api.updateDeploymentAccess as unknown as ReturnType<typeof vi.fn>
+const mockFetchAudit = api.fetchResourceAudit as unknown as ReturnType<typeof vi.fn>
 
 beforeEach(() => {
   mockFetchFamily.mockReset()
@@ -84,6 +90,7 @@ beforeEach(() => {
   mockListStacks.mockReset()
   mockListResources.mockReset()
   mockUpdateAccess.mockReset()
+  mockFetchAudit.mockReset()
   sseCalls.length = 0
   // Sensible defaults so tests that don't care about these don't blow up
   // on undefined returns.
@@ -548,5 +555,124 @@ describe('DeployDetailPage — privacy panel', () => {
     // private=true, allowed_ips=[] → save disabled (matches backend
     // validation: 400 on empty list when private).
     expect(save.disabled).toBe(true)
+  })
+})
+
+// ─── DeployDetailPage — Metrics + Audit tabs render content (W12 H12) ────
+//
+// Pre-W12 these two tabs rendered nothing — the chrome shipped a
+// "blocked" pill in the tab header and clicking the tab dropped the
+// user on an empty page body. The fix: Metrics shows an honest empty
+// state pointing at the per-resource metrics surface, Audit renders
+// the same AuditPanel ResourceDetailPage uses (when the deploy is bound
+// to a resource) or its own empty state.
+
+describe('DeployDetailPage — Metrics tab (W12 H12)', () => {
+  it('renders an honest empty state that points at per-resource metrics for a bound resource', async () => {
+    const resourceID = '99999999-9999-4999-8999-999999999999'
+    mockGetDeployment.mockResolvedValueOnce({
+      ok: true,
+      deployment: deployment({ resource_id: resourceID }),
+    })
+    renderPage(`/deployments/${deployment().id}`)
+    await waitFor(() => expect(mockGetDeployment).toHaveBeenCalled())
+    const tab = await waitFor(() => screen.getByText('Metrics'))
+    tab.click()
+    const empty = await waitFor(() => screen.getByTestId('deploy-metrics-empty'))
+    // Honest copy — no fake charts, no "your metrics will appear here".
+    expect(empty.textContent ?? '').toContain('Deploy metrics coming soon')
+    // Deep-link to /app/resources/:id when a resource_id is bound.
+    const link = empty.querySelector(`a[href="/app/resources/${resourceID}"]`)
+    expect(link).not.toBeNull()
+  })
+
+  it('falls back to /app/resources when no resource_id is bound', async () => {
+    mockGetDeployment.mockResolvedValueOnce({
+      ok: true,
+      deployment: deployment({ resource_id: undefined }),
+    })
+    renderPage(`/deployments/${deployment().id}`)
+    await waitFor(() => expect(mockGetDeployment).toHaveBeenCalled())
+    const tab = await waitFor(() => screen.getByText('Metrics'))
+    tab.click()
+    const empty = await waitFor(() => screen.getByTestId('deploy-metrics-empty'))
+    const link = empty.querySelector('a[href="/app/resources"]')
+    expect(link).not.toBeNull()
+  })
+
+  it("tab header no longer shows the stale 'blocked' tag — the tab is reachable, not blocked", async () => {
+    mockGetDeployment.mockResolvedValueOnce({
+      ok: true,
+      deployment: deployment(),
+    })
+    renderPage(`/deployments/${deployment().id}`)
+    await waitFor(() => expect(mockGetDeployment).toHaveBeenCalled())
+    // The Metrics tab button must contain "Metrics" but NOT "blocked"
+    // — pre-W12 the chrome rendered a <span class="tag">blocked</span>.
+    const metricsTab = await waitFor(() => screen.getByText('Metrics'))
+    // Walk up to the <button> ancestor so we capture any sibling tag spans.
+    const button = metricsTab.closest('button')
+    expect(button).not.toBeNull()
+    expect((button!.textContent ?? '').toLowerCase()).not.toContain('blocked')
+  })
+})
+
+describe('DeployDetailPage — Audit tab (W12 H12)', () => {
+  it('renders the AuditPanel when a resource_id is bound to the deploy', async () => {
+    const resourceID = '99999999-9999-4999-8999-999999999999'
+    mockGetDeployment.mockResolvedValueOnce({
+      ok: true,
+      deployment: deployment({ resource_id: resourceID }),
+    })
+    // AuditPanel calls fetchResourceAudit on mount — stub with a clean
+    // empty response so the panel renders its no-events state instead of
+    // surfacing an error banner.
+    mockFetchAudit.mockResolvedValueOnce({
+      ok: true,
+      items: [],
+      total_returned: 0,
+      next_cursor: null,
+      lookback_days: 1,
+      tier: 'pro',
+    })
+
+    renderPage(`/deployments/${deployment().id}`)
+    await waitFor(() => expect(mockGetDeployment).toHaveBeenCalled())
+    const tab = await waitFor(() => screen.getByText('Audit'))
+    tab.click()
+    // The wrapper renders before the panel's async load resolves, so we
+    // can assert the slot is mounted immediately.
+    await waitFor(() => expect(screen.getByTestId('deploy-audit-panel')).toBeTruthy())
+    // And the panel's own request fired with the right resource id.
+    await waitFor(() => expect(mockFetchAudit).toHaveBeenCalledWith(resourceID, expect.anything()))
+  })
+
+  it('renders the empty state when no resource_id is bound', async () => {
+    mockGetDeployment.mockResolvedValueOnce({
+      ok: true,
+      deployment: deployment({ resource_id: undefined }),
+    })
+    renderPage(`/deployments/${deployment().id}`)
+    await waitFor(() => expect(mockGetDeployment).toHaveBeenCalled())
+    const tab = await waitFor(() => screen.getByText('Audit'))
+    tab.click()
+    const empty = await waitFor(() => screen.getByTestId('deploy-audit-empty'))
+    expect(empty.textContent ?? '').toContain('No bound resource')
+    // fetchResourceAudit must NOT fire — we don't have a resource id to
+    // scope the request against.
+    expect(mockFetchAudit).not.toHaveBeenCalled()
+  })
+
+  it("tab header no longer shows the stale 'blocked' tag — the audit panel is wired", async () => {
+    mockGetDeployment.mockResolvedValueOnce({
+      ok: true,
+      deployment: deployment(),
+    })
+    renderPage(`/deployments/${deployment().id}`)
+    await waitFor(() => expect(mockGetDeployment).toHaveBeenCalled())
+    const auditTab = await waitFor(() => screen.getByText('Audit'))
+    const button = auditTab.closest('button')
+    expect(button).not.toBeNull()
+    expect((button!.textContent ?? '').toLowerCase()).not.toContain('blocked')
   })
 })

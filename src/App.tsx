@@ -64,6 +64,17 @@ const UseCaseDetailPage = lazy(() =>
 const ChangelogPage = lazy(() =>
   import('./pages/ChangelogPage').then((m) => ({ default: m.ChangelogPage })),
 )
+// PrivacyPage / TermsPage (W12 H15) — stop-gap placeholders for the footer
+// legal links. Both /privacy and /terms used to 404 (App.tsx had no route)
+// so the MarketingPage and PublicShell footers were dead. The pages render
+// honest placeholder copy with a contact-legal email so customers know
+// where to ask. Replace with real binding copy when legal sign-off lands.
+const PrivacyPage = lazy(() =>
+  import('./pages/PrivacyPage').then((m) => ({ default: m.PrivacyPage })),
+)
+const TermsPage = lazy(() =>
+  import('./pages/TermsPage').then((m) => ({ default: m.TermsPage })),
+)
 
 // Authenticated dashboard surfaces — lazy-loaded. These pages only render
 // behind AuthGate (token must be present), so a marketing visitor never
@@ -123,6 +134,15 @@ const SettingsPage = lazy(() =>
 )
 const ContractsPage = lazy(() =>
   import('./pages/ContractsPage').then((m) => ({ default: m.ContractsPage })),
+)
+// CheckoutPage (W12) — landing page for the /pricing CTA. Lives at
+// /app/checkout so the AuthGate kicks unauthenticated users to /login first
+// (with state.from preserved so they land back here post-login). The page
+// reads ?plan= + ?frequency= from the URL, POSTs to /api/v1/billing/checkout,
+// then either redirects to Razorpay's short_url or renders a friendly
+// fallback when Razorpay isn't configured for the requested tier.
+const CheckoutPage = lazy(() =>
+  import('./pages/CheckoutPage').then((m) => ({ default: m.CheckoutPage })),
 )
 // AdminCustomersPage — founder console at /app/admin/customers. The page
 // itself reads ctx.me.is_platform_admin and renders a Navigate when the
@@ -218,6 +238,11 @@ export function AppRoutes() {
             change notification), subprocessors.md, and trust-residency
             egress section. Used to 404 because no route existed. */}
         <Route path="/changelog" element={<ChangelogPage />} />
+        {/* W12 H15: /privacy and /terms used to 404 — footer links were
+            dead. Stop-gap pages render placeholder copy with a legal@
+            email until binding language ships. */}
+        <Route path="/privacy" element={<PrivacyPage />} />
+        <Route path="/terms" element={<TermsPage />} />
 
         {/* ─── auth surfaces (no chrome, dedicated layout) ───────── */}
         <Route path="/login" element={<LoginPage />} />
@@ -255,6 +280,11 @@ export function AppRoutes() {
           <Route path="billing" element={<BillingPage />} />
           <Route path="settings" element={<SettingsPage />} />
           <Route path="contracts" element={<ContractsPage />} />
+          {/* W12 C1: /app/checkout is the landing point for /pricing CTAs.
+              The page reads ?plan= + ?frequency=, POSTs to the billing
+              checkout endpoint, and redirects to Razorpay. AuthGate above
+              kicks anonymous visitors to /login first. */}
+          <Route path="checkout" element={<CheckoutPage />} />
           {/* Admin-only — the page itself renders <Navigate to="/" /> for
               non-admin users so the route 404s instead of 403s. */}
           <Route path="admin/customers" element={<AdminCustomersPage />} />

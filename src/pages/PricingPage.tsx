@@ -21,6 +21,12 @@ type PricingFrequency = 'monthly' | 'yearly'
 
 const FREQ_STORAGE_KEY = 'instant.billing.plan_frequency'
 
+// SOURCE-OF-TRUTH-RISK: this matrix (TIERS + ROWS below) mirrors
+// api/plans.yaml. When updating tier prices, limits, or names, update
+// api/plans.yaml in the SAME PR — the two are not wired together yet
+// (M11 marketing-matrix migration is post-W12 scope). A regression test
+// in PricingPage.test.tsx asserts the five tier cards are present so an
+// accidental deletion can't slip through CI.
 const TIERS: {
   key: TierKey
   name: string
@@ -46,8 +52,11 @@ const TIERS: {
     monthly: { price: '$9', sub: '/ mo' },
     yearly: { price: '$8.25', sub: '/ mo billed yearly', saveLabel: 'save $9/yr' },
     cta: 'Start hobby →',
-    ctaHrefMonthly: '/checkout?plan=hobby&frequency=monthly',
-    ctaHrefYearly: '/checkout?plan=hobby&frequency=yearly',
+    // W12 C1: CTAs go to /app/checkout (under AuthGate) instead of the
+    // unregistered /checkout path. The auth bounce sends anon visitors
+    // through /login with state.from preserved so they land back here.
+    ctaHrefMonthly: '/app/checkout?plan=hobby&frequency=monthly',
+    ctaHrefYearly: '/app/checkout?plan=hobby&frequency=yearly',
   },
   // hobby_plus (W11) — $19/mo mid-step. Sits between Hobby and Pro to
   // anchor the decoy effect: research shows triple-tier $9/$19/$49 lifts
@@ -59,8 +68,8 @@ const TIERS: {
     monthly: { price: '$19', sub: '/ mo' },
     yearly: { price: '$16.58', sub: '/ mo billed yearly', saveLabel: 'save $29/yr' },
     cta: 'Start hobby plus →',
-    ctaHrefMonthly: '/checkout?plan=hobby_plus&frequency=monthly',
-    ctaHrefYearly: '/checkout?plan=hobby_plus&frequency=yearly',
+    ctaHrefMonthly: '/app/checkout?plan=hobby_plus&frequency=monthly',
+    ctaHrefYearly: '/app/checkout?plan=hobby_plus&frequency=yearly',
   },
   {
     key: 'pro',
@@ -68,8 +77,8 @@ const TIERS: {
     monthly: { price: '$49', sub: '/ mo' },
     yearly: { price: '$40.83', sub: '/ mo billed yearly', saveLabel: 'save $98/yr' },
     cta: 'Start pro →',
-    ctaHrefMonthly: '/checkout?plan=pro&frequency=monthly',
-    ctaHrefYearly: '/checkout?plan=pro&frequency=yearly',
+    ctaHrefMonthly: '/app/checkout?plan=pro&frequency=monthly',
+    ctaHrefYearly: '/app/checkout?plan=pro&frequency=yearly',
     highlighted: true,
   },
   // Team tier is under active development — visible so customers can see the
@@ -142,8 +151,11 @@ const FAQ: { q: string; a: string }[] = [
     a: "Your agent calls /db/new without auth. Resources expire in 24 h unless claimed via the link in the response."
   },
   {
+    // W12 H14: previous copy said "Cancel anytime" which contradicted the
+    // platform's no-self-serve-cancel policy. The honest answer matches
+    // the BillingPage copy: cancellation is support-only with a 24h SLA.
     q: 'How is billing handled?',
-    a: 'Razorpay subscriptions. Cancel anytime; existing resources keep their tier until the end of the current period.'
+    a: "Razorpay subscriptions. Cancel by emailing support@instanode.dev — we'll process within 24h. Existing resources keep their tier until the end of the current period."
   },
   {
     q: 'Can I move resources between envs?',
