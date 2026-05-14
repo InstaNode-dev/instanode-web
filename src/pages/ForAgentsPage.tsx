@@ -31,6 +31,11 @@ const REASONS: { eyebrow: string; body: string }[] = [
     eyebrow: '03 · idempotent claim',
     body:
       "Idempotent claim. The same JWT can be claimed exactly once — atomically. Your agent's logic is deterministic."
+  },
+  {
+    eyebrow: '04 · safe retries on every create',
+    body:
+      'Every create endpoint deduplicates retries. Pass an Idempotency-Key header for true exactly-once across a 24h window, or just retry safely — the server fingerprints (scope + route + canonical body) and replays for 120s. The response header X-Idempotent-Replay: true tells you when you hit the cache.'
   }
 ]
 
@@ -324,10 +329,13 @@ function ForAgentsStyles() {
       /* reasons */
       .fa-reasons {
         display: grid;
-        grid-template-columns: repeat(3, 1fr);
+        grid-template-columns: repeat(4, 1fr);
         gap: 14px;
       }
-      @media (max-width: 980px) {
+      @media (max-width: 1180px) {
+        .fa-reasons { grid-template-columns: repeat(2, 1fr); }
+      }
+      @media (max-width: 640px) {
         .fa-reasons { grid-template-columns: 1fr; }
       }
       .fa-reason {
