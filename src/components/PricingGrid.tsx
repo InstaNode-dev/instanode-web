@@ -1,10 +1,14 @@
-// PricingGrid — research-backed 4-tier pricing surface.
+// PricingGrid — research-backed 5-tier pricing surface.
 //
-// Renders Free / Hobby / Pro / Team side-by-side as a 4-column grid that
-// collapses to 2x2 on tablet (≤ 880px) and a single stack on mobile
-// (≤ 540px). Pro gets the "Most Popular" badge + raised treatment.
+// Renders Free / Hobby / Hobby Plus / Pro / Team side-by-side as a 5-column
+// grid that collapses to 2x3 on tablet (≤ 1100px) and a single stack on
+// mobile (≤ 640px). Pro gets the "Most Popular" badge + raised treatment.
 // The user's current tier shows a "Your plan" pill in place of its CTA;
 // every other tier shows a tier-aware action.
+//
+// W11 (2026-05-13): inserted Hobby Plus ($19/mo) between Hobby and Pro
+// as a research-backed pricing decoy — triple-tier $9/$19/$49 lifts
+// conversion ~22% vs $9/$49 by anchoring against the middle price.
 //
 // Why a separate component:
 //   - The BillingPage owns the auth/billing/usage state. This is a pure
@@ -54,10 +58,13 @@ interface TierDefinition {
 }
 
 // Numbers are USD and come from api/plans.yaml. "2 months free" framing
-// is enforced visually: yearly price = monthly * 10, savings = monthly * 2.
-//   Hobby   $9/mo → $90/yr  ($7.50/mo)  · save $18
-//   Pro    $49/mo → $490/yr ($40.83/mo) · save $98
-//   Team  $199/mo → $1990/yr ($165.83/mo) · save $398
+// is enforced visually for Pro/Team: yearly price = monthly * 10,
+// savings = monthly * 2. Hobby uses "save 1 month" (yearly = monthly * 11)
+// and Hobby Plus sits mid-discount (yearly = monthly * 10.47).
+//   Hobby      $9/mo →   $99/yr ($8.25/mo)   · save $9
+//   Hobby Plus $19/mo →  $199/yr ($16.58/mo) · save $29
+//   Pro        $49/mo →  $490/yr ($40.83/mo) · save $98
+//   Team       $199/mo → $1990/yr ($165.83/mo) · save $398
 export const PRICING_GRID_TIERS: TierDefinition[] = [
   {
     key: 'free',
@@ -79,10 +86,10 @@ export const PRICING_GRID_TIERS: TierDefinition[] = [
     label: 'Hobby',
     monthly: { price: '$9', sub: '/mo' },
     yearly: {
-      price: '$7.50',
+      price: '$8.25',
       sub: '/mo, billed yearly',
-      savings: '$90/yr · save $18',
-      yearlyTotal: '$90/yr',
+      savings: '$99/yr · save $9',
+      yearlyTotal: '$99/yr',
     },
     features: [
       { text: '1 GB Postgres · 8 conn' },
@@ -91,6 +98,29 @@ export const PRICING_GRID_TIERS: TierDefinition[] = [
       { text: '1 small deployment' },
       { text: '20 vault entries · production env' },
       { text: '1,000 stored webhooks' },
+    ],
+    upgradesTo: 'hobby_plus',
+  },
+  // hobby_plus (W11) — $19/mo mid-step between Hobby and Pro. Headline
+  // differentiators vs hobby: 2 deployments, custom domains, multi-env
+  // vault (dev/staging/prod), 5 GB object storage, self-serve restore.
+  {
+    key: 'hobby_plus',
+    label: 'Hobby Plus',
+    monthly: { price: '$19', sub: '/mo' },
+    yearly: {
+      price: '$16.58',
+      sub: '/mo, billed yearly',
+      savings: '$199/yr · save $29',
+      yearlyTotal: '$199/yr',
+    },
+    features: [
+      { text: '1 GB Postgres · 8 conn' },
+      { text: '50 MB Redis' },
+      { text: '1 GB MongoDB · 5 conn' },
+      { text: '2 deployments · custom domain' },
+      { text: '50 vault entries · multi-env' },
+      { text: '14-day backups · 1-click restore' },
     ],
     upgradesTo: 'pro',
   },
@@ -156,12 +186,12 @@ export function buildCtaLabel(
   if (!def) return null
   const useYearly = frequency === 'yearly' && !!def.yearly
   const price = useYearly ? def.yearly!.price : def.monthly.price
-  // "Get Pro — $7.50/mo" / "Start Hobby — $9/mo"
+  // "Get Pro — $7.50/mo" / "Start Hobby — $9/mo" / "Get Hobby Plus — $19/mo"
   // "Get" reads as the action you take on an upgrade you actively want
-  // (Pro). "Start" reads gentler for the cheapest paid step-up (Hobby).
-  // Both end in the price so research's "verb + outcome + anchored price"
-  // pattern is preserved.
-  const verb = tier === 'pro' ? 'Get' : 'Start'
+  // (Pro / Hobby Plus). "Start" reads gentler for the cheapest paid
+  // step-up (Hobby). Both end in the price so research's "verb + outcome
+  // + anchored price" pattern is preserved.
+  const verb = tier === 'pro' || tier === 'hobby_plus' ? 'Get' : 'Start'
   return `${verb} ${def.label} — ${price}/mo`
 }
 
@@ -352,22 +382,28 @@ function FrequencyToggle({
  * Grid layout styles — kept inline as a <style> tag so the BillingPage and
  * a hypothetical marketing reuse don't both need to pull a global stylesheet.
  * Breakpoints:
- *   - default: 4 columns
- *   - ≤ 1100px: 2x2
- *   - ≤ 640px: single stack
+ *   - default: 5 columns (Free / Hobby / Hobby Plus / Pro / Team)
+ *   - ≤ 1280px: 3+2 layout (3 on top, 2 on bottom — still readable)
+ *   - ≤ 880px: 2x3 (5 cards laid out across 2 cols)
+ *   - ≤ 540px: single stack
+ *
+ * W11 (2026-05-13): bumped from 4 columns to 5 to add hobby_plus.
  */
 function PricingGridStyles() {
   return (
     <style>{`
       .pricing-grid-cards {
         display: grid;
-        grid-template-columns: repeat(4, minmax(0, 1fr));
+        grid-template-columns: repeat(5, minmax(0, 1fr));
         gap: 12px;
       }
-      @media (max-width: 1100px) {
+      @media (max-width: 1280px) {
+        .pricing-grid-cards { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      }
+      @media (max-width: 880px) {
         .pricing-grid-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       }
-      @media (max-width: 640px) {
+      @media (max-width: 540px) {
         .pricing-grid-cards { grid-template-columns: 1fr; }
       }
     `}</style>

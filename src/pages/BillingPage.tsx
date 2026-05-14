@@ -61,6 +61,10 @@ type PlanLimits = {
 // LIMITS — only the per-tier numeric caps the Usage panel needs. The grid
 // renders the marketing copy from PricingGrid's own internal table, so we
 // no longer need a duplicate `features` list here.
+//
+// W11 (2026-05-13): added hobby_plus mid-tier ($19/mo). Same postgres /
+// redis as hobby; bumped mongodb to 1 GB, deployments to 2, webhooks to
+// 5000. Numbers mirror api/plans.yaml hobby_plus block.
 const LIMITS: Record<string, { label: string; limits: PlanLimits; nextTier?: TierKey }> = {
   anonymous: {
     label: 'Anonymous',
@@ -74,8 +78,13 @@ const LIMITS: Record<string, { label: string; limits: PlanLimits; nextTier?: Tie
   },
   hobby: {
     label: 'Hobby',
-    nextTier: 'pro',
+    nextTier: 'hobby_plus',
     limits: { postgres_mb: 1024, redis_mb: 50, mongodb_mb: 100, deployments: 1, webhooks: 1000, team_seats: 1 },
+  },
+  hobby_plus: {
+    label: 'Hobby Plus',
+    nextTier: 'pro',
+    limits: { postgres_mb: 1024, redis_mb: 50, mongodb_mb: 1024, deployments: 2, webhooks: 5000, team_seats: 1 },
   },
   pro: {
     label: 'Pro',
@@ -91,11 +100,11 @@ const LIMITS: Record<string, { label: string; limits: PlanLimits; nextTier?: Tie
   },
 }
 
-// Normalise the user's tier into one of the four grid tiers. Anonymous +
+// Normalise the user's tier into one of the five grid tiers. Anonymous +
 // any unknown value collapses to 'free' for the grid (so an anonymous
 // user viewing /app/billing sees Free highlighted as "Your plan").
 function gridTierFromTier(tier: string): TierKey {
-  if (tier === 'hobby' || tier === 'pro' || tier === 'team' || tier === 'free') {
+  if (tier === 'hobby' || tier === 'hobby_plus' || tier === 'pro' || tier === 'team' || tier === 'free') {
     return tier
   }
   // anonymous + unknown → free

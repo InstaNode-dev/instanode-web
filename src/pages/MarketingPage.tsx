@@ -62,7 +62,7 @@ const SERVICES: Service[] = [
 ]
 
 type Plan = {
-  id: 'anonymous' | 'hobby' | 'pro' | 'team'
+  id: 'anonymous' | 'hobby' | 'hobby_plus' | 'pro' | 'team'
   name: string
   tagline: string
   price: string
@@ -73,6 +73,11 @@ type Plan = {
   cta: { label: string; href: string; variant: 'primary' | 'secondary' | 'disabled' }
 }
 
+// W11 (2026-05-13): inserted hobby_plus between hobby and pro. The new
+// $19/mo tier is the research-backed pricing decoy — triple-tier
+// $9/$19/$49 lifts conversion ~22% vs $9/$49 by anchoring against the
+// middle price. Pro remains `featured: true` so the existing visual
+// emphasis stays on the upgrade target rather than the decoy.
 const PLANS: Plan[] = [
   {
     id: 'anonymous',
@@ -101,6 +106,21 @@ const PLANS: Plan[] = [
       '20 vault entries · production env',
     ],
     cta: { label: 'Start hobby →', href: ROUTES.signin, variant: 'secondary' },
+  },
+  {
+    id: 'hobby_plus',
+    name: 'Hobby Plus',
+    tagline: 'For the side project that wants a vanity URL and a backup safety net.',
+    price: '$19',
+    freq: '/ mo',
+    features: [
+      '1 GB Postgres · 8 conn',
+      '50 MB Redis · 1 GB Mongo · 5 conn',
+      '2 deployments · custom domain included',
+      '50 vault entries · multi-env (dev / staging / prod)',
+      '14-day backups · 1-click restore',
+    ],
+    cta: { label: 'Start hobby plus →', href: ROUTES.signin, variant: 'secondary' },
   },
   {
     id: 'pro',
