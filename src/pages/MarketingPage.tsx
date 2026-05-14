@@ -585,9 +585,14 @@ export function MarketingPage() {
             </div>
             <div className="mkt-footer-col">
               <h4>Legal</h4>
+              {/* W12 H15: /privacy and /terms are real routes again
+                  (stop-gap placeholder pages with a legal@ email).
+                  /llms.txt is served from the apex by the prerender
+                  pipeline — we link the absolute URL so a future
+                  same-origin move can't silently 404 the link. */}
               <a href="/privacy">Privacy</a>
               <a href="/terms">Terms</a>
-              <a href="/llms.txt">llms.txt</a>
+              <a href="https://instanode.dev/llms.txt">llms.txt</a>
             </div>
           </div>
           <div className="mkt-footer-bottom">

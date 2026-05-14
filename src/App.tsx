@@ -64,6 +64,17 @@ const UseCaseDetailPage = lazy(() =>
 const ChangelogPage = lazy(() =>
   import('./pages/ChangelogPage').then((m) => ({ default: m.ChangelogPage })),
 )
+// PrivacyPage / TermsPage (W12 H15) — stop-gap placeholders for the footer
+// legal links. Both /privacy and /terms used to 404 (App.tsx had no route)
+// so the MarketingPage and PublicShell footers were dead. The pages render
+// honest placeholder copy with a contact-legal email so customers know
+// where to ask. Replace with real binding copy when legal sign-off lands.
+const PrivacyPage = lazy(() =>
+  import('./pages/PrivacyPage').then((m) => ({ default: m.PrivacyPage })),
+)
+const TermsPage = lazy(() =>
+  import('./pages/TermsPage').then((m) => ({ default: m.TermsPage })),
+)
 
 // Authenticated dashboard surfaces — lazy-loaded. These pages only render
 // behind AuthGate (token must be present), so a marketing visitor never
@@ -227,6 +238,11 @@ export function AppRoutes() {
             change notification), subprocessors.md, and trust-residency
             egress section. Used to 404 because no route existed. */}
         <Route path="/changelog" element={<ChangelogPage />} />
+        {/* W12 H15: /privacy and /terms used to 404 — footer links were
+            dead. Stop-gap pages render placeholder copy with a legal@
+            email until binding language ships. */}
+        <Route path="/privacy" element={<PrivacyPage />} />
+        <Route path="/terms" element={<TermsPage />} />
 
         {/* ─── auth surfaces (no chrome, dedicated layout) ───────── */}
         <Route path="/login" element={<LoginPage />} />

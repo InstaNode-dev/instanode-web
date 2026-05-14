@@ -44,6 +44,8 @@ import { DocsPage } from './pages/DocsPage'
 import { UseCasesPage } from './pages/UseCasesPage'
 import { UseCaseDetailPage } from './pages/UseCaseDetailPage'
 import { ChangelogPage } from './pages/ChangelogPage'
+import { PrivacyPage } from './pages/PrivacyPage'
+import { TermsPage } from './pages/TermsPage'
 
 // SSRRoutes — the SSG-only route tree. Mirrors the public surface of the
 // client AppRoutes (everything reachable without auth). The /app/* subtree
@@ -63,6 +65,11 @@ function SSRRoutes() {
       <Route path="/use-cases" element={<UseCasesPage />} />
       <Route path="/use-cases/:slug" element={<UseCaseDetailPage />} />
       <Route path="/changelog" element={<ChangelogPage />} />
+      {/* W12 H15: privacy / terms pre-rendered with their stop-gap
+          placeholder copy so the footer links resolve to a real page
+          for crawlers and direct visitors alike. */}
+      <Route path="/privacy" element={<PrivacyPage />} />
+      <Route path="/terms" element={<TermsPage />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   )
