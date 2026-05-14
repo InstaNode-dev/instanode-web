@@ -150,6 +150,15 @@ async function refreshBilling() {
 let bootstrapped = false
 export function ensureBootstrap() {
   if (bootstrapped) return
+  // Skip bootstrap on public pages (no session yet). RouteTracker mounts
+  // outside AuthGate so it sees every URL including /login, /pricing,
+  // and /login/callback. Without this guard those public mounts fire
+  // four authenticated calls that all 401, and the centralized 401
+  // handler in src/api/index.ts calls clearToken() on each, racing the
+  // JWT that LoginCallbackPage.setToken() just stored. Net effect:
+  // GitHub OAuth + magic-link both bounce the user back to /login with
+  // empty localStorage. Surfaced live 2026-05-14 via Playwright debug.
+  if (!api.getToken()) return
   bootstrapped = true
   void refreshMe().then(() => {
     // Counts and billing are independent — fire in parallel once auth resolves.
