@@ -26,7 +26,13 @@ const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000
 // default). This regex is best-effort cosmetic cleanup only — it does NOT
 // neutralise hostile input. If hostile bytes reach `text`, they appear as
 // literal text characters, never executable HTML.
-function stripHtmlTags(s: string): string {
+function stripHtmlTags(s: string | null | undefined): string {
+  // Null-safe: the server's activity feed contract permits rows where
+  // `text` is missing (e.g., a future event-shape we haven't templated
+  // for yet). Returning '' lets the row render an empty body rather than
+  // crashing the whole Overview. Live-fix 2026-05-14 after a logged-in
+  // user hit "TypeError: can't access property replace, i is undefined".
+  if (typeof s !== 'string') return ''
   return s.replace(/<\/?[a-zA-Z][^>]*>/g, '')
 }
 
