@@ -5,6 +5,7 @@ import {
   Card, ContractLine, PromptCard,
   expiryLevel, formatTimeUntil, useExpiryTick, copyToClipboard
 } from '../components/Common'
+import { MetricsPanel } from '../components/MetricsPanel'
 import * as api from '../api'
 import type { Resource } from '../api'
 
@@ -106,7 +107,7 @@ export function ResourceDetailPage() {
         {TABS.map((t) => (
           <button key={t} className={`tab ${tab === t ? 'active' : ''}`} onClick={() => setTab(t)}>
             {t}
-            {(t === 'Metrics' || t === 'Audit') && <span className="tag">blocked</span>}
+            {t === 'Audit' && <span className="tag">blocked</span>}
           </button>
         ))}
       </div>
@@ -175,16 +176,12 @@ export function ResourceDetailPage() {
               <ContractLine method="GET"    path="/api/v1/resources/:id" status="live" />
               <ContractLine method="POST"   path="/api/v1/resources/:id/rotate" status="live" />
               <ContractLine method="DELETE" path="/api/v1/resources/:id" status="live" />
-              {/* Metrics + Audit endpoints intentionally omitted (P3 persona
-                  feedback 2026-05-13). The previous build advertised them
-                  as status="gap" — placeholders for unbuilt features that
-                  read to customers as missing contracts on a live surface.
-                  Replaced with the early-access CTA below. The real
-                  contracts will land via W7-F (api side) and W7-G
-                  (dashboard wiring); when those ship, re-add ContractLine
-                  rows with status="live". */}
+              {/* Metrics now LIVE (W7-F, 2026-05-14). Audit remains gap —
+                  early-access CTA for audit retained below until W7-G ships. */}
+              <ContractLine method="GET"    path="/api/v1/resources/:id/metrics" status="live" />
+              <ContractLine method="GET"    path="/api/v1/resources/:id/audit" status="gap" />
               <div
-                data-testid="metrics-early-access"
+                data-testid="audit-early-access"
                 style={{
                   marginTop: 10,
                   padding: '10px 12px',
@@ -195,10 +192,10 @@ export function ResourceDetailPage() {
                   lineHeight: 1.55,
                 }}
               >
-                <strong style={{ color: 'var(--text)' }}>Per-resource metrics & audit</strong>
+                <strong style={{ color: 'var(--text)' }}>Per-resource audit log</strong>
                 {' — '}coming in Pro.{' '}
                 <a
-                  href="mailto:enterprise@instanode.dev?subject=Early%20access%3A%20resource%20metrics%20%26%20audit"
+                  href="mailto:enterprise@instanode.dev?subject=Early%20access%3A%20resource%20audit"
                   style={{ color: 'var(--accent)', textDecoration: 'underline', textUnderlineOffset: 3 }}
                 >
                   Request early access →
@@ -268,15 +265,11 @@ export function ResourceDetailPage() {
         </Card>
       )}
 
-      {/* METRICS — blocked */}
+      {/* METRICS — W7F: real metrics tile, polls /api/v1/resources/:id/metrics
+          every 60s. Stub-data banner is rendered inside MetricsPanel when
+          data_source === "stub" (until the W5-A prober's per-probe writer ships). */}
       {tab === 'Metrics' && (
-        <>
-          <Card title="Metrics · 24h" right={<span style={{ color: 'var(--rose)' }}>no data source</span>}>
-            <div style={{ opacity: 0.4, padding: 32, textAlign: 'center', fontFamily: 'var(--font-mono)', color: 'var(--text-dim)' }}>
-              awaiting backend
-            </div>
-          </Card>
-        </>
+        <MetricsPanel resourceId={r.token} ownerTier={r.tier} />
       )}
 
       {/* AUDIT — blocked */}

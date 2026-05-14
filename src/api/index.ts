@@ -393,6 +393,51 @@ export async function rotateResource(id: string): Promise<{ ok: true; connection
   }
 }
 
+// ─── Resource metrics ───
+//
+// GET /api/v1/resources/:id/metrics — per-resource time-series metrics
+// (p50/p95/p99 latency, active connections, storage_bytes, error_rate_pct)
+// over a tier-capped window. The dashboard polls this every 60s on the
+// Metrics tab; per CLAUDE.md feedback ("aggregations need caching +
+// consistency reasoning") the freshness model here is poll-on-demand, not
+// long-cached — these tiles are observability surfaces where seeing the
+// latest sample matters more than minimising server load.
+//
+// The response's `data_source` field is "stub" until the W5-A prober's
+// per-probe row writer lands. The dashboard renders a yellow "metrics will
+// populate" banner only when data_source === "stub" so the layout doesn't
+// shift when real data arrives.
+
+export type MetricsDataSource = 'stub' | 'newrelic' | 'resource_metrics'
+
+export interface ResourceMetricsResponse {
+  ok: true
+  resource_id: string
+  resource_type: string
+  window_seconds: number
+  samples_count: number
+  sample_interval_seconds: number
+  metrics: {
+    latency_p50_ms: number[]
+    latency_p95_ms: number[]
+    latency_p99_ms: number[]
+    connections_active: number[]
+    storage_bytes: number[]
+    error_rate_pct: number[]
+  }
+  data_source: MetricsDataSource
+}
+
+export async function getResourceMetrics(
+  id: string,
+  windowParam: string = '1h',
+): Promise<ResourceMetricsResponse> {
+  const r = await call<ResourceMetricsResponse>(
+    `/api/v1/resources/${id}/metrics?window=${encodeURIComponent(windowParam)}`,
+  )
+  return r
+}
+
 // ─── Stacks / deployments ───
 // GET /api/v1/stacks returns one row per stack including the real env
 // (production / staging / dev / ...) and parent_stack_id linkage. We adapt
