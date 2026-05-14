@@ -256,6 +256,89 @@ export async function reportExperimentConverted(input: {
   }
 }
 
+// ─── Status — public, real backend (W11) ──────────────────────────────────
+// GET /api/v1/status returns the worker-aggregated uptime feed. Replaces
+// the previous client-side probe loop on /status (which had the fatal
+// "instanode edge down → probe also down" failure mode caught by P3).
+//
+// Public — no auth. Errors fall through to an empty payload so the page
+// renders a skeleton instead of a crash.
+
+export interface StatusComponent {
+  slug: string
+  name: string
+  category: string
+  description?: string
+  current_status: 'operational' | 'degraded' | 'down'
+  uptime_7d_pct: number
+  uptime_30d_pct: number
+  /** 96 booleans, one per 15-minute slot, oldest → newest. */
+  last_24h_samples: boolean[]
+}
+
+export interface StatusIncident {
+  id: string
+  title: string
+  severity: string
+  status: string
+  started_at: string
+  resolved_at?: string
+  summary?: string
+  url?: string
+}
+
+export interface StatusPayload {
+  ok: boolean
+  freshness_seconds: number
+  as_of: string
+  components: StatusComponent[]
+  current_incidents: StatusIncident[]
+}
+
+/**
+ * fetchStatus — public GET /api/v1/status. Best-effort: on any failure
+ * returns an honest empty payload (ok=false, components=[]) so the page
+ * can render a degraded-but-functional skeleton instead of a 500 or a
+ * console error. The page logic distinguishes ok=false from
+ * components=[] (the latter is also a valid "fresh install, no probes
+ * yet" state).
+ */
+export async function fetchStatus(): Promise<StatusPayload> {
+  const base = getAPIBaseURL()
+  const origin =
+    base || (typeof window !== 'undefined' ? window.location.origin : 'http://localhost')
+  let url: string
+  try {
+    url = new URL('/api/v1/status', origin).toString()
+  } catch {
+    return emptyStatus()
+  }
+  try {
+    const res = await fetch(url, { method: 'GET' })
+    if (!res.ok) return emptyStatus()
+    const body = (await res.json().catch(() => null)) as StatusPayload | null
+    if (!body || !Array.isArray(body.components)) return emptyStatus()
+    // Defensive: server should always send current_incidents, but coerce
+    // missing/null to [] so the consumer can safely .map().
+    if (!Array.isArray(body.current_incidents)) {
+      body.current_incidents = []
+    }
+    return body
+  } catch {
+    return emptyStatus()
+  }
+}
+
+function emptyStatus(): StatusPayload {
+  return {
+    ok: false,
+    freshness_seconds: 60,
+    as_of: new Date().toISOString(),
+    components: [],
+    current_incidents: [],
+  }
+}
+
 export async function logout(): Promise<{ ok: true }> {
   clearToken()
   // Drop the admin URL prefix on logout. A stale prefix in module-local
