@@ -42,7 +42,18 @@ export function ResourceDetailPage() {
 
   if (!r) return <div className="skel" style={{ width: '100%', height: 320 }} />
 
-  const masked = (r.connection_url ?? '').replace(/:([^@]+)@/, ':<span class="mask">••••••••</span>@')
+  // W12 XSS hardening (2026-05-14): connection_url is server-derived and
+  // currently HTML-safe, but rendering it via dangerouslySetInnerHTML made
+  // the password-masking effect a stored-XSS sink if a future server change
+  // ever interpolated user-controlled bytes (e.g., resource name) into the
+  // string. We now split the URL around the `:password@` segment and render
+  // each piece as a plain JSX text node — the mask is a real <span>, not
+  // string concatenation. Same visual, zero HTML interpolation.
+  const connStr = r.connection_url ?? ''
+  const maskMatch = connStr.match(/^(.*?:)([^@]+)(@.*)$/)
+  const connBefore = maskMatch ? maskMatch[1] : connStr
+  const connAfter = maskMatch ? maskMatch[3] : ''
+  const hasMaskable = Boolean(maskMatch)
 
   return (
     <>
@@ -146,11 +157,17 @@ export function ResourceDetailPage() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             <Card title="Connection URL" right="postgresql://">
               <div className="conn">
-                <span className="url" dangerouslySetInnerHTML={{
-                  __html: revealed
-                    ? (r.connection_url ?? '')
-                    : masked
-                }} />
+                <span className="url">
+                  {revealed || !hasMaskable ? (
+                    connStr
+                  ) : (
+                    <>
+                      {connBefore}
+                      <span className="mask">••••••••</span>
+                      {connAfter}
+                    </>
+                  )}
+                </span>
                 <button className="btn btn-sm btn-ghost" onClick={() => setRevealed((x) => !x)}>
                   {revealed ? 'hide' : 'reveal'}
                 </button>

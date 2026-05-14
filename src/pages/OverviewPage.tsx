@@ -13,6 +13,23 @@ import { useDashboardCtx } from '../hooks/useDashboardCtx'
 const TIER_LIMIT_GB: Record<string, number> = { hobby: 0.5, pro: 5, team: 50 }
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000
 
+// stripHtmlTags — display helper, NOT a security control.
+//
+// Server-emitted activity summaries embed presentational tags like <strong>
+// and <code> (a pre-W12 holdover from when the feed was rendered via
+// dangerouslySetInnerHTML). Now that the feed renders as plain JSX text,
+// those raw tag characters would otherwise show up in the UI. This helper
+// strips them so users see "agent provisioned postgres tok_abcd1234"
+// instead of "agent provisioned <strong>postgres</strong> <code>...</code>".
+//
+// The XSS guarantee comes from rendering as a text node (React escapes by
+// default). This regex is best-effort cosmetic cleanup only — it does NOT
+// neutralise hostile input. If hostile bytes reach `text`, they appear as
+// literal text characters, never executable HTML.
+function stripHtmlTags(s: string): string {
+  return s.replace(/<\/?[a-zA-Z][^>]*>/g, '')
+}
+
 export function OverviewPage() {
   const [resources, setResources] = useState<Resource[]>([])
   const [activity, setActivity] = useState<ActivityItem[]>([])
@@ -258,7 +275,19 @@ export function OverviewPage() {
               {activity.map((a) => (
                 <div key={a.id} className="feed-row">
                   <span className={`dot ${a.level}`} />
-                  <span className="text" dangerouslySetInnerHTML={{ __html: a.text }} />
+                  {/* W12 XSS hardening (2026-05-14): a.text used to be
+                      rendered via dangerouslySetInnerHTML so server-emitted
+                      <strong>/<code> tags would format. The risk: if any
+                      future server path interpolated a user-controlled
+                      resource name into a summary, that name would execute
+                      as HTML. The current /api/v1/audit summaries never
+                      include user-controlled bytes, but the client-side
+                      synth fallback in api/index.ts did. We now render
+                      activity text as plain JSX. Bold formatting goes
+                      away; XSS surface closes. Follow-up: switch the
+                      server to emit structured fields ({event, resource_name})
+                      so the client can format safely with JSX. */}
+                  <span className="text">{stripHtmlTags(a.text)}</span>
                   <RelTime at={a.at} />
                 </div>
               ))}
