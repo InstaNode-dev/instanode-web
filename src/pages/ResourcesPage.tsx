@@ -187,6 +187,25 @@ export function ResourcesPage() {
                   <div className="info">
                     <span className="n" style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
                       {r.name ?? r.id}
+                      {r.status === 'paused' && (
+                        <span
+                          data-testid="resource-row-paused-pill"
+                          title="Paused — data preserved, doesn't count against quota"
+                          style={{
+                            padding: '1px 6px',
+                            fontSize: 10,
+                            fontWeight: 600,
+                            letterSpacing: '0.04em',
+                            textTransform: 'uppercase',
+                            color: 'var(--text-dim)',
+                            background: 'rgba(255,193,7,0.08)',
+                            border: '1px solid rgba(255,193,7,0.25)',
+                            borderRadius: 3,
+                          }}
+                        >
+                          Paused
+                        </span>
+                      )}
                       <ExpiryBadge expiresAt={r.expires_at} now={now} />
                     </span>
                     <span className="id">{r.token}</span>

@@ -64,9 +64,15 @@ const TIERS: {
     name: 'Team',
     monthly: { price: '$199', sub: '/ mo' },
     yearly: { price: '$165.83', sub: '/ mo billed yearly', saveLabel: 'save $398/yr' },
-    cta: 'Coming soon',
-    ctaHrefMonthly: '#',
-    comingSoon: true,
+    // Self-serve checkout for Team is still being wired (multi-seat / RBAC
+    // UI). The Razorpay yearly plan and dedicated-infra k8s plumbing both
+    // exist, so the tier is sellable via enterprise@ today. Dropping
+    // `comingSoon` so the CTA renders as a clickable mailto link instead of
+    // a disabled span; per-feature SOON markers in the matrix below still
+    // flag the specific gaps (SSO, RBAC, audit-export) honestly.
+    cta: 'Contact sales →',
+    ctaHrefMonthly: 'mailto:enterprise@instanode.dev?subject=Team%20tier%20inquiry',
+    ctaHrefYearly: 'mailto:enterprise@instanode.dev?subject=Team%20tier%20annual%20inquiry',
   },
 ]
 

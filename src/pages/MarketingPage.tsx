@@ -123,14 +123,18 @@ const PLANS: Plan[] = [
     tagline: 'For the engineering org with envs, vault, and an audit trail.',
     price: '$199',
     freq: '/ mo',
-    comingSoon: true,
     features: [
       'Everything in Pro, with larger per-resource limits',
-      'Multi-seat workspace · RBAC + audit log',
-      'SSO / SAML · 99.9% SLA',
+      'Multi-seat workspace · RBAC + audit log (rolling out)',
+      'SSO / SAML · 99.9% SLA (on roadmap)',
       'Dedicated node pools · priority support',
     ],
-    cta: { label: 'Coming soon', href: '#', variant: 'disabled' },
+    // Multi-seat / RBAC / SSO UI is still being built (flagged inline in
+    // the `features` list as "rolling out" / "on roadmap"). The Razorpay
+    // yearly plan and dedicated-infra k8s plumbing both exist, so Team
+    // is sellable via enterprise@ today. Replacing the dead `#` anchor
+    // with a real mailto unblocks procurement conversations.
+    cta: { label: 'Contact sales →', href: 'mailto:enterprise@instanode.dev?subject=Team%20tier%20inquiry', variant: 'primary' },
   },
 ]
 
@@ -406,7 +410,8 @@ export function MarketingPage() {
             </h2>
             <p className="mkt-section-sub">
               Anonymous is the funnel. Hobby pays for the side project. Pro unlocks the
-              multi-env workflow. Team (coming soon) is for the company that ships every day.
+              multi-env workflow. Team is for the company that ships every day — talk to us
+              about your needs.
             </p>
           </div>
 

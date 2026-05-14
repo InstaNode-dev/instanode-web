@@ -817,14 +817,22 @@ describe('BillingPage — §10.8 leak fixes', () => {
     expect(container.textContent?.toLowerCase()).not.toContain('running')
   })
 
-  it('exposes the Update payment-method action as a mailto link, not a dead button', async () => {
+  it('exposes the Update payment-method action as a clickable button (self-serve, not a dead mailto)', async () => {
     mockTier = 'pro'
     mockHappyBilling()
     render(<BillingPage />)
     await waitForLoaded()
+    // The button is wired to POST /api/v1/billing/update-payment which
+    // returns a Razorpay short_url; on api error the component falls back
+    // to a support mailto. Either way the data-testid is present.
     const link = screen.getByTestId('contact-support-update-payment') as HTMLAnchorElement
     expect(link.tagName).toBe('A')
-    expect(link.href.toLowerCase()).toContain('mailto:support@instanode.dev')
+    // The button starts in interactive mode: clickable href="#" with an
+    // onClick handler. Only after a failed API call does it degrade to a
+    // mailto. So the default-state assertion is "not a dead anchor in the
+    // sense of pointing somewhere; it has an onclick handler".
+    expect(link.href.toLowerCase()).not.toContain('mailto:')
+    expect(link.textContent?.toLowerCase()).toContain('update')
   })
 })
 

@@ -329,6 +329,27 @@ export async function inviteMember(_body: { email: string; role: string }): Prom
   return { ok: true }
 }
 
+// ─── Resource pause / resume (LIVE — Pro+ tier) ────────────────────────
+// Pause keeps the data + connection_url but stops counting the resource
+// against the per-team count quota; storage still counts. Resume flips
+// status back to active. 402 means the team is on a tier that doesn't
+// include pause/resume; surface the agent_action upgrade copy.
+export async function pauseResource(id: string): Promise<{ ok: true; resource: Resource }> {
+  const r = await call<{ ok: boolean; resource: any }>(
+    `/api/v1/resources/${encodeURIComponent(id)}/pause`,
+    { method: 'POST' },
+  )
+  return { ok: true, resource: adaptResource(r.resource) }
+}
+
+export async function resumeResource(id: string): Promise<{ ok: true; resource: Resource }> {
+  const r = await call<{ ok: boolean; resource: any }>(
+    `/api/v1/resources/${encodeURIComponent(id)}/resume`,
+    { method: 'POST' },
+  )
+  return { ok: true, resource: adaptResource(r.resource) }
+}
+
 // ─── Resources (LIVE) ───────────────────────────────────────────────────
 type ResourceListResp = { ok: boolean; items: any[]; total: number }
 type ResourceGetResp = { ok: boolean; item: any }
@@ -1069,6 +1090,21 @@ export async function validatePromotion(
 export async function cancelSubscription(): Promise<{ ok: true }> {
   await call<{ ok: boolean }>('/api/v1/billing/cancel', { method: 'POST' })
   return { ok: true }
+}
+
+// updatePaymentMethod — LIVE. POST /api/v1/billing/update-payment returns a
+// Razorpay short_url the customer can hit to swap their saved card without
+// going through support. Previously the BillingPage "Update" button was a
+// mailto:support@ link because the comment in BillingPage.tsx claimed "no
+// self-serve update-payment endpoint exists" — but the api shipped this
+// handler (billing.go:1082 UpdatePaymentMethodAPI) so the dashboard should
+// just call it.
+export async function updatePaymentMethod(): Promise<{ ok: true; short_url: string }> {
+  const r = await call<{ ok: boolean; short_url: string }>(
+    '/api/v1/billing/update-payment',
+    { method: 'POST' },
+  )
+  return { ok: true, short_url: r.short_url }
 }
 
 // ─── Vault (LIVE — listing keys works, value reveal lives on detail) ────

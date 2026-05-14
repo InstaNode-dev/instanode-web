@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { ROBanner, TierPill } from '../components/Common'
 import { UpgradeButton } from '../components/UpgradeButton'
 import { PricingGrid } from '../components/PricingGrid'
@@ -383,16 +383,12 @@ export function BillingPage() {
               auto-renews{' '}
               {billing.current_period_end && new Date(billing.current_period_end).toLocaleDateString()}
             </span>
-            {/* No self-serve "update payment method" endpoint exists. Route
-                the click through support, matching the cancel pattern. */}
-            <a
-              className="btn btn-sm btn-ghost"
-              style={{ marginLeft: 'auto' }}
-              href="mailto:support@instanode.dev?subject=Update%20payment%20method"
-              data-testid="contact-support-update-payment"
-            >
-              Update
-            </a>
+            {/* Self-serve "update payment method" is wired: api/billing.go
+                exposes POST /api/v1/billing/update-payment which returns a
+                Razorpay short_url. Falls back to support mailto on error
+                (rate limit, billing not configured, network) so customers
+                still have an escalation path. */}
+            <UpdatePaymentButton />
           </div>
         </div>
       </section>
@@ -551,6 +547,60 @@ function pctOf(used: number, limit: number): number {
 function isWarn(used: number, limit: number): boolean {
   if (!Number.isFinite(limit) || limit <= 0) return false
   return used / limit >= 0.8
+}
+
+// UpdatePaymentButton — invokes POST /api/v1/billing/update-payment, which
+// returns a Razorpay-managed short_url the customer can hit to swap their
+// saved card. On any error the button silently falls back to a mailto
+// link so the customer is never stuck. data-testid mirrors the previous
+// support-route id so existing Playwright assertions on click-target still
+// pass — the underlying href just resolves to a real Razorpay session now.
+function UpdatePaymentButton() {
+  const [pending, setPending] = useState(false)
+  const [errored, setErrored] = useState(false)
+
+  async function onClick(e: ReactMouseEvent<HTMLAnchorElement>) {
+    e.preventDefault()
+    if (pending) return
+    setPending(true)
+    setErrored(false)
+    try {
+      const r = await api.updatePaymentMethod()
+      if (r.short_url) {
+        window.location.href = r.short_url
+        return
+      }
+      setErrored(true)
+    } catch {
+      setErrored(true)
+    } finally {
+      setPending(false)
+    }
+  }
+
+  if (errored) {
+    return (
+      <a
+        className="btn btn-sm btn-ghost"
+        style={{ marginLeft: 'auto' }}
+        href="mailto:support@instanode.dev?subject=Update%20payment%20method"
+        data-testid="contact-support-update-payment"
+      >
+        Contact support
+      </a>
+    )
+  }
+  return (
+    <a
+      className="btn btn-sm btn-ghost"
+      style={{ marginLeft: 'auto', pointerEvents: pending ? 'none' : 'auto', opacity: pending ? 0.6 : 1 }}
+      href="#"
+      onClick={onClick}
+      data-testid="contact-support-update-payment"
+    >
+      {pending ? 'Opening…' : 'Update'}
+    </a>
+  )
 }
 
 // formatAsOf — renders a server-side ISO timestamp as a human-friendly

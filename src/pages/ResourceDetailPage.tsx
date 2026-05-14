@@ -54,6 +54,33 @@ export function ResourceDetailPage() {
             </h2>
             <EnvPill env={r.env} />
             <TierPill tier={r.tier} />
+            {r.status === 'paused' && (
+              // Customer-visible "this resource is paused" signal — the
+              // /resources list view shows a chip too. Connection_url still
+              // works but the resource doesn't count against the per-team
+              // resource quota. Resume via the agent.
+              <span
+                data-testid="resource-paused-pill"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  padding: '2px 8px',
+                  fontSize: 11,
+                  fontWeight: 600,
+                  letterSpacing: '0.04em',
+                  textTransform: 'uppercase',
+                  color: 'var(--text-dim)',
+                  background: 'rgba(255,193,7,0.08)',
+                  border: '1px solid rgba(255,193,7,0.25)',
+                  borderRadius: 4,
+                }}
+                title="Resource is paused. Data + connection URL preserved; resource quota slot is free."
+              >
+                <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#ffc107' }} />
+                Paused
+              </span>
+            )}
             <ExpiryBadge expiresAt={r.expires_at} now={now} />
           </div>
           <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11.5, color: 'var(--text-faint)' }}>
@@ -174,10 +201,17 @@ export function ResourceDetailPage() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             <Card title="API contract">
               <ContractLine method="GET"    path="/api/v1/resources/:id" status="live" />
-              <ContractLine method="POST"   path="/api/v1/resources/:id/rotate" status="live" />
+              <ContractLine method="POST"   path="/api/v1/resources/:id/rotate-credentials" status="live" />
+              <ContractLine method="POST"   path="/api/v1/resources/:id/pause" status="live" />
+              <ContractLine method="POST"   path="/api/v1/resources/:id/resume" status="live" />
+              <ContractLine method="POST"   path="/api/v1/resources/:id/provision-twin" status="live" />
+              <ContractLine method="GET"    path="/api/v1/resources/:id/credentials" status="live" />
               <ContractLine method="DELETE" path="/api/v1/resources/:id" status="live" />
-              {/* Metrics now LIVE (W7-F, 2026-05-14). Audit remains gap —
-                  early-access CTA for audit retained below until W7-G ships. */}
+              {/* Metrics LIVE (W7-F, 2026-05-14). Audit on the per-resource
+                  contract is still gap — early-access CTA retained until
+                  W7-G ships the per-resource audit endpoint. Team-level
+                  /api/v1/audit IS live but not surfaced here (lives on the
+                  Team page). */}
               <ContractLine method="GET"    path="/api/v1/resources/:id/metrics" status="live" />
               <ContractLine method="GET"    path="/api/v1/resources/:id/audit" status="gap" />
               <div
