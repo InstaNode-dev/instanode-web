@@ -160,9 +160,13 @@ async function call<T>(
 
 // ─── Auth / me ───────────────────────────────────────────────────────────
 // GET /auth/me on the agent API returns:
-//   { ok, user_id, team_id, email, tier, trial_ends_at, experiments }
+//   { ok, user_id, team_id, email, tier, experiments }
 // The dashboard expected { user, team } — we adapt here so the rest of
 // the dashboard still consumes the richer fixture shape.
+//
+// Historical note: this response used to include a `trial_ends_at` field;
+// removed on 2026-05-14 per policy memory project_no_trial_pay_day_one.md.
+// The platform has no trial period — hobby/pro/team are paid from day one.
 export async function fetchMe(): Promise<AuthMeResponse> {
   type AgentMe = {
     ok: boolean
@@ -170,7 +174,6 @@ export async function fetchMe(): Promise<AuthMeResponse> {
     team_id: string
     email: string
     tier: string
-    trial_ends_at: string | null
     /** A/B-test bucket per registered experiment, e.g.
      *  `{ upgrade_button: "urgent" }`. Older API builds omit this
      *  field entirely — callers must treat undefined as "no
@@ -1101,7 +1104,7 @@ export async function deleteCustomDomain(stackSlug: string, id: string): Promise
 type BillingStateResp = {
   ok: boolean
   tier: string
-  subscription_status?: 'none' | 'active' | 'cancelled' | 'trial'
+  subscription_status?: 'none' | 'active' | 'cancelled'
   next_renewal_at?: string | null
   amount_inr?: number | null
   payment_method?: {

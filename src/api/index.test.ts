@@ -604,7 +604,6 @@ describe('fetchMe()', () => {
       team_id: 't_xyz',
       email: 'agent@instanode.dev',
       tier: 'pro',
-      trial_ends_at: null,
     }))
     const r = await fetchMe()
     expect(r.user.id).toBe('u_xyz')
@@ -651,7 +650,6 @@ describe('fetchMe()', () => {
       team_id: 't_xyz',
       email: 'agent@instanode.dev',
       tier: 'pro',
-      trial_ends_at: null,
       experiments: { upgrade_button: 'urgent' },
     }))
     const r = await fetchMe()
@@ -669,7 +667,6 @@ describe('fetchMe()', () => {
       team_id: 't_xyz',
       email: 'agent@instanode.dev',
       tier: 'pro',
-      trial_ends_at: null,
     }))
     const r = await fetchMe()
     expect(r.experiments).toBeUndefined()
@@ -1296,7 +1293,6 @@ describe('Admin URL prefix wiring', () => {
       team_id: 't_admin',
       email: 'founder@instanode.dev',
       tier: 'team',
-      trial_ends_at: null,
       is_platform_admin: true,
       admin_path_prefix: 'abcdefghijklmnopqrstuvwxyz012345',
     }))
@@ -1315,7 +1311,6 @@ describe('Admin URL prefix wiring', () => {
       team_id: 't_user',
       email: 'alice@example.com',
       tier: 'hobby',
-      trial_ends_at: null,
       // is_platform_admin and admin_path_prefix both absent
     }))
     const { fetchMe, getAdminPathPrefix, setAdminPathPrefix } = await import('./index')

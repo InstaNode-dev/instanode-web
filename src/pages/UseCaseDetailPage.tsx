@@ -167,8 +167,9 @@ function AutoDetail({ services }: { services: Service[] }) {
             The first call returns a real resource in under a second.
           </li>
           <li>
-            <strong>Anonymous-first.</strong> The 24-hour anonymous tier is the trial — every
-            resource expires unless you claim it. No credit card needed to try.
+            <strong>Anonymous-first.</strong> The 24-hour anonymous tier is your sandbox to
+            evaluate the platform — every resource expires unless you claim it. No credit card
+            needed to try.
           </li>
           <li>
             <strong>Real infrastructure, not a sandbox.</strong> Every Postgres is a real
