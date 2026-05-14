@@ -2,7 +2,7 @@
 
 ## What is instanode.dev?
 
-instanode.dev is an infrastructure provisioning API. Call one HTTP endpoint, get back a working resource — a Postgres database, a Redis cache, a MongoDB database, a NATS JetStream queue, S3-compatible storage, a webhook receiver, or a full deployed app stack. The resource works immediately with standard client libraries. No account required, no Docker, no configuration, no SDK.
+instanode.dev is an infrastructure provisioning API. Call one HTTP endpoint, get back a working resource — a Postgres database, a Redis cache, a MongoDB database, a NATS JetStream queue, S3-compatible object storage (backed by DigitalOcean Spaces in `nyc3`), a webhook receiver, or a full deployed app stack. The resource works immediately with standard client libraries. No account required, no Docker, no configuration, no SDK.
 
 Designed for two audiences:
 1. AI coding agents (Claude, Copilot, Cursor, etc.) that need to provision real infrastructure while generating working application code.

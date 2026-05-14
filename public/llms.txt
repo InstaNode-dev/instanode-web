@@ -369,7 +369,7 @@ Response 200:
 
 ### POST /storage/new
 
-Provision an S3-compatible object storage bucket. Returns AWS-compatible credentials.
+Provision an S3-compatible object storage bucket. Returns AWS-compatible credentials. Production backend is DigitalOcean Spaces (S3-compatible) in `nyc3`. Anonymous-tier buckets are auto-deleted at 24h by a bucket lifecycle rule enforced at the storage layer.
 
 Response 201:
 ```json
