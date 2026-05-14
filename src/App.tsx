@@ -37,6 +37,9 @@ const ForAgentsPage = lazy(() =>
 const StatusPage = lazy(() =>
   import('./pages/StatusPage').then((m) => ({ default: m.StatusPage })),
 )
+const IncidentsPage = lazy(() =>
+  import('./pages/IncidentsPage').then((m) => ({ default: m.IncidentsPage })),
+)
 const BlogPage = lazy(() =>
   import('./pages/BlogPage').then((m) => ({ default: m.BlogPage })),
 )
@@ -187,6 +190,7 @@ export function AppRoutes() {
         <Route path="/pricing" element={<PricingPage />} />
         <Route path="/for-agents" element={<ForAgentsPage />} />
         <Route path="/status" element={<StatusPage />} />
+        <Route path="/incidents" element={<IncidentsPage />} />
         <Route path="/blog" element={<BlogPage />} />
         <Route path="/blog/:slug" element={<BlogPostPage />} />
         <Route path="/docs" element={<DocsPage />} />

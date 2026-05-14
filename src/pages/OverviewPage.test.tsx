@@ -369,3 +369,39 @@ describe('OverviewPage — Recently active', () => {
     })
   })
 })
+
+// ─── Stat tiles must NOT show fake sparkline data ─────────────────────────
+// The Stat helper used to synthesize hardcoded series (e.g. [22,20,18,...])
+// from a `spark` shape hint, which displayed as a real trend to customers
+// (P3 founder persona caught this on 2026-05-13). The component now requires
+// a real `series` prop and renders no sparkline when it's omitted. The page
+// passes series={undefined} from every call site until real time-series
+// data is wired up — pin that contract so a regression can't reintroduce
+// fake series without breaking this test.
+describe('OverviewPage — Stat sparklines (no fake trend data)', () => {
+  it('renders no <svg class="sparkline"> elements when the page mounts with the default no-series wiring', async () => {
+    ;(api.listResources as any).mockResolvedValueOnce({ ok: true, total: 0, items: [] })
+    ;(api.fetchActivity as any).mockResolvedValueOnce({ ok: true, items: [] })
+    const { container } = render(withRouter(<OverviewPage />))
+    await waitFor(() => {
+      // Page has rendered at least one stat tile.
+      expect(container.querySelector('.stat')).not.toBeNull()
+    })
+    // No sparkline SVGs anywhere on the page.
+    const sparklines = container.querySelectorAll('svg.sparkline')
+    expect(sparklines.length).toBe(0)
+  })
+
+  it('still renders the stat number + label tiles (sparkline-free is fine, empty is not)', async () => {
+    ;(api.listResources as any).mockResolvedValueOnce({ ok: true, total: 0, items: [] })
+    ;(api.fetchActivity as any).mockResolvedValueOnce({ ok: true, items: [] })
+    const { container } = render(withRouter(<OverviewPage />))
+    await waitFor(() => {
+      const tiles = container.querySelectorAll('.stat')
+      // The page renders 6 stat tiles (resources, storage, conn, deployments,
+      // webhooks, vault entries). Pin that the tiles still render even with
+      // no series.
+      expect(tiles.length).toBe(6)
+    })
+  })
+})

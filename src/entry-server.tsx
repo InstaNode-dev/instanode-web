@@ -37,6 +37,7 @@ import { MarketingPage } from './pages/MarketingPage'
 import { PricingPage } from './pages/PricingPage'
 import { ForAgentsPage } from './pages/ForAgentsPage'
 import { StatusPage } from './pages/StatusPage'
+import { IncidentsPage } from './pages/IncidentsPage'
 import { BlogPage } from './pages/BlogPage'
 import { BlogPostPage } from './pages/BlogPostPage'
 import { DocsPage } from './pages/DocsPage'
@@ -54,6 +55,7 @@ function SSRRoutes() {
       <Route path="/pricing" element={<PricingPage />} />
       <Route path="/for-agents" element={<ForAgentsPage />} />
       <Route path="/status" element={<StatusPage />} />
+      <Route path="/incidents" element={<IncidentsPage />} />
       <Route path="/blog" element={<BlogPage />} />
       <Route path="/blog/:slug" element={<BlogPostPage />} />
       <Route path="/docs" element={<DocsPage />} />
