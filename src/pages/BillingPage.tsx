@@ -320,13 +320,6 @@ export function BillingPage() {
 
   return (
     <>
-      <ROBanner variant="write" showAsk={false}>
-        <strong>Upgrades and card updates stay clickable on this page</strong> — the
-        agent doesn't have payment credentials, so the human has to drive the
-        Razorpay flow. <strong>To cancel or downgrade, contact support</strong> —
-        we don't expose a self-serve path on purpose.
-      </ROBanner>
-
       {/* Pricing grid: 4 tiers side-by-side with Pro highlighted. Replaces
           the single-plan upgrade card. The grid owns its own frequency
           toggle (Annual default) and renders "Your plan" on the current
