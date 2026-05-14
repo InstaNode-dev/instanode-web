@@ -64,7 +64,7 @@ export function clearToken(): void {
 
 // ─── Low-level fetch ─────────────────────────────────────────────────────
 
-class APIError extends Error {
+export class APIError extends Error {
   status: number
   code: string
   constructor(status: number, code: string, message: string) {
@@ -897,6 +897,114 @@ export async function updateDeploymentAccess(
     throw new APIError(500, 'invalid_response', 'PATCH /deployments/:id returned no item')
   }
   return { ok: true, deployment: adaptDeployment(r.item) }
+}
+
+// ─── Deletion confirmation (Wave FIX-I) ──────────────────────────────────
+//
+// Two-step email-confirmed deletion. The api returns 202 with
+// deletion_status='pending_confirmation' on the first DELETE for any
+// paid-tier deploy or stack; this module wraps the follow-up endpoints.
+//
+// All three helpers share the same envelope shape — surfaced via the
+// DeletionConfirmResponse type so the page can render a consistent
+// success/failure banner.
+
+export type DeletionPendingResponse = {
+  ok: true
+  id: string
+  deletion_status: 'pending_confirmation'
+  confirmation_sent_to: string
+  confirmation_expires_at: string
+  agent_action: string
+  cancellation_note: string
+}
+
+export type DeletionResolvedResponse = {
+  ok: true
+  id: string
+  resource_type: 'deploy' | 'stack'
+  deletion_status: 'confirmed' | 'cancelled'
+  freed_at?: string
+  agent_action: string
+  note: string
+}
+
+/** Issue the initial DELETE — may return either an immediate 200 (free
+ *  / anonymous / header-bypass) or a 202 with the pending envelope.
+ *  The caller branches on `deletion_status`. */
+export async function deleteDeployment(
+  id: string,
+  opts?: { skipEmailConfirmation?: boolean },
+): Promise<DeletionPendingResponse | { ok: true; message: string }> {
+  const headers: Record<string, string> = {}
+  if (opts?.skipEmailConfirmation) {
+    headers['X-Skip-Email-Confirmation'] = 'yes'
+  }
+  return call(`/api/v1/deployments/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+    headers,
+  })
+}
+
+/** Step 2 — confirm the pending deletion with the plaintext token
+ *  carried in the email link. Returns 200 on the winning CAS; 410 on
+ *  expired/already-used (surfaces as APIError with code
+ *  'deletion_token_invalid'). */
+export async function confirmDeploymentDeletion(
+  id: string,
+  token: string,
+): Promise<DeletionResolvedResponse> {
+  return call(
+    `/api/v1/deployments/${encodeURIComponent(id)}/confirm-deletion?token=${encodeURIComponent(token)}`,
+    { method: 'POST' },
+  )
+}
+
+/** Step 2 (alternate) — cancel a pending deletion. The resource stays
+ *  active and the slot stays consumed. Idempotent: a cancel on an
+ *  already-resolved row returns 410. */
+export async function cancelDeploymentDeletion(
+  id: string,
+): Promise<DeletionResolvedResponse> {
+  return call(
+    `/api/v1/deployments/${encodeURIComponent(id)}/confirm-deletion`,
+    { method: 'DELETE' },
+  )
+}
+
+// Stack-side counterparts. Same contract, different path prefix.
+
+export async function deleteStack(
+  slug: string,
+  opts?: { skipEmailConfirmation?: boolean },
+): Promise<DeletionPendingResponse | { ok: true; message: string }> {
+  const headers: Record<string, string> = {}
+  if (opts?.skipEmailConfirmation) {
+    headers['X-Skip-Email-Confirmation'] = 'yes'
+  }
+  return call(`/stacks/${encodeURIComponent(slug)}`, {
+    method: 'DELETE',
+    headers,
+  })
+}
+
+export async function confirmStackDeletion(
+  slug: string,
+  token: string,
+): Promise<DeletionResolvedResponse> {
+  return call(
+    `/api/v1/stacks/${encodeURIComponent(slug)}/confirm-deletion?token=${encodeURIComponent(token)}`,
+    { method: 'POST' },
+  )
+}
+
+export async function cancelStackDeletion(
+  slug: string,
+): Promise<DeletionResolvedResponse> {
+  return call(
+    `/api/v1/stacks/${encodeURIComponent(slug)}/confirm-deletion`,
+    { method: 'DELETE' },
+  )
 }
 
 // ─── Stack family — env-sibling grid ─────────────────────────────────────
