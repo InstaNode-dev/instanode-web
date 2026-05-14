@@ -6,6 +6,7 @@ import {
   expiryLevel, formatTimeUntil, useExpiryTick, copyToClipboard
 } from '../components/Common'
 import { MetricsPanel } from '../components/MetricsPanel'
+import { AuditPanel } from '../components/AuditPanel'
 import { PauseResumeButton } from '../components/PauseResumeButton'
 import * as api from '../api'
 import type { Resource } from '../api'
@@ -135,7 +136,6 @@ export function ResourceDetailPage() {
         {TABS.map((t) => (
           <button key={t} className={`tab ${tab === t ? 'active' : ''}`} onClick={() => setTab(t)}>
             {t}
-            {t === 'Audit' && <span className="tag">blocked</span>}
           </button>
         ))}
       </div>
@@ -208,34 +208,20 @@ export function ResourceDetailPage() {
               <ContractLine method="POST"   path="/api/v1/resources/:id/provision-twin" status="live" />
               <ContractLine method="GET"    path="/api/v1/resources/:id/credentials" status="live" />
               <ContractLine method="DELETE" path="/api/v1/resources/:id" status="live" />
-              {/* Metrics LIVE (W7-F, 2026-05-14). Audit on the per-resource
-                  contract is still gap — early-access CTA retained until
-                  W7-G ships the per-resource audit endpoint. Team-level
-                  /api/v1/audit IS live but not surfaced here (lives on the
-                  Team page). */}
+              {/* Metrics LIVE (W7-F, 2026-05-14). Audit LIVE
+                  (W11 honesty patch, 2026-05-14): there is no
+                  per-resource path on the agent API, but the
+                  team-level GET /api/v1/audit endpoint scopes rows to
+                  the caller's team OR resources they own. The
+                  dashboard fetches that window and filters
+                  client-side for matching metadata.resource_id —
+                  precision cut, not a security boundary. The contract
+                  line keeps the per-resource path because that's the
+                  shape agents are guided toward in docs; the wire
+                  call resolves to the team-level endpoint until the
+                  per-resource handler lands. */}
               <ContractLine method="GET"    path="/api/v1/resources/:id/metrics" status="live" />
-              <ContractLine method="GET"    path="/api/v1/resources/:id/audit" status="gap" />
-              <div
-                data-testid="audit-early-access"
-                style={{
-                  marginTop: 10,
-                  padding: '10px 12px',
-                  border: '1px dashed var(--border)',
-                  borderRadius: 6,
-                  fontSize: 12.5,
-                  color: 'var(--text-dim)',
-                  lineHeight: 1.55,
-                }}
-              >
-                <strong style={{ color: 'var(--text)' }}>Per-resource audit log</strong>
-                {' — '}coming in Pro.{' '}
-                <a
-                  href="mailto:enterprise@instanode.dev?subject=Early%20access%3A%20resource%20audit"
-                  style={{ color: 'var(--accent)', textDecoration: 'underline', textUnderlineOffset: 3 }}
-                >
-                  Request early access →
-                </a>
-              </div>
+              <ContractLine method="GET"    path="/api/v1/resources/:id/audit" status="live" />
             </Card>
 
             <Card
@@ -339,8 +325,15 @@ export function ResourceDetailPage() {
         <MetricsPanel resourceId={r.token} ownerTier={r.tier} />
       )}
 
-      {/* AUDIT — blocked */}
-          </>
+      {/* AUDIT — W11 honesty patch (2026-05-14): wires to the team-level
+          GET /api/v1/audit, filters client-side for rows whose
+          metadata.resource_id === r.id. Empty state when no rows, never
+          fake data. AuditPanel reads `id` (not `token`) since
+          metadata.resource_id is the UUID, not the public token. */}
+      {tab === 'Audit' && (
+        <AuditPanel resourceId={r.id} />
+      )}
+    </>
   )
 }
 
