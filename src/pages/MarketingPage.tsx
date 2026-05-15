@@ -35,7 +35,7 @@ function HeroPromptCard() {
     <div className="mkt-prompt-card">
       <div className="mkt-prompt-label">
         <span className="mkt-pulse" aria-hidden="true" />
-        Paste this into Claude Code, Cursor, or any MCP agent
+        Paste this into Claude Code, Cursor, or any AI coding agent
       </div>
       <p className="mkt-prompt-text">{HERO_PROMPT}</p>
       <button
