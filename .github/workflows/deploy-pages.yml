@@ -37,7 +37,12 @@ jobs:
           # init (fail-open), so PR forks / unconfigured envs still build cleanly.
           VITE_NEWRELIC_LICENSE_KEY: ${{ secrets.VITE_NEWRELIC_LICENSE_KEY }}
           VITE_NEWRELIC_APP_ID: ${{ secrets.VITE_NEWRELIC_APP_ID }}
-      - run: cp dist/index.html dist/404.html
+      # NOTE: do NOT `cp dist/index.html dist/404.html` here. prerender.mjs
+      # already writes dist/404.html as the bare SPA shell so every /app/*
+      # bookmark / shared link / magic-link callback rehydrates the React
+      # router. Copying the post-prerender index.html would clobber the SPA
+      # shell with the homepage SSG HTML, breaking every /app/* path.
+      # See instanode-web/scripts/prerender.mjs Step 4.7.
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist
