@@ -113,9 +113,11 @@ export const PRICING_GRID_TIERS: TierDefinition[] = [
     ],
     upgradesTo: 'hobby_plus',
   },
-  // hobby_plus (W11) — $19/mo mid-step between Hobby and Pro. Headline
-  // differentiators vs hobby: 2 deployments, custom domains, multi-env
-  // vault (dev/staging/prod), 5 GB object storage, self-serve restore.
+  // hobby_plus — $19/mo mid-step between Hobby and Pro.
+  // 2026-05-15 (W12 pricing pass): multi-env vault rolled back to Pro+,
+  // so hobby_plus's differentiators vs hobby are now storage (10× Mongo,
+  // 10× object), 2 deployments, custom domain, and self-serve restore —
+  // not multi-env.
   {
     key: 'hobby_plus',
     label: 'Hobby Plus',
@@ -129,9 +131,9 @@ export const PRICING_GRID_TIERS: TierDefinition[] = [
     features: [
       { text: '1 GB Postgres · 8 conn' },
       { text: '50 MB Redis' },
-      { text: '1 GB MongoDB · 5 conn' },
+      { text: '1 GB MongoDB · 5 conn · 5 GB object storage' },
       { text: '2 deployments · custom domain' },
-      { text: '50 vault entries · multi-env' },
+      { text: '50 vault entries · production env' },
       { text: '14-day backups · 1-click restore' },
     ],
     upgradesTo: 'pro',
