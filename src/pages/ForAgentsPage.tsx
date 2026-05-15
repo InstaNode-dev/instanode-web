@@ -41,7 +41,7 @@ const REASONS: { eyebrow: string; body: string }[] = [
 
 const PLAYGROUND_CURL = `curl -X POST https://api.instanode.dev/db/new \\
   -H 'Content-Type: application/json' \\
-  -d '{"engine":"postgres"}'`
+  -d '{"name":"prod-db","engine":"postgres"}'`
 
 const PLAYGROUND_RESPONSE = `{
   "id": "res_2RtL9k4mP",

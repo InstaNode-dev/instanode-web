@@ -21,37 +21,37 @@ import { renderMarkdown } from '../lib/markdown'
 const SERVICE_INFO: Record<Service, { label: string; curl: string; gets: string }> = {
   pg: {
     label: 'Postgres',
-    curl: 'curl -X POST https://api.instanode.dev/db/new',
+    curl: `curl -X POST https://api.instanode.dev/db/new -d '{"name":"prod-db"}'`,
     gets: 'A real, dedicated Postgres database with pgvector pre-installed. Connection URL returned in ~1 second.',
   },
   redis: {
     label: 'Redis',
-    curl: 'curl -X POST https://api.instanode.dev/cache/new',
+    curl: `curl -X POST https://api.instanode.dev/cache/new -d '{"name":"prod-cache"}'`,
     gets: 'A namespaced Redis instance with per-token ACLs. Connection URL returned in ~500 ms.',
   },
   mongo: {
     label: 'MongoDB',
-    curl: 'curl -X POST https://api.instanode.dev/nosql/new',
+    curl: `curl -X POST https://api.instanode.dev/nosql/new -d '{"name":"events-db"}'`,
     gets: 'A dedicated MongoDB user + database. Connection URL returned in ~1 second.',
   },
   nats: {
     label: 'NATS JetStream',
-    curl: 'curl -X POST https://api.instanode.dev/queue/new',
+    curl: `curl -X POST https://api.instanode.dev/queue/new -d '{"name":"task-queue"}'`,
     gets: 'A NATS JetStream client URL and per-token credentials. Durable subjects, request/reply, pub/sub.',
   },
   minio: {
     label: 'MinIO (S3)',
-    curl: 'curl -X POST https://api.instanode.dev/storage/new',
+    curl: `curl -X POST https://api.instanode.dev/storage/new -d '{"name":"user-uploads"}'`,
     gets: 'An S3-compatible bucket with per-token IAM user. Standard AWS SDKs work as-is.',
   },
   webhook: {
     label: 'Webhook receiver',
-    curl: 'curl -X POST https://api.instanode.dev/webhook/new',
+    curl: `curl -X POST https://api.instanode.dev/webhook/new -d '{"name":"github-hook"}'`,
     gets: 'A public receive URL that captures any HTTP method. Inspect payloads at GET /webhooks/<token>/requests.',
   },
   deploy: {
     label: 'Container deploy',
-    curl: 'curl -X POST https://api.instanode.dev/deploy/new -F tarball=@app.tar.gz',
+    curl: 'curl -X POST https://api.instanode.dev/deploy/new -F name=prod-app -F tarball=@app.tar.gz',
     gets: 'A kaniko build runs in-cluster; your app rolls out behind a public *.deployment.instanode.dev HTTPS URL.',
   },
 }
@@ -187,7 +187,7 @@ function AutoDetail({ services }: { services: Service[] }) {
 }
 
 function primaryCurl(services: Service[]): string {
-  if (services.length === 0) return 'curl -X POST https://api.instanode.dev/db/new'
+  if (services.length === 0) return `curl -X POST https://api.instanode.dev/db/new -d '{"name":"prod-db"}'`
   return SERVICE_INFO[services[0]].curl
 }
 

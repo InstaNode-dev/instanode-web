@@ -166,7 +166,7 @@ const FAQ: { q: string; a: string }[] = [
   }
 ]
 
-const TRY_CURL = 'curl -X POST https://api.instanode.dev/db/new'
+const TRY_CURL = `curl -X POST https://api.instanode.dev/db/new -d '{"name":"prod-db"}'`
 
 export function PricingPage() {
   // P2: monthly/yearly toggle, persisted in localStorage. Default monthly.
