@@ -107,21 +107,13 @@ const PLANS: Plan[] = [
     ],
     cta: { label: 'Start hobby →', href: ROUTES.signin, variant: 'secondary' },
   },
-  {
-    id: 'hobby_plus',
-    name: 'Hobby Plus',
-    tagline: 'For the side project that wants a vanity URL and a backup safety net.',
-    price: '$19',
-    freq: '/ mo',
-    features: [
-      '1 GB Postgres · 8 conn',
-      '50 MB Redis · 1 GB Mongo · 5 conn',
-      '2 deployments · custom domain included',
-      '50 vault entries · multi-env (dev / staging / prod)',
-      '14-day backups · 1-click restore',
-    ],
-    cta: { label: 'Start hobby plus →', href: ROUTES.signin, variant: 'secondary' },
-  },
+  // 2026-05-15: Hobby Plus removed from the marketing page to avoid
+  // cluttering the public tier ladder (Anonymous / Hobby / Pro / Team
+  // tells the cleaner story for first-time visitors). The tier remains
+  // a real, paid plan in api/plans.yaml and is reachable via dashboard
+  // upsell paths (quota_wall, custom_domain prompts, in-product nudges).
+  // Re-add this card if Hobby Plus becomes an outbound funnel rather
+  // than an upsell-only step.
   {
     id: 'pro',
     name: 'Pro',
@@ -130,31 +122,26 @@ const PLANS: Plan[] = [
     freq: '/ mo',
     featured: true,
     features: [
-      '5 GB Postgres · 20 conn',
-      '256 MB Redis · 2 GB Mongo · 20 conn',
-      '10 medium deployments · custom domain',
+      '10 GB Postgres · 20 conn',
+      '512 MB Redis · 5 GB Mongo · 20 conn',
+      '50 GB object storage · 10 medium deployments · custom domain',
       '200 vault entries · multi-env (dev/staging/prod + custom)',
     ],
     cta: { label: 'Start pro →', href: ROUTES.signin, variant: 'primary' },
   },
   {
+    // Team tier — not launched yet. Per launch posture (2026-05-15), the
+    // homepage card shows ONLY a "coming soon" placeholder. No price, no
+    // feature list, no CTA. The full Team launch will swap this card to
+    // a real tier once multi-seat / RBAC / SSO are shipped.
     id: 'team',
     name: 'Team',
-    tagline: 'For the engineering org with envs, vault, and an audit trail.',
-    price: '$199',
-    freq: '/ mo',
-    features: [
-      'Everything in Pro, with larger per-resource limits',
-      'Multi-seat workspace · RBAC + audit log (rolling out)',
-      'SSO / SAML · 99.9% SLA (on roadmap)',
-      'Dedicated node pools · priority support',
-    ],
-    // Multi-seat / RBAC / SSO UI is still being built (flagged inline in
-    // the `features` list as "rolling out" / "on roadmap"). The Razorpay
-    // yearly plan and dedicated-infra k8s plumbing both exist, so Team
-    // is sellable via enterprise@ today. Replacing the dead `#` anchor
-    // with a real mailto unblocks procurement conversations.
-    cta: { label: 'Contact sales →', href: 'mailto:enterprise@instanode.dev?subject=Team%20tier%20inquiry', variant: 'primary' },
+    tagline: 'For the engineering org. Coming soon.',
+    price: 'coming soon',
+    freq: '',
+    features: [],
+    cta: { label: '', href: '', variant: 'primary' },
+    comingSoon: true,
   },
 ]
 

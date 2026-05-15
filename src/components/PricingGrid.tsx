@@ -55,6 +55,9 @@ interface TierDefinition {
   // user is already on Pro.
   upgradesTo?: TierKey
   highlight?: boolean
+  // Set when the tier is announced but not yet purchasable (today: Team).
+  // Renders a "coming soon" badge and disables the CTA.
+  comingSoon?: boolean
 }
 
 // Numbers are USD and come from api/plans.yaml. "2 months free" framing
@@ -150,31 +153,25 @@ export const PRICING_GRID_TIERS: TierDefinition[] = [
       yearlyTotal: '$490/yr',
     },
     features: [
-      { text: '5 GB Postgres · 20 conn' },
-      { text: '256 MB Redis' },
-      { text: '2 GB MongoDB · 20 conn' },
-      { text: '10 medium deployments' },
+      // 2026-05-15 Pro storage bump — keep in sync with api/plans.yaml.
+      { text: '10 GB Postgres · 20 conn' },
+      { text: '512 MB Redis' },
+      { text: '5 GB MongoDB · 20 conn' },
+      { text: '50 GB object storage · 10 medium deployments' },
       { text: '200 vault entries · multi-env' },
       { text: 'custom domain · 10k stored webhooks' },
     ],
     upgradesTo: 'team',
   },
   {
+    // Team — coming soon. No price, no yearly, no feature list. The card
+    // header and "coming soon" badge are enough; we don't promise anything
+    // about Team until launch.
     key: 'team',
     label: 'Team',
-    monthly: { price: '$199', sub: '/mo' },
-    yearly: {
-      price: '$165.83',
-      sub: '/mo, billed yearly',
-      savings: '$1990/yr · save $398',
-      yearlyTotal: '$1990/yr',
-    },
-    features: [
-      { text: 'Everything in Pro, with larger limits', comingSoon: true },
-      { text: 'Multi-seat · RBAC + audit log', comingSoon: true },
-      { text: 'SSO / SAML · 99.9% SLA', comingSoon: true },
-      { text: 'Dedicated node pools', comingSoon: true },
-    ],
+    monthly: { price: 'coming soon', sub: '' },
+    features: [],
+    comingSoon: true,
   },
 ]
 

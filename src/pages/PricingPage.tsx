@@ -9,8 +9,13 @@ import { copyToClipboard } from '../components/Common'
 // TierKey — the local-to-this-page tier enum. Marketing /pricing uses
 // `anonymous` (the public-facing label for the no-signup free curl tier),
 // not `free` — the marketing CTA goes through the agent flow rather than
-// the dashboard signup. W11 inserted `hobby_plus` between hobby and pro.
-type TierKey = 'anonymous' | 'hobby' | 'hobby_plus' | 'pro' | 'team'
+// the dashboard signup.
+//
+// 2026-05-15: `hobby_plus` removed from this enum to keep the marketing
+// surface as Anonymous / Hobby / Pro / Team. Hobby Plus is still a real
+// paid tier in api/plans.yaml — it's reached via dashboard upsell flows
+// (quota_wall, custom_domain prompts), not the public pricing ladder.
+type TierKey = 'anonymous' | 'hobby' | 'pro' | 'team'
 
 // P2: monthly vs yearly pricing. The toggle on this page is purely
 // presentational — the CTA passes the chosen cycle through as
@@ -58,19 +63,11 @@ const TIERS: {
     ctaHrefMonthly: '/app/checkout?plan=hobby&frequency=monthly',
     ctaHrefYearly: '/app/checkout?plan=hobby&frequency=yearly',
   },
-  // hobby_plus (W11) — $19/mo mid-step. Sits between Hobby and Pro to
-  // anchor the decoy effect: research shows triple-tier $9/$19/$49 lifts
-  // conversion ~22% vs $9/$49. The CTA points at /checkout which routes
-  // to /api/v1/billing/checkout with plan=hobby_plus.
-  {
-    key: 'hobby_plus',
-    name: 'Hobby Plus',
-    monthly: { price: '$19', sub: '/ mo' },
-    yearly: { price: '$16.58', sub: '/ mo billed yearly', saveLabel: 'save $29/yr' },
-    cta: 'Start hobby plus →',
-    ctaHrefMonthly: '/app/checkout?plan=hobby_plus&frequency=monthly',
-    ctaHrefYearly: '/app/checkout?plan=hobby_plus&frequency=yearly',
-  },
+  // 2026-05-15: Hobby Plus tile removed from the marketing matrix.
+  // The tier still exists in plans.yaml and is offered via dashboard
+  // upsell flows (quota wall, custom-domain prompts) — it's an
+  // internal step, not a public funnel entry. Re-insert here if the
+  // tier ever becomes a primary acquisition surface.
   {
     key: 'pro',
     name: 'Pro',
@@ -81,24 +78,19 @@ const TIERS: {
     ctaHrefYearly: '/app/checkout?plan=pro&frequency=yearly',
     highlighted: true,
   },
-  // Team tier is under active development — visible so customers can see the
-  // roadmap but disabled (no checkout, no signup). Backend k8s plumbing for
-  // team-scale dedicated infra is already in place; what's pending is the
-  // multi-seat + RBAC + SSO surface.
+  // Team tier — not launched yet. We intentionally show NO pricing, NO
+  // detail, NO CTA. A single quiet "coming soon" placeholder is enough to
+  // signal the tier exists without making any commitment customers can
+  // hold us to. The per-row SOON markers in the matrix below render as
+  // empty cells for the same reason.
   {
     key: 'team',
     name: 'Team',
-    monthly: { price: '$199', sub: '/ mo' },
-    yearly: { price: '$165.83', sub: '/ mo billed yearly', saveLabel: 'save $398/yr' },
-    // Self-serve checkout for Team is still being wired (multi-seat / RBAC
-    // UI). The Razorpay yearly plan and dedicated-infra k8s plumbing both
-    // exist, so the tier is sellable via enterprise@ today. Dropping
-    // `comingSoon` so the CTA renders as a clickable mailto link instead of
-    // a disabled span; per-feature SOON markers in the matrix below still
-    // flag the specific gaps (SSO, RBAC, audit-export) honestly.
-    cta: 'Contact sales →',
-    ctaHrefMonthly: 'mailto:enterprise@instanode.dev?subject=Team%20tier%20inquiry',
-    ctaHrefYearly: 'mailto:enterprise@instanode.dev?subject=Team%20tier%20annual%20inquiry',
+    monthly: { price: 'coming soon', sub: '' },
+    // No yearly — there's nothing to bill annually for an unlaunched tier.
+    cta: '',
+    ctaHrefMonthly: '',
+    comingSoon: true,
   },
 ]
 
@@ -106,49 +98,50 @@ type Cell =
   | string
   | { mark: 'check' | 'dash' }
   | { text: string; comingSoon?: boolean }
-// Row values are a 5-tuple in column order: Anonymous, Hobby, Hobby Plus,
-// Pro, Team. The order MUST stay in lock-step with the TIERS array above.
-type Row = { label: string; sub?: string; values: [Cell, Cell, Cell, Cell, Cell] }
+// Row values are a 4-tuple in column order: Anonymous, Hobby, Pro, Team.
+// (Hobby Plus removed from the marketing matrix on 2026-05-15 — it lives
+// in plans.yaml + dashboard upsell flows only.) The order MUST stay in
+// lock-step with the TIERS array above.
+type Row = { label: string; sub?: string; values: [Cell, Cell, Cell, Cell] }
 
 // Team-tier values use { text: '', comingSoon: true } across the board because
-// the tier isn't shipped — claiming "unlimited" for capacity we haven't
-// delivered would be misleading. Once team launches, replace these with the
-// real numbers from plans.yaml.
+// the tier hasn't launched. Marketing copy keeps Team as "coming soon"
+// until the launch ships; do not list capacity numbers here even if
+// plans.yaml has them — the source of truth for what's advertised is
+// the launch posture, not the registry.
 const SOON: Cell = { text: '', comingSoon: true }
 
-// W11 (2026-05-13): added the Hobby Plus column (third position). Each row
-// now has 5 cells: [Anonymous, Hobby, Hobby Plus, Pro, Team]. Numbers come
-// from api/plans.yaml. Hobby Plus shares Postgres/Redis with Hobby and
-// bumps MongoDB, storage, webhooks, deployments, and unlocks multi-env
-// + custom domain + 1-click restore.
+// Each row has 4 cells: [Anonymous, Hobby, Pro, Team]. Numbers come from
+// api/plans.yaml. 2026-05-15: Hobby Plus column removed (the tier exists
+// for upsell flows but is not part of the public ladder); Pro storage
+// bumped per PRICING-AUDIT-2026-05-15.md (Postgres 5→10 GB, Redis
+// 256→512 MB, Mongo 2→5 GB, object 10→50 GB).
 const ROWS: Row[] = [
-  { label: 'Postgres', values: ['10 MB / 2 conn / 24h TTL', '1 GB / 8 conn',     '1 GB / 8 conn',     '5 GB / 20 conn', SOON] },
-  { label: 'Redis',    values: ['5 MB / 24h TTL',           '50 MB',             '50 MB',             '256 MB',         SOON] },
-  { label: 'MongoDB',  values: ['5 MB / 2 conn / 24h TTL',  '100 MB / 5 conn',   '1 GB / 5 conn',     '2 GB / 20 conn', SOON] },
+  { label: 'Postgres', values: ['10 MB / 2 conn / 24h TTL', '1 GB / 8 conn',     '10 GB / 20 conn', SOON] },
+  { label: 'Redis',    values: ['5 MB / 24h TTL',           '50 MB',             '512 MB',          SOON] },
+  { label: 'MongoDB',  values: ['5 MB / 2 conn / 24h TTL',  '100 MB / 5 conn',   '5 GB / 20 conn',  SOON] },
   // FIX-G (2026-05-14): the column used to advertise "1 000 / 5 000 / 100k
   // msg/d" but there's no backing queue_messages_per_day field on the
   // plans.yaml side — quota enforcement is on queue_storage_mb. Shipping
   // a per-day-msg counter is real scope and not in flight, so the copy
   // moves to the field we actually enforce. Numbers mirror plans.yaml
-  // queue_storage_mb (anonymous=1024, hobby/hobby_plus=5120, pro=10240).
-  { label: 'Queue',    sub: 'NATS storage', values: ['1 GB / 24h TTL', '5 GB', '5 GB', '10 GB', SOON] },
-  { label: 'Storage',  values: [{ mark: 'dash' },              '512 MB',           '5 GB',             '10 GB',          SOON] },
-  { label: 'Webhook stored', values: ['100',                   '1 000',            '5 000',            '10k',            SOON] },
-  { label: 'Deploy apps', values: [{ mark: 'dash' },           '1 small',          '2 medium',         '10 medium',      SOON] },
-  { label: 'Domains',  values: [{ mark: 'dash' }, '*.deployment.instanode.dev', 'custom domain', 'custom domain', SOON] },
+  // queue_storage_mb (anonymous=1024, hobby=5120, pro=10240).
+  { label: 'Queue',    sub: 'NATS storage', values: ['1 GB / 24h TTL', '5 GB', '10 GB', SOON] },
+  { label: 'Storage',  values: [{ mark: 'dash' },              '512 MB',           '50 GB',          SOON] },
+  { label: 'Webhook stored', values: ['100',                   '1 000',            '10k',            SOON] },
+  { label: 'Deploy apps', values: [{ mark: 'dash' },           '1 small',          '10 medium',      SOON] },
+  { label: 'Domains',  values: [{ mark: 'dash' }, '*.deployment.instanode.dev', 'custom domain', SOON] },
   // Multi-env workflows (stack promotion + vault copy across envs) is a
   // shipped Pro-tier feature: POST /api/v1/stacks/:slug/promote and
   // POST /api/v1/vault/copy are live (RETRO-2026-05-12 §10.17). Hobby is
-  // single-env (production only). W11: Hobby Plus also unlocks multi-env
-  // — it's the marquee differentiator vs Hobby alongside custom domains
-  // and the 2-deployment cap bump.
-  { label: 'Multi-env workflows', sub: 'stack promotion + vault copy', values: [{ mark: 'dash' }, { mark: 'dash' }, 'dev / staging / prod', 'dev / staging / prod', SOON] },
-  { label: 'RBAC + audit', values: [{ mark: 'dash' }, { mark: 'dash' }, { mark: 'dash' }, { mark: 'dash' }, SOON] },
-  { label: 'Vault entries', values: [{ mark: 'dash' }, '20', '50', '200', SOON] },
-  { label: 'Vault envs',    values: [{ mark: 'dash' }, 'production only', 'multi-env', 'multi-env', SOON] },
-  { label: 'Backups',       values: [{ mark: 'dash' }, '7-day · no restore', '14-day · 1-click restore', '30-day · 1-click restore', SOON] },
-  { label: 'SSO / SAML', values: [{ mark: 'dash' }, { mark: 'dash' }, { mark: 'dash' }, { mark: 'dash' }, SOON] },
-  { label: '99.9% SLA',  values: [{ mark: 'dash' }, { mark: 'dash' }, { mark: 'dash' }, { mark: 'dash' }, SOON] }
+  // single-env (production only).
+  { label: 'Multi-env workflows', sub: 'stack promotion + vault copy', values: [{ mark: 'dash' }, { mark: 'dash' }, 'dev / staging / prod', SOON] },
+  { label: 'RBAC + audit', values: [{ mark: 'dash' }, { mark: 'dash' }, { mark: 'dash' }, SOON] },
+  { label: 'Vault entries', values: [{ mark: 'dash' }, '20', '200', SOON] },
+  { label: 'Vault envs',    values: [{ mark: 'dash' }, 'production only', 'multi-env', SOON] },
+  { label: 'Backups',       values: [{ mark: 'dash' }, '7-day · no restore', '30-day · 1-click restore', SOON] },
+  { label: 'SSO / SAML', values: [{ mark: 'dash' }, { mark: 'dash' }, { mark: 'dash' }, SOON] },
+  { label: '99.9% SLA',  values: [{ mark: 'dash' }, { mark: 'dash' }, { mark: 'dash' }, SOON] }
 ]
 
 const FAQ: { q: string; a: string }[] = [

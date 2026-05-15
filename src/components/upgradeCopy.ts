@@ -130,8 +130,8 @@ export const UPGRADE_COPY: Record<UpgradeFeature, UpgradeCopy> = {
     secondaryCtaFrequency: 'monthly',
   },
   quota_wall: {
-    title: "You're approaching your hobby quota — Pro Annual unlocks 10x",
-    body: 'Upgrade to Pro for 5 GB Postgres (10x) and 256 MB Redis. Your existing resources keep working — limits raise immediately.',
+    title: "You're approaching your hobby quota — Pro unlocks 10× everything",
+    body: 'Upgrade to Pro for 10 GB Postgres, 512 MB Redis, 50 GB object storage, 10 deploys. Your existing resources keep working — limits raise immediately.',
     priceLine: '$40.83/mo billed yearly · 2 months free · resources elevate instantly',
     primaryCtaLabel: PRIMARY_CTA_LABEL_PRO_ANNUAL,
     primaryCtaFrequency: 'yearly',
