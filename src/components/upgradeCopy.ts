@@ -45,7 +45,7 @@ export type CtaFrequency = 'yearly' | 'monthly'
  *  - `title`/`body`: the surface-specific framing.
  *  - `priceLine`: small mono footer (kept for visual continuity with U2).
  *  - `primaryCtaLabel`/`primaryCtaFrequency`: the prominent CTA — defaults
- *    to the Pro Annual destination ("$7.50/mo billed yearly · 2 months free").
+ *    to the Pro Annual destination ("$40.83/mo billed yearly · 2 months free").
  *  - `secondaryCtaLabel`/`secondaryCtaFrequency`: the small text link below
  *    ("Or pay monthly — $9/mo") that keeps the monthly path discoverable.
  *  - `ctaHref`: link target (defaults to BILLING_PATH). Both CTAs use the
@@ -73,14 +73,22 @@ export const BILLING_PATH = '/app/billing'
 export const DEFAULT_UPGRADE_PLAN = 'pro'
 
 /** Shared primary CTA label — the Pro Annual destination. Anchored on the
- *  effective per-month price ($7.50) with the "2 months free" framing from
- *  the pricing playbook. Centralised so every surface stays on-message. */
-export const PRIMARY_CTA_LABEL_PRO_ANNUAL = 'Get Pro — $7.50/mo billed yearly · 2 months free'
+ *  effective per-month price ($40.83) with the "2 months free" framing
+ *  from the pricing playbook. Centralised so every surface stays
+ *  on-message.
+ *
+ *  History (FIX-2026-05-15): this label previously read "$7.50/mo billed
+ *  yearly". $7.50 is the Hobby Annual effective monthly, not Pro — Pro
+ *  annual is $490/yr = $40.83/mo. The wrong number rendered everywhere
+ *  upgrade prompts fired (~5.4× too low). Source of truth is
+ *  api/plans.yaml → pro_yearly.price_monthly_cents = 49000.
+ */
+export const PRIMARY_CTA_LABEL_PRO_ANNUAL = 'Get Pro — $40.83/mo billed yearly · 2 months free'
 
 /** Shared secondary CTA label — the mid-cycle monthly fallback. Kept short
  *  so it visually reads as a secondary text link rather than a second
  *  button. */
-export const SECONDARY_CTA_LABEL_PRO_MONTHLY = 'Or pay monthly — $9/mo'
+export const SECONDARY_CTA_LABEL_PRO_MONTHLY = 'Or pay monthly — $49/mo'
 
 /** Legacy fallback. Retained so existing P1 variant logic continues to work
  *  when a /auth/me payload omits both feature copy and variant label.
@@ -93,7 +101,7 @@ export const UPGRADE_COPY: Record<UpgradeFeature, UpgradeCopy> = {
   vault_prod: {
     title: 'Vault for production env requires Pro Annual',
     body: 'Keeps prod secrets isolated from staging and dev. AES-256-GCM at rest, scoped per-env at runtime.',
-    priceLine: '$7.50/mo billed yearly · 2 months free',
+    priceLine: '$40.83/mo billed yearly · 2 months free',
     primaryCtaLabel: PRIMARY_CTA_LABEL_PRO_ANNUAL,
     primaryCtaFrequency: 'yearly',
     secondaryCtaLabel: SECONDARY_CTA_LABEL_PRO_MONTHLY,
@@ -102,7 +110,7 @@ export const UPGRADE_COPY: Record<UpgradeFeature, UpgradeCopy> = {
   provision_twin: {
     title: 'Provision-twin in another env requires Pro Annual',
     body: 'Creates a sibling staging Postgres in one click, linked to your prod DB. Schema stays in lockstep.',
-    priceLine: '$7.50/mo billed yearly · 2 months free',
+    priceLine: '$40.83/mo billed yearly · 2 months free',
     primaryCtaLabel: PRIMARY_CTA_LABEL_PRO_ANNUAL,
     primaryCtaFrequency: 'yearly',
     secondaryCtaLabel: SECONDARY_CTA_LABEL_PRO_MONTHLY,
@@ -111,16 +119,16 @@ export const UPGRADE_COPY: Record<UpgradeFeature, UpgradeCopy> = {
   family_bindings: {
     title: 'Family deploy bindings require Pro Annual',
     body: 'One deploy manifest works across prod + staging + dev. Promote between envs without rewriting bindings.',
-    priceLine: '$7.50/mo billed yearly · 2 months free',
+    priceLine: '$40.83/mo billed yearly · 2 months free',
     primaryCtaLabel: PRIMARY_CTA_LABEL_PRO_ANNUAL,
     primaryCtaFrequency: 'yearly',
     secondaryCtaLabel: SECONDARY_CTA_LABEL_PRO_MONTHLY,
     secondaryCtaFrequency: 'monthly',
   },
   quota_wall: {
-    title: "You're approaching your hobby quota — Pro Annual unlocks 10x",
-    body: 'Upgrade to Pro for 5 GB Postgres (10x) and 256 MB Redis. Your existing resources keep working — limits raise immediately.',
-    priceLine: '$7.50/mo billed yearly · 2 months free · resources elevate instantly',
+    title: "You're approaching your hobby quota — Pro unlocks 10× everything",
+    body: 'Upgrade to Pro for 10 GB Postgres, 512 MB Redis, 50 GB object storage, 10 deploys. Your existing resources keep working — limits raise immediately.',
+    priceLine: '$40.83/mo billed yearly · 2 months free · resources elevate instantly',
     primaryCtaLabel: PRIMARY_CTA_LABEL_PRO_ANNUAL,
     primaryCtaFrequency: 'yearly',
     secondaryCtaLabel: SECONDARY_CTA_LABEL_PRO_MONTHLY,
@@ -129,7 +137,7 @@ export const UPGRADE_COPY: Record<UpgradeFeature, UpgradeCopy> = {
   custom_domain: {
     title: 'Custom domains require Pro Annual',
     body: 'Bind your own hostname (e.g. app.acme.com) to a deployment. TLS certs issued automatically via cert-manager.',
-    priceLine: '$7.50/mo billed yearly · 2 months free',
+    priceLine: '$40.83/mo billed yearly · 2 months free',
     primaryCtaLabel: PRIMARY_CTA_LABEL_PRO_ANNUAL,
     primaryCtaFrequency: 'yearly',
     secondaryCtaLabel: SECONDARY_CTA_LABEL_PRO_MONTHLY,
@@ -138,7 +146,7 @@ export const UPGRADE_COPY: Record<UpgradeFeature, UpgradeCopy> = {
   private_deploy: {
     title: 'Private deploys with IP allow-list require Pro Annual',
     body: 'Lock your CRM, internal dashboard, or staging app to specific IPs.',
-    priceLine: '$7.50/mo billed yearly · 2 months free',
+    priceLine: '$40.83/mo billed yearly · 2 months free',
     primaryCtaLabel: PRIMARY_CTA_LABEL_PRO_ANNUAL,
     primaryCtaFrequency: 'yearly',
     secondaryCtaLabel: SECONDARY_CTA_LABEL_PRO_MONTHLY,
