@@ -83,8 +83,10 @@ export interface DashboardDeployment {
   id: string
   /** Public app token; doubles as the URL slug under deployment.instanode.dev. */
   app_id: string
-  /** Human-readable name. Server doesn't expose one yet — falls back to app_id. */
-  name: string
+  /** Human-readable name. `null` when the server hasn't set one — the UI
+   *  renders `(unnamed deploy)` in that case and shows app_id as muted
+   *  secondary text rather than promoting the hash to a primary label. */
+  name: string | null
   /** Application URL — e.g. https://<app_id>.deployment.instanode.dev. */
   url: string | null
   status: DeploymentStatus

@@ -3,7 +3,7 @@ import { useParams, Link } from 'react-router-dom'
 import {
   ROBanner, ContractBanner, EnvPill, ExpiryBadge, TierPill, ResourceIcon,
   Card, ContractLine, PromptCard,
-  expiryLevel, formatTimeUntil, useExpiryTick, copyToClipboard
+  expiryLevel, formatTimeUntil, useExpiryTick, copyToClipboard, displayName, isUnnamed
 } from '../components/Common'
 import { MetricsPanel } from '../components/MetricsPanel'
 import { AuditPanel } from '../components/AuditPanel'
@@ -62,8 +62,15 @@ export function ResourceDetailPage() {
         <ResourceIcon type={r.resource_type} size={44} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
-            <h2 style={{ fontSize: 22, fontWeight: 500, letterSpacing: '-0.02em' }}>
-              {r.name ?? r.id}
+            <h2
+              style={{
+                fontSize: 22,
+                fontWeight: 500,
+                letterSpacing: '-0.02em',
+                ...(isUnnamed(r.name) ? { fontStyle: 'italic', color: 'var(--text-dim)' } : {}),
+              }}
+            >
+              {displayName(r.name, r.resource_type)}
             </h2>
             <EnvPill env={r.env} />
             <TierPill tier={r.tier} />
@@ -207,7 +214,7 @@ export function ResourceDetailPage() {
               <Kv k="type" v={r.resource_type} />
               <Kv k="tier" v={r.tier} />
               <Kv k="env" v={r.env} />
-              <Kv k="name" v={r.name ?? '—'} />
+              <Kv k="name" v={r.name?.trim() ? r.name : displayName(null, r.resource_type)} />
               <Kv k="storage" v={`${(r.storage_bytes / 1_000_000).toFixed(1)} / ${(r.storage_limit_bytes / 1_000_000).toFixed(0)} MB · ${Math.round((r.storage_bytes / r.storage_limit_bytes) * 100)}%`} />
               <Kv k="connections" v={`${r.connections_in_use ?? '—'} / ${r.connections_limit ?? '—'}`} />
               <Kv k="cloud_vendor" v={`${r.cloud_vendor ?? '—'} · ${r.country_code ?? '—'}`} />
@@ -279,13 +286,13 @@ export function ResourceDetailPage() {
               prompt={
                 <>
                   Rotate the password for my <strong>{r.resource_type}</strong> resource{' '}
-                  <em>{r.name ?? r.id}</em> (token <code>{r.token}</code>) and update the
+                  <em>{displayName(r.name, r.resource_type)}</em> (token <code>{r.token}</code>) and update the
                   connection string anywhere I've used it (.env, deployment env, secrets).
                   Existing connections on the old URL keep working for 5 minutes.
                 </>
               }
               promptText={
-                `Rotate the password for my ${r.resource_type} resource "${r.name ?? r.id}" on instanode.\n` +
+                `Rotate the password for my ${r.resource_type} resource "${displayName(r.name, r.resource_type)}" on instanode.\n` +
                 `\n` +
                 `- Resource token: ${r.token}\n` +
                 `- Resource id: ${r.id}\n` +
@@ -304,12 +311,12 @@ export function ResourceDetailPage() {
               hint="data loss"
               prompt={
                 <>
-                  Permanently delete <em>{r.name ?? r.id}</em> and remove all references to its
+                  Permanently delete <em>{displayName(r.name, r.resource_type)}</em> and remove all references to its
                   connection string in my code. <strong>Data is gone for good.</strong>
                 </>
               }
               promptText={
-                `Permanently decommission my ${r.resource_type} resource "${r.name ?? r.id}" on instanode.\n` +
+                `Permanently decommission my ${r.resource_type} resource "${displayName(r.name, r.resource_type)}" on instanode.\n` +
                 `\n` +
                 `- Resource token: ${r.token}\n` +
                 `- Resource id: ${r.id}\n` +

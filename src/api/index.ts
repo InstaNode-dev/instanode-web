@@ -758,10 +758,11 @@ function adaptDeployment(d: DeploymentRespItem): DashboardDeployment {
   return {
     id,
     app_id: appID,
-    // The server doesn't ship a separate display name yet — fall back to
-    // the app_id so the UI has something stable to render. Once the API
-    // exposes a real name, this falls through automatically.
-    name: d.name ?? appID,
+    // Surface the server's display name verbatim, or `null` when absent.
+    // The UI (DeploymentsPage / DeployDetailPage) renders `(unnamed deploy)`
+    // for a null name and keeps app_id as muted secondary text — we no
+    // longer promote the hash into the primary `name` slot.
+    name: d.name?.trim() ? d.name : null,
     url: d.url ?? null,
     status: normaliseDeploymentStatus(d.status),
     env: (envScope ?? 'production') as DashboardDeployment['env'],

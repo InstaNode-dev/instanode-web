@@ -144,8 +144,19 @@ describe('StackCreatePage — file validation', () => {
     const input = screen.getByTestId('stack-create-file') as HTMLInputElement
     const ok = makeFile('app.tar.gz', 1024)
     fireEvent.change(input, { target: { files: [ok] } })
+    // Name is a required field — submit stays disabled until it's filled.
+    fireEvent.change(screen.getByTestId('stack-create-name'), { target: { value: 'my-app' } })
     const submit = screen.getByTestId('stack-create-submit') as HTMLButtonElement
     expect(submit.disabled).toBe(false)
+  })
+
+  it('keeps submit disabled when the name is left blank', () => {
+    render(withRouter(<StackCreatePage />))
+    fireEvent.change(screen.getByTestId('stack-create-file'), {
+      target: { files: [makeFile('app.tar.gz', 1024)] },
+    })
+    const submit = screen.getByTestId('stack-create-submit') as HTMLButtonElement
+    expect(submit.disabled).toBe(true)
   })
 })
 
@@ -236,6 +247,7 @@ describe('StackCreatePage — submit shape', () => {
     fireEvent.change(screen.getByTestId('stack-create-file'), {
       target: { files: [makeFile('a.tar.gz', 100)] },
     })
+    fireEvent.change(screen.getByTestId('stack-create-name'), { target: { value: 'my-app' } })
     await act(async () => {
       fireEvent.click(screen.getByTestId('stack-create-submit'))
     })
@@ -253,6 +265,7 @@ describe('StackCreatePage — submit shape', () => {
     fireEvent.change(screen.getByTestId('stack-create-file'), {
       target: { files: [makeFile('a.tar.gz', 100)] },
     })
+    fireEvent.change(screen.getByTestId('stack-create-name'), { target: { value: 'my-app' } })
     await act(async () => {
       fireEvent.click(screen.getByTestId('stack-create-submit'))
     })
@@ -280,6 +293,7 @@ describe('StackCreatePage — polling loop', () => {
     fireEvent.change(screen.getByTestId('stack-create-file'), {
       target: { files: [makeFile('a.tar.gz', 100)] },
     })
+    fireEvent.change(screen.getByTestId('stack-create-name'), { target: { value: 'sunny-cat-7' } })
     await act(async () => {
       fireEvent.click(screen.getByTestId('stack-create-submit'))
     })
@@ -311,6 +325,7 @@ describe('StackCreatePage — polling loop', () => {
     fireEvent.change(screen.getByTestId('stack-create-file'), {
       target: { files: [makeFile('a.tar.gz', 100)] },
     })
+    fireEvent.change(screen.getByTestId('stack-create-name'), { target: { value: 'sad-stack' } })
     await act(async () => {
       fireEvent.click(screen.getByTestId('stack-create-submit'))
     })
@@ -332,6 +347,7 @@ describe('StackCreatePage — error paths', () => {
     fireEvent.change(screen.getByTestId('stack-create-file'), {
       target: { files: [makeFile('a.tar.gz', 100)] },
     })
+    fireEvent.change(screen.getByTestId('stack-create-name'), { target: { value: 'my-app' } })
     await act(async () => {
       fireEvent.click(screen.getByTestId('stack-create-submit'))
     })
@@ -348,6 +364,7 @@ describe('StackCreatePage — error paths', () => {
     fireEvent.change(screen.getByTestId('stack-create-file'), {
       target: { files: [makeFile('a.tar.gz', 100)] },
     })
+    fireEvent.change(screen.getByTestId('stack-create-name'), { target: { value: 'my-app' } })
     await act(async () => {
       fireEvent.click(screen.getByTestId('stack-create-submit'))
     })

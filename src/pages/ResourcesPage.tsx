@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   ContractBanner, EnvPill, ExpiryBadge, TierPill, ResourceIcon, RelTime, UsageBar, PromptCard,
-  useExpiryTick
+  useExpiryTick, displayName, isUnnamed
 } from '../components/Common'
 import { QuotaWallBanner } from '../components/QuotaWallBanner'
 import { UpgradePromptCard } from '../components/UpgradePromptCard'
@@ -194,7 +194,12 @@ export function ResourcesPage() {
                   <ResourceIcon type={r.resource_type} />
                   <div className="info">
                     <span className="n" style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                      {r.name ?? r.id}
+                      <span
+                        data-testid={`resource-row-name-${r.id}`}
+                        style={isUnnamed(r.name) ? { fontStyle: 'italic', color: 'var(--text-dim)' } : undefined}
+                      >
+                        {displayName(r.name, r.resource_type)}
+                      </span>
                       {r.status === 'paused' && (
                         <span
                           data-testid="resource-row-paused-pill"

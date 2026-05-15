@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import {
-  ROBanner, ContractBanner, EnvPill, StatusPill, TierPill, ResourceIcon, PromptCard, RelTime
+  ROBanner, ContractBanner, EnvPill, StatusPill, TierPill, ResourceIcon, PromptCard, RelTime,
+  displayName, isUnnamed
 } from '../components/Common'
 import { AuditPanel } from '../components/AuditPanel'
 import { CustomDomainPanel } from '../components/CustomDomainPanel'
@@ -77,7 +78,10 @@ type DeployView =
   | {
       kind: 'deployment'
       id: string
-      name: string
+      /** May be null for legacy deployments — the chrome renders
+       *  `(unnamed deploy)` via displayName() and keeps app_id as the
+       *  muted secondary identifier. */
+      name: string | null
       status: DashboardDeployment['status']
       env: DashboardDeployment['env']
       tier: DashboardDeployment['tier']
@@ -176,16 +180,25 @@ export function DeployDetailPage() {
 
   if (!loaded || !view) return <div className="skel" style={{ width: '100%', height: 320 }} />
 
+  // Raw (possibly empty / null) name straight off the backing surface —
+  // used to drive the `(unnamed deploy)` fallback + italic muted styling.
+  const rawName = view.kind === 'stack' ? view.data.name : view.name
+  const nameUnnamed = isUnnamed(rawName)
+  // Human-readable label: the name when present, else `(unnamed deploy)`.
+  const label = displayName(rawName, 'deploy')
+
   // Project the discriminated view into the flat fields the chrome
   // already consumes. The Overview / EnvVars / Resources / log panels
-  // below switch on `view.kind` to pick the right data source.
+  // below switch on `view.kind` to pick the right data source. `name` is
+  // projected through displayName() so every PromptCard interpolation
+  // reads a real label rather than a blank string for legacy deploys.
   const d: DashboardStack =
     view.kind === 'stack'
-      ? view.data
+      ? { ...view.data, name: label }
       : ({
           id: view.id,
           slug: view.slug,
-          name: view.name,
+          name: label,
           // 'deploying' is mapped through StatusPill (renders like
           // 'building'); 'healthy' stays as 'running' in shared chrome.
           status: (view.status === 'deploying'
@@ -209,7 +222,17 @@ export function DeployDetailPage() {
         <ResourceIcon type="deploy" size={44} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-            <h2 style={{ fontSize: 22, fontWeight: 500, letterSpacing: '-0.02em' }}>{d.name}</h2>
+            <h2
+              data-testid="deploy-detail-name"
+              style={{
+                fontSize: 22,
+                fontWeight: 500,
+                letterSpacing: '-0.02em',
+                ...(nameUnnamed ? { fontStyle: 'italic', color: 'var(--text-dim)' } : {}),
+              }}
+            >
+              {d.name}
+            </h2>
             <StatusPill status={d.status} />
             <EnvPill env={d.env} />
             <TierPill tier={d.tier} />
@@ -230,6 +253,15 @@ export function DeployDetailPage() {
               {d.url.replace('https://', '')} <span style={{ opacity: 0.6 }}>↗</span>
             </a>
           )}
+          {/* Muted secondary identifier — app_id (deployment) or stack slug.
+              Users still need it to reference the deploy in agent prompts,
+              so it stays visible but de-emphasised below the name + URL. */}
+          <div
+            data-testid="deploy-detail-id"
+            style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-faint)', marginTop: 2 }}
+          >
+            {view.kind === 'deployment' ? view.slug : view.data.slug}
+          </div>
         </div>
       </div>
 
@@ -1236,7 +1268,9 @@ function DeploymentBoundResources({
             <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>{b.envVarKey}</span>
             <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <ResourceIcon type={b.resourceType as any} />
-              <span>{b.name ?? b.resourceType}</span>
+              <span style={isUnnamed(b.name) ? { fontStyle: 'italic', color: 'var(--text-dim)' } : undefined}>
+                {displayName(b.name, b.resourceType)}
+              </span>
             </span>
             <span
               style={{

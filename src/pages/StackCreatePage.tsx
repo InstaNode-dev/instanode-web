@@ -106,6 +106,11 @@ export function StackCreatePage() {
     return null
   })()
 
+  // `name` is a required field — the platform is making resource/stack
+  // names mandatory so the dashboard always has a human-readable label to
+  // render (no more hash-as-primary). Empty is only "not yet an error"
+  // before the user has touched the field; submit is gated on a non-empty
+  // valid name via `formValid` below.
   const nameError = (() => {
     if (!name) return null
     if (name.length > 32) return 'Name must be 32 characters or fewer.'
@@ -133,6 +138,7 @@ export function StackCreatePage() {
     canCreate &&
     file !== null &&
     fileError === null &&
+    name.trim().length > 0 &&
     nameError === null &&
     portError === null &&
     envVarErrors.every((e) => e === null)
@@ -152,7 +158,7 @@ export function StackCreatePage() {
         if (row.key) envVarsMap[row.key] = row.value
       }
       const r = await api.createStack(file, {
-        name: name || undefined,
+        name: name.trim(),
         port,
         env,
         env_vars: Object.keys(envVarsMap).length > 0 ? envVarsMap : undefined,
@@ -344,18 +350,21 @@ export function StackCreatePage() {
         )}
       </FormField>
 
-      {/* Name */}
+      {/* Name — required. A human-readable name is now mandatory so the
+          dashboard always has a real label to show (instead of a hash). */}
       <FormField
         label="Stack name"
-        hint="auto-generated if blank · lowercase + hyphens, max 32"
+        hint="required · lowercase + hyphens, max 32"
         error={nameError}
       >
         <input
           type="text"
+          required
+          aria-required="true"
           value={name}
           onChange={(e) => setName(e.target.value.toLowerCase())}
           maxLength={32}
-          placeholder="auto-generated if blank"
+          placeholder="my-app"
           data-testid="stack-create-name"
           style={{ width: '100%' }}
         />

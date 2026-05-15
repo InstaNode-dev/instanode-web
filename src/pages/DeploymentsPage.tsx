@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
-  EnvPill, StatusPill, ResourceIcon, RelTime, PromptCard
+  EnvPill, StatusPill, ResourceIcon, RelTime, PromptCard, displayName, isUnnamed
 } from '../components/Common'
 import { QuotaWallBanner } from '../components/QuotaWallBanner'
 import { IpAllowList, IP_ALLOW_LIST_MAX } from '../components/IpAllowList'
@@ -137,7 +137,13 @@ export function DeploymentsPage() {
             <div className="res-name">
               <ResourceIcon type="deploy" />
               <div className="info">
-                <span className="n">{d.name}</span>
+                <span
+                  className="n"
+                  data-testid={`deployment-row-name-${d.id}`}
+                  style={isUnnamed(d.name) ? { fontStyle: 'italic', color: 'var(--text-dim)' } : undefined}
+                >
+                  {displayName(d.name, 'deploy')}
+                </span>
                 <span className="id">
                   {d.app_id} · {d.tier}
                 </span>

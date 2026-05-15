@@ -937,8 +937,10 @@ describe('listDeployments()', () => {
     // last_deploy_at falls back to updated_at when the API doesn't yet
     // expose a dedicated last-deploy field.
     expect(a.last_deploy_at).toBe('2026-05-12T11:30:00Z')
-    // Display name falls through to app_id until the API exposes one.
-    expect(a.name).toBe('6fffcc21')
+    // Display name is `null` when the server doesn't supply one — the UI
+    // renders `(unnamed deploy)` and keeps app_id as muted secondary text
+    // rather than promoting the hash into the primary `name` slot.
+    expect(a.name).toBeNull()
 
     expect(r.items[1].env).toBe('staging')
     expect(r.items[1].status).toBe('building')

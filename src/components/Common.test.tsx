@@ -8,7 +8,38 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { copyToClipboard } from './Common'
+import { copyToClipboard, displayName, isUnnamed } from './Common'
+
+describe('displayName / isUnnamed — mandatory-name fallback', () => {
+  it('returns the name verbatim when present', () => {
+    expect(displayName('my-app-db', 'postgres')).toBe('my-app-db')
+    expect(isUnnamed('my-app-db')).toBe(false)
+  })
+
+  it('falls back to "(unnamed <type>)" for null / empty / whitespace names', () => {
+    expect(displayName(null, 'postgres')).toBe('(unnamed postgres)')
+    expect(displayName(undefined, 'redis')).toBe('(unnamed redis)')
+    expect(displayName('', 'deploy')).toBe('(unnamed deploy)')
+    expect(displayName('   ', 'mongodb')).toBe('(unnamed mongodb)')
+  })
+
+  it('falls back to bare "(unnamed)" when no type is supplied', () => {
+    expect(displayName(null)).toBe('(unnamed)')
+    expect(displayName('')).toBe('(unnamed)')
+  })
+
+  it('isUnnamed reports true only for blank names', () => {
+    expect(isUnnamed(null)).toBe(true)
+    expect(isUnnamed(undefined)).toBe(true)
+    expect(isUnnamed('')).toBe(true)
+    expect(isUnnamed('  ')).toBe(true)
+    expect(isUnnamed('x')).toBe(false)
+  })
+
+  it('trims surrounding whitespace from real names', () => {
+    expect(displayName('  spaced  ', 'postgres')).toBe('spaced')
+  })
+})
 
 describe('copyToClipboard', () => {
   let originalClipboardDescriptor: PropertyDescriptor | undefined

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import {
   ROBanner, EnvPill, TierPill, ResourceIcon, RelTime, UsageBar, Card, Sparkline,
-  copyToClipboard
+  copyToClipboard, displayName, isUnnamed
 } from '../components/Common'
 import { QuotaWallBanner } from '../components/QuotaWallBanner'
 import { UpgradeButton } from '../components/UpgradeButton'
@@ -212,7 +212,12 @@ export function OverviewPage() {
                 <Link to={`/app/resources/${r.id}`} className="res-name">
                   <ResourceIcon type={r.resource_type} />
                   <div className="info">
-                    <span className="n">{r.name ?? r.id}</span>
+                    <span
+                      className="n"
+                      style={isUnnamed(r.name) ? { fontStyle: 'italic', color: 'var(--text-dim)' } : undefined}
+                    >
+                      {displayName(r.name, r.resource_type)}
+                    </span>
                     <span className="id">
                       {r.token} · {r.resource_type}
                     </span>
