@@ -109,7 +109,11 @@ const LIMITS: Record<string, { label: string; limits: PlanLimits; nextTier?: Tie
   pro: {
     label: 'Pro',
     nextTier: 'team',
-    limits: { postgres_mb: 5120, redis_mb: 256, mongodb_mb: 2048, deployments: 10, webhooks: 10000, team_seats: 5 },
+    // 2026-05-15 storage bump (PRICING-AUDIT-2026-05-15.md R1): plans.yaml
+    // pro raised postgres 5 GB → 10 GB, redis 256 → 512 MB, mongodb 2 → 5 GB.
+    // These caps were stale, so the Usage panel under-reported a Pro user's
+    // headroom (progress bars read ~2x too full). Mirror api/plans.yaml pro.
+    limits: { postgres_mb: 10240, redis_mb: 512, mongodb_mb: 5120, deployments: 10, webhooks: 10000, team_seats: 5 },
   },
   team: {
     label: 'Team',
@@ -412,7 +416,7 @@ export function BillingPage() {
               letterSpacing: '0.03em',
             }}
           >
-            Promo codes apply at checkout (Razorpay).
+            Have a promo code? Contact support@instanode.dev to apply it.
           </span>
         </div>
       </section>
