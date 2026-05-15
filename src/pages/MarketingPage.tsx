@@ -13,8 +13,47 @@
  * so we don't pollute the global token sheet.
  */
 
-import { Brand } from '../components/Common'
+import { useState } from 'react'
+import { Brand, copyToClipboard } from '../components/Common'
 import { USE_CASES } from '../content/useCases'
+
+// HERO_PROMPT — the copy-pasteable demo prompt shown at the top of the
+// homepage. The instanode pitch is "tell your coding agent to use us";
+// this is the literal sentence a user drops into Claude Code / Cursor.
+// Kept as a single const so the homepage card and llms.txt example
+// stay verbatim-identical.
+const HERO_PROMPT =
+  'Build me a tiny expense tracker — Postgres backing store, a FastAPI ' +
+  'app on top, and deploy it to a public URL I can hit from my phone. ' +
+  'Use instanode.dev — no signup, provision whatever you need.'
+
+// HeroPromptCard — the prompt + a copy button. Pure client interaction;
+// the page is SSG-prerendered and this hydrates on load.
+function HeroPromptCard() {
+  const [copied, setCopied] = useState(false)
+  return (
+    <div className="mkt-prompt-card">
+      <div className="mkt-prompt-label">
+        <span className="mkt-pulse" aria-hidden="true" />
+        Paste this into Claude Code, Cursor, or any MCP agent
+      </div>
+      <p className="mkt-prompt-text">{HERO_PROMPT}</p>
+      <button
+        type="button"
+        className="mkt-prompt-copy"
+        onClick={async () => {
+          const ok = await copyToClipboard(HERO_PROMPT)
+          if (ok) {
+            setCopied(true)
+            setTimeout(() => setCopied(false), 2000)
+          }
+        }}
+      >
+        {copied ? 'Copied ✓' : 'Copy prompt'}
+      </button>
+    </div>
+  )
+}
 
 /* Curated subset of cases for the homepage showcase — one strong exemplar
  * per major archetype so a visitor sees the catalogue's range without
@@ -191,6 +230,8 @@ export function MarketingPage() {
             <strong>Provisioned in &lt;2 seconds.</strong>{' '}
             No signup, no Docker, no waitlist.
           </p>
+          <HeroPromptCard />
+
           <div className="mkt-hero-cta">
             <a href={ROUTES.playground} className="btn btn-primary mkt-btn-large">
               Try the curl <span aria-hidden="true">→</span>
@@ -754,6 +795,45 @@ const MKT_CSS = `
   margin-bottom: 64px;
 }
 .mkt-btn-large { padding: 14px 22px !important; font-size: 15px !important; }
+
+/* ---------- hero prompt card ---------- */
+.mkt-prompt-card {
+  max-width: 620px;
+  margin: 0 0 28px;
+  padding: 18px 20px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface, rgba(255,255,255,0.02));
+}
+.mkt-prompt-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  color: var(--text-dim, #8a8a92);
+  margin-bottom: 10px;
+}
+.mkt-prompt-text {
+  margin: 0 0 14px;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text);
+}
+.mkt-prompt-copy {
+  appearance: none;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 500;
+  padding: 7px 14px;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+.mkt-prompt-copy:hover { border-color: var(--accent); color: var(--accent); }
 
 /* ---------- terminal ---------- */
 .mkt-terminal-stage {
