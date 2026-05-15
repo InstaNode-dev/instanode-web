@@ -93,6 +93,32 @@ function initNewRelic(): void {
 
 initNewRelic()
 
+// Stale-deploy self-heal.
+//
+// GitHub Pages stamps `Cache-Control: max-age=600` on the HTML entry
+// documents (/app/index.html, /404.html) and we can't override it. So
+// for ~10 min after every dashboard deploy, a returning visitor can
+// load a CACHED HTML document that references a hashed JS chunk the new
+// deploy already deleted. The chunk 404s, the lazy import rejects, and
+// React Router's route-level dynamic import fails — the page looks
+// stuck on a 404.
+//
+// Vite fires `vite:preloadError` on window when a dynamically-imported
+// chunk fails to load. We catch it and force ONE full reload — which
+// re-fetches the HTML, gets the current bundle hash, and recovers.
+// The sessionStorage guard prevents an infinite reload loop if the
+// reload itself somehow still fails (genuine outage vs. stale cache).
+window.addEventListener('vite:preloadError', () => {
+  const KEY = 'instanode.chunkReloadAt'
+  const last = Number(sessionStorage.getItem(KEY) || 0)
+  // Only auto-reload once per 30s — a real, persistent chunk failure
+  // (CDN outage) must not trap the user in a reload loop.
+  if (Date.now() - last > 30_000) {
+    sessionStorage.setItem(KEY, String(Date.now()))
+    window.location.reload()
+  }
+})
+
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <ErrorBoundary>
