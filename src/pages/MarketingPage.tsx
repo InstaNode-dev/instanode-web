@@ -259,7 +259,9 @@ export function MarketingPage() {
                   <span className="cmd">
                     <span className="verb">curl</span>{' '}
                     <span className="flag">-X POST</span>{' '}
-                    <span className="url">https://api.instanode.dev/db/new</span>
+                    <span className="url">https://api.instanode.dev/db/new</span>{' '}
+                    <span className="flag">-d</span>{' '}
+                    <span className="str">{`'{"name":"prod-db"}'`}</span>
                   </span>
                 </span>
                 <span className="line out">
@@ -587,7 +589,9 @@ export function MarketingPage() {
                   <span style={{ color: 'var(--violet)' }}>$(</span>
                   <span style={{ color: 'var(--blue)' }}>curl</span>{' '}
                   <span style={{ color: 'var(--violet)' }}>-s</span>{' '}
-                  api.instanode.dev/db/new
+                  api.instanode.dev/db/new{' '}
+                  <span style={{ color: 'var(--violet)' }}>-d</span>{' '}
+                  <span className="str">{`'{"name":"prod-db"}'`}</span>
                   {'\n        '}| <span style={{ color: 'var(--blue)' }}>jq</span>{' '}
                   <span className="str">-r .connection_url</span>
                   <span style={{ color: 'var(--violet)' }}>)</span>

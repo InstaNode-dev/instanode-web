@@ -84,7 +84,7 @@ Content-Type: application/json
 { "name": "my-app-db" }
 ```
 
-Body may be omitted. Authenticated requests (Bearer JWT) provision permanent resources.
+`name` is required: 1–64 chars matching `^[A-Za-z0-9][A-Za-z0-9 _-]*$`. Omitting it returns HTTP 400. Authenticated requests (Bearer JWT) provision permanent resources.
 
 #### Response 201:
 ```json
@@ -133,6 +133,8 @@ Content-Type: application/json
 { "name": "session-cache" }
 ```
 
+`name` is required: 1–64 chars matching `^[A-Za-z0-9][A-Za-z0-9 _-]*$`. Omitting it returns HTTP 400.
+
 #### Response 201:
 ```json
 {
@@ -166,6 +168,8 @@ Content-Type: application/json
 
 { "name": "events-db" }
 ```
+
+`name` is required: 1–64 chars matching `^[A-Za-z0-9][A-Za-z0-9 _-]*$`. Omitting it returns HTTP 400.
 
 #### Response 201:
 ```json
@@ -205,7 +209,7 @@ Content-Type: application/json
 { "name": "task-queue" }
 ```
 
-Body may be omitted. Authenticated requests (Bearer JWT) provision permanent resources.
+`name` is required: 1–64 chars matching `^[A-Za-z0-9][A-Za-z0-9 _-]*$`. Omitting it returns HTTP 400. Authenticated requests (Bearer JWT) provision permanent resources.
 
 #### Response 201:
 ```json
@@ -257,6 +261,7 @@ Deploy a full application stack. Builds Docker images via the cluster's Docker d
 **Content-Type: multipart/form-data**
 
 Fields:
+- `name` (string, required): 1–64 chars matching `^[A-Za-z0-9][A-Za-z0-9 _-]*$`. Omitting it returns HTTP 400.
 - `manifest` (file, required): YAML file defining services (instant.yaml format, see below)
 - `<service-name>` (file, one per service): gzipped tar of the service source directory
 
@@ -287,6 +292,7 @@ tar czf web.tar.gz -C ./myapp .
 
 # Deploy
 curl -X POST https://instanode.dev/stacks/new \
+  -F name=prod-stack \
   -F manifest=@instant.yaml \
   -F web=@web.tar.gz
 ```
@@ -709,6 +715,9 @@ This is the full upgrade journey for an anonymous user.
    Example:
    ```
    POST https://instanode.dev/db/new
+   Content-Type: application/json
+
+   { "name": "my-app-db" }
    ```
    Response includes:
    - token: use immediately in application code
@@ -894,6 +903,7 @@ tar czf web.tar.gz -C ./myapp .
 
 # 3. Deploy
 STACK=$(curl -sfX POST https://instanode.dev/stacks/new \
+  -F name=prod-stack \
   -F manifest=@instant.yaml \
   -F web=@web.tar.gz)
 SLUG=$(echo $STACK | jq -r .stack_id)
@@ -930,5 +940,5 @@ EOF
 
 # Step 3: deploy
 tar czf api.tar.gz -C ./api .
-curl -sfX POST https://instanode.dev/stacks/new -F manifest=@instant.yaml -F api=@api.tar.gz
+curl -sfX POST https://instanode.dev/stacks/new -F name=prod-stack -F manifest=@instant.yaml -F api=@api.tar.gz
 ```

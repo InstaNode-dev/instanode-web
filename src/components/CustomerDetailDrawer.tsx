@@ -25,7 +25,7 @@ import type {
   AdminCustomerSummary,
 } from '../api/types'
 import { type CurrencyCode, DEFAULT_CURRENCY, formatMoney } from '../lib/currency'
-import { EnvPill, RelTime, TierPill } from './Common'
+import { EnvPill, RelTime, TierPill, displayName, isUnnamed } from './Common'
 import { IssuePromoModal } from './IssuePromoModal'
 import { TierChangeModal } from './TierChangeModal'
 
@@ -407,7 +407,21 @@ function ResourcesTab({ detail }: { detail: AdminCustomerDetailResponse }) {
             style={{ borderTop: '1px solid var(--border, #eee)' }}
           >
             <td style={{ padding: '6px 4px' }}>{r.resource_type}</td>
-            <td style={{ padding: '6px 4px' }}>{r.name ?? r.token.slice(0, 12)}</td>
+            <td style={{ padding: '6px 4px' }}>
+              <span style={isUnnamed(r.name) ? { fontStyle: 'italic', color: 'var(--text-dim)' } : undefined}>
+                {displayName(r.name, r.resource_type)}
+              </span>
+              <span
+                style={{
+                  display: 'block',
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: 10.5,
+                  color: 'var(--text-faint, #999)',
+                }}
+              >
+                {r.token}
+              </span>
+            </td>
             <td style={{ padding: '6px 4px' }}>
               <EnvPill env={r.env} />
             </td>

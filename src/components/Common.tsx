@@ -5,6 +5,33 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import type { Resource, ResourceType, StackStatus, Tier, Env, Role } from '../api/types'
 
+// ------------- display-name helpers -------------
+// Resource `name` is becoming a required field on the API, but legacy rows
+// (provisioned before the field existed) can still carry an empty/null
+// `name`. A backend backfill populates most of them — these helpers render
+// defensively so a missing name never shows a blank primary label.
+//
+// The contract: the human-readable `name` is ALWAYS the primary label; the
+// hash/token/UUID is secondary muted text. When `name` is absent we show
+// `(unnamed <type>)` so the row is still identifiable at a glance.
+
+/** Primary display label for a resource/deployment/stack.
+ *  Returns the name when present, else `(unnamed)` or `(unnamed <type>)`. */
+export function displayName(
+  name: string | null | undefined,
+  type?: string | null,
+): string {
+  const trimmed = (name ?? '').trim()
+  if (trimmed) return trimmed
+  return type ? `(unnamed ${type})` : '(unnamed)'
+}
+
+/** True when a resource has no usable name — used to style the fallback
+ *  label as muted/italic so it reads as a placeholder, not a real name. */
+export function isUnnamed(name: string | null | undefined): boolean {
+  return !(name ?? '').trim()
+}
+
 // ------------- branding -------------
 // The mark uses the canonical instanode.dev favicon (cube + braces). Loaded
 // from /public so it's part of the app bundle, not an external request.

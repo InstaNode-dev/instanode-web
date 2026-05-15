@@ -50,6 +50,8 @@ All provisioning endpoints:
 
 Provision a Postgres database (includes pgvector extension).
 
+Request body (application/json): `{ "name": "my-app-db" }`. `name` is required — 1–64 chars matching `^[A-Za-z0-9][A-Za-z0-9 _-]*$`. Omitting it returns HTTP 400.
+
 Response 201:
 ```json
 {
@@ -77,6 +79,8 @@ Tier limits:
 
 Provision a Redis cache (ACL-isolated namespace).
 
+Request body (application/json): `{ "name": "session-cache" }`. `name` is required — 1–64 chars matching `^[A-Za-z0-9][A-Za-z0-9 _-]*$`. Omitting it returns HTTP 400.
+
 Response 201:
 ```json
 {
@@ -103,6 +107,8 @@ Tier limits:
 
 Provision a MongoDB database.
 
+Request body (application/json): `{ "name": "events-db" }`. `name` is required — 1–64 chars matching `^[A-Za-z0-9][A-Za-z0-9 _-]*$`. Omitting it returns HTTP 400.
+
 Response 201:
 ```json
 {
@@ -128,6 +134,8 @@ Tier limits:
 ### POST /queue/new
 
 Provision a NATS JetStream message queue.
+
+Request body (application/json): `{ "name": "task-queue" }`. `name` is required — 1–64 chars matching `^[A-Za-z0-9][A-Za-z0-9 _-]*$`. Omitting it returns HTTP 400.
 
 Response 201:
 ```json
@@ -156,6 +164,7 @@ Deploy a full application stack from a Dockerfile. Multipart POST.
 Deploy a new app stack. Accepts a multipart/form-data body.
 
 Fields:
+- name (string, required): 1–64 chars matching ^[A-Za-z0-9][A-Za-z0-9 _-]*$. Omitting it returns HTTP 400.
 - manifest (file, required): YAML manifest file (instant.yaml). Defines services and build config.
 - <service-name> (file, per service): gzipped tarball of the service source directory.
 
@@ -182,6 +191,7 @@ services:
 Example request:
 ```bash
 curl -X POST https://instanode.dev/stacks/new \
+  -F name=prod-stack \
   -F manifest=@instant.yaml \
   -F web=@web.tar.gz \
   -F api=@api.tar.gz
@@ -316,6 +326,8 @@ Stack tier limits:
 
 Provision a webhook receiver URL. Any service (GitHub, Stripe, your own apps) can POST to it.
 
+Request body (application/json): `{ "name": "github-hook" }`. `name` is required — 1–64 chars matching `^[A-Za-z0-9][A-Za-z0-9 _-]*$`. Omitting it returns HTTP 400.
+
 Response 201:
 ```json
 {
@@ -370,6 +382,8 @@ Response 200:
 ### POST /storage/new
 
 Provision an S3-compatible object storage bucket. Returns AWS-compatible credentials. Production backend is DigitalOcean Spaces (S3-compatible) in `nyc3`. Anonymous-tier buckets are auto-deleted at 24h by a bucket lifecycle rule enforced at the storage layer.
+
+Request body (application/json): `{ "name": "user-uploads" }`. `name` is required — 1–64 chars matching `^[A-Za-z0-9][A-Za-z0-9 _-]*$`. Omitting it returns HTTP 400.
 
 Response 201:
 ```json
