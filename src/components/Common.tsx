@@ -81,7 +81,7 @@ export function EnvPill({ env }: { env: Env }) {
 export function StatusPill({
   status,
 }: {
-  status: StackStatus | 'healthy' | 'deploying'
+  status: StackStatus | 'healthy' | 'deploying' | 'expired'
 }) {
   const display =
     status === 'running'   ? 'healthy' :
@@ -91,6 +91,7 @@ export function StatusPill({
     display === 'healthy'  ? 'status-pill healthy' :
     display === 'building' ? 'status-pill building' :
     display === 'failed'   ? 'status-pill failed' :
+    display === 'expired'  ? 'status-pill stopped' :
                              'status-pill stopped'
   return <span className={cls}>{display}</span>
 }
