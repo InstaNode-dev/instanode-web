@@ -16,6 +16,7 @@
 
 import { useEffect, useSyncExternalStore } from 'react'
 import * as api from '../api'
+import { registerLogoutHook } from '../api'
 import type { AuthMeResponse, BillingDetails, Resource } from '../api'
 
 const ENV_KEY = 'instanode.env'
@@ -38,6 +39,8 @@ export type DashboardCtx = {
   billingLoading: boolean
 }
 
+// state is populated from initialState at module load; resetBootstrap()
+// restores it to initialState on logout (D08 fix).
 let state: DashboardCtx = {
   me: null,
   meErr: null,
@@ -49,6 +52,14 @@ let state: DashboardCtx = {
   billing: null,
   billingLoading: true,
 }
+// Note: initialState is defined AFTER the first `state` declaration because
+// it needs the same env expression. TypeScript module evaluation is top-to-
+// bottom, so the two initialisers are order-dependent. The ordering is:
+//   1. state = { ...literal with meLoading:true for the initial app mount }
+//   2. initialState = { ...same literal but meLoading:false for post-logout }
+// This asymmetry is intentional: the first mount shows a loading spinner;
+// the post-logout state does not (the user has navigated to /login and the
+// /app/* subtree is not mounted).
 
 const listeners = new Set<() => void>()
 
@@ -148,6 +159,36 @@ async function refreshBilling() {
 }
 
 let bootstrapped = false
+
+// initialState is the zero-value DashboardCtx — factored out so resetBootstrap
+// can restore it without duplicating the literal.
+const initialState: DashboardCtx = {
+  me: null,
+  meErr: null,
+  meLoading: false, // false on reset so consumers don't show a spinner before re-login
+  env: typeof window !== 'undefined' ? (localStorage.getItem(ENV_KEY) ?? 'production') : 'production',
+  envs: ['production', 'staging', 'development'],
+  counts: { resources: 0, deployments: 0, vault: 0, team: 1 },
+  resources: [],
+  billing: null,
+  billingLoading: false,
+}
+
+// resetBootstrap clears all cached state and resets the bootstrapped flag so
+// the next ensureBootstrap() call (triggered by the first /app/* page mount
+// after login) performs a fresh identity fetch.
+//
+// D08 (P1): without this, a same-tab logout+re-login scenario serves the
+// PREVIOUS user's identity (email, team, tier, admin "Customers" nav link)
+// to the new user because `bootstrapped = true` prevented a fresh
+// /auth/me call. Callers: api.logout() (index.ts) and any component that
+// needs to force a full identity refresh (e.g. after an account switch).
+export function resetBootstrap() {
+  bootstrapped = false
+  state = { ...initialState }
+  emit()
+}
+
 export function ensureBootstrap() {
   if (bootstrapped) return
   // Skip bootstrap on public pages (no session yet). RouteTracker mounts
@@ -179,3 +220,9 @@ export function useEnvSync(): string {
   // Lighter-weight hook for components that only care about the env string.
   return useDashboardCtx().env
 }
+
+// D08 (P1): register resetBootstrap as a logout hook so api.logout() triggers
+// a full identity reset. Registration happens at module-evaluation time (once
+// per app lifetime). registerLogoutHook is idempotent so hot-module-reloading
+// in Vite dev mode does not produce duplicate registrations.
+registerLogoutHook(resetBootstrap)
