@@ -13,9 +13,9 @@ export function ContractsPage() {
       </div>
 
       <div className="stats" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
-        <SummaryStat color="accent" label="locked" v="26" sub="endpoints live" />
+        <SummaryStat color="accent" label="locked" v="25" sub="endpoints live" />
         <SummaryStat color="rose"   label="blocked" v="11" sub="missing entirely" subCls="err" />
-        <SummaryStat color="amber"  label="needs lock" v="5" sub="contract gaps" subCls="warn" />
+        <SummaryStat color="amber"  label="needs lock" v="6" sub="contract gaps" subCls="warn" />
         <SummaryStat color="blue"   label="delegated" v="3" sub="via agent api" subCls="dim" />
       </div>
 
@@ -51,10 +51,9 @@ export function ContractsPage() {
           <ContractLine method="GET"    path="/api/v1/stacks/:slug" status="→ {ok, stack}" />
           <ContractLine method="DELETE" path="/api/v1/stacks/:slug" status="→ {ok}" />
         </Group>
-        <Group title="Auth · 4">
-          <ContractLine method="POST"   path="/auth/login" status="body: {email} · auto-creates user · hobby tier" />
-          <ContractLine method="POST"   path="/auth/refresh" status="cookie-based · 24h ttl" />
-          <ContractLine method="POST"   path="/auth/logout" status="→ {ok}" />
+        <Group title="Auth · 3">
+          <ContractLine method="POST"   path="/auth/email/start" status="body: {email, return_to?} → 202 always · rate-limited 5/hr per email" />
+          <ContractLine method="POST"   path="/auth/logout" status="→ {ok} · server-side JTI revocation in Redis" />
           <ContractLine method="GET"    path="/auth/me" status="→ {ok, user, team, access_token?}" />
         </Group>
       </Card>
@@ -154,12 +153,19 @@ data: {}`}</>}
         />
       </div>
 
-      <SectionH label="NEEDS LOCK" badgeBg="var(--amber)" title="4 contradictions or partial implementations" sub="FE/BE will diverge until these resolve" />
+      <SectionH label="NEEDS LOCK" badgeBg="var(--amber)" title="5 contradictions or partial implementations" sub="FE/BE will diverge until these resolve" />
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         {/* The "Trial vs. immediate Hobby" banner was removed on 2026-05-14
             per policy memory project_no_trial_pay_day_one.md — the platform
             has no trial period; hobby/pro/team are paid from day one. */}
+        <ContractBanner kind="warning" badge="#0">
+          <strong>POST /auth/refresh — unimplemented.</strong> This endpoint was previously listed
+          as "LOCKED" but was never registered in the API router. Adding proper refresh-token
+          rotation requires a <code>refresh_tokens</code> table, a rotation strategy, and
+          coordinated dashboard + SDK changes. It is removed from LOCKED until that work lands.
+          <strong> Do not call this endpoint — it returns 404.</strong>
+        </ContractBanner>
         <ContractBanner kind="warning" badge="#1">
           <strong>"Deployments" vs "Stacks".</strong> Brief uses "Deployments"; the API uses "Stacks". <strong>Lock:</strong> dashboard URL is <code>/deployments</code> (user language), API stays <code>/stacks</code> (existing).
         </ContractBanner>
