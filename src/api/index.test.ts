@@ -1094,13 +1094,17 @@ describe('getDeployment()', () => {
   })
 })
 
-// ─── createDeploy() — POST /deploy/new with private + allowed_ips ────────
-// The dashboard's createDeploy helper is the wire-shape source of truth
-// for the private-deploy fields. The agent prompt on DeploymentsPage
-// renders these same keys, so a contract drift here would silently leak
-// into the prompt copy. We lock the field names + path explicitly.
+// ─── createDeploy() — POST /deploy/new multipart (C02 fix) ───────────────
+// createDeploy must send multipart/form-data — the server calls
+// c.MultipartForm() and returns 400 invalid_form on any JSON body.
+// Field names: tarball (file), name, port, env (scope), env_vars (JSON string),
+// private, allowed_ips (JSON string).
 describe('createDeploy()', () => {
-  it('POSTs to /deploy/new with private + allowed_ips in the body', async () => {
+  function fakeTarball(size = 100): File {
+    return new File([new ArrayBuffer(size)], 'app.tar.gz', { type: 'application/gzip' })
+  }
+
+  it('POSTs to /deploy/new as multipart/form-data with private + allowed_ips', async () => {
     const m = installFetch()
     m.mockResolvedValueOnce(jsonResponse({
       ok: true,
@@ -1111,14 +1115,18 @@ describe('createDeploy()', () => {
         private: true, allowed_ips: ['8.8.8.8'],
       },
     }))
-    const r = await createDeploy({
-      name: 'my-app',
-      port: 8080,
-      env: 'production',
-      env_vars: { FOO: 'bar' },
-      private: true,
-      allowed_ips: ['8.8.8.8'],
-    })
+    const tb = fakeTarball()
+    const r = await createDeploy(
+      {
+        name: 'my-app',
+        port: 8080,
+        env: 'production',
+        env_vars: { FOO: 'bar' },
+        private: true,
+        allowed_ips: ['8.8.8.8'],
+      },
+      tb,
+    )
     expect(r.ok).toBe(true)
     expect(r.deployment.private).toBe(true)
     expect(r.deployment.allowed_ips).toEqual(['8.8.8.8'])
@@ -1126,16 +1134,19 @@ describe('createDeploy()', () => {
     const [url, init] = m.mock.calls[0]
     expect(String(url)).toContain('/deploy/new')
     expect(init?.method).toBe('POST')
-    const sent = JSON.parse(String(init!.body))
-    expect(sent.private).toBe(true)
-    expect(sent.allowed_ips).toEqual(['8.8.8.8'])
-    // env_vars rides under the server's legacy `env` alias; the env scope
-    // goes in `environment`.
-    expect(sent.env).toEqual({ FOO: 'bar' })
-    expect(sent.environment).toBe('production')
+    // Body must be FormData (not a JSON string) — server rejects JSON.
+    const body = init!.body as FormData
+    expect(body).toBeInstanceOf(FormData)
+    expect(body.get('tarball')).toBe(tb)
+    expect(body.get('name')).toBe('my-app')
+    expect(body.get('port')).toBe('8080')
+    expect(body.get('env')).toBe('production')
+    expect(body.get('env_vars')).toBe(JSON.stringify({ FOO: 'bar' }))
+    expect(body.get('private')).toBe('true')
+    expect(body.get('allowed_ips')).toBe(JSON.stringify(['8.8.8.8']))
   })
 
-  it('omits private + allowed_ips when caller does not pass them (public deploy)', async () => {
+  it('omits private + allowed_ips fields when caller does not pass them (public deploy)', async () => {
     const m = installFetch()
     m.mockResolvedValueOnce(jsonResponse({
       ok: true,
@@ -1146,9 +1157,9 @@ describe('createDeploy()', () => {
       },
     }))
     await createDeploy({ name: 'my-app', port: 8080, env: 'production' })
-    const sent = JSON.parse(String(m.mock.calls[0][1]!.body))
-    expect(sent).not.toHaveProperty('private')
-    expect(sent).not.toHaveProperty('allowed_ips')
+    const body = m.mock.calls[0][1]!.body as FormData
+    expect(body.has('private')).toBe(false)
+    expect(body.has('allowed_ips')).toBe(false)
   })
 
   it('propagates 402 (tier gate) so the page can render an upgrade prompt', async () => {
@@ -1466,17 +1477,18 @@ describe('Admin URL prefix wiring', () => {
   })
 })
 
-// ─── createStack() — POST /stacks/new multipart upload ───────────────────
-// W9: the human-driven "Create stack" form. The api endpoint is multipart-
-// only; this helper builds the FormData body. We lock the field names
-// because the api parser is strict about them.
+// ─── createStack() — POST /stacks/new multipart upload (C06/D09 fix) ─────
+// POST /stacks/new requires a 'manifest' field (instant.yaml text) and a
+// tarball keyed by the service name from the manifest. The server returns
+// 400 missing_manifest without it. We auto-generate a single-service manifest
+// from the caller's opts (service name "app").
 describe('createStack()', () => {
   function fakeFile(name: string, size: number): File {
     const f = new File([new ArrayBuffer(size)], name, { type: 'application/gzip' })
     return f
   }
 
-  it('POSTs to /stacks/new with a multipart body containing the tarball', async () => {
+  it('POSTs to /stacks/new with manifest + tarball keyed as "app"', async () => {
     const m = installFetch()
     m.mockResolvedValueOnce(jsonResponse({
       ok: true, slug: 'sunny-cat-9', status: 'building', url: null, name: 'sunny-cat-9', env: 'development',
@@ -1495,43 +1507,47 @@ describe('createStack()', () => {
     const [url, init] = m.mock.calls[0]
     expect(String(url)).toContain('/stacks/new')
     expect(init?.method).toBe('POST')
-    // Body is a FormData instance; assert the fields we appended.
     const body = init!.body as FormData
     expect(body).toBeInstanceOf(FormData)
+    // manifest field is REQUIRED — server 400s without it.
+    const manifestText = body.get('manifest') as string
+    expect(typeof manifestText).toBe('string')
+    expect(manifestText).toContain('services:')
+    expect(manifestText).toContain('app:')
+    expect(manifestText).toContain('port: 3000')
+    expect(manifestText).toContain("API_KEY: 'secret'")
+    // Tarball field key must match the service name in the manifest ("app").
+    expect(body.get('app')).toBe(f)
+    // name field sets the human-readable stack name.
     expect(body.get('name')).toBe('my-app')
-    expect(body.get('port')).toBe('3000')
-    expect(body.get('env')).toBe('staging')
-    expect(body.get('env_vars')).toBe(JSON.stringify({ API_KEY: 'secret' }))
-    expect(body.get('tarball')).toBe(f)
-    // CRITICAL — Content-Type must NOT be set on the request headers; the
-    // browser generates a multipart boundary automatically. Set it
-    // ourselves and the api parser bails.
+    // env, port, env_vars are embedded in the manifest — NOT separate fields.
+    expect(body.has('tarball')).toBe(false)
+    expect(body.has('port')).toBe(false)
+    expect(body.has('env')).toBe(false)
+    expect(body.has('env_vars')).toBe(false)
+    // CRITICAL — Content-Type must NOT be set (browser generates boundary).
     const headers = init?.headers as Headers
     expect(headers.has('Content-Type')).toBe(false)
   })
 
-  it('defaults env to "development" when caller omits it (matches platform memory 2026-05-13)', async () => {
+  it('generates a default port of 8080 in the manifest when caller omits port', async () => {
     const m = installFetch()
-    m.mockResolvedValueOnce(jsonResponse({
-      ok: true, slug: 's', status: 'building', url: null,
-    }))
+    m.mockResolvedValueOnce(jsonResponse({ ok: true, slug: 's', status: 'building', url: null }))
     await createStack(fakeFile('a.tar.gz', 100), {})
     const body = m.mock.calls[0][1]!.body as FormData
-    expect(body.get('env')).toBe('development')
+    const manifestText = body.get('manifest') as string
+    expect(manifestText).toContain('port: 8080')
   })
 
-  it('omits name + port + env_vars from the body when not provided', async () => {
+  it('omits name from the body when not provided', async () => {
     const m = installFetch()
-    m.mockResolvedValueOnce(jsonResponse({
-      ok: true, slug: 's', status: 'building', url: null,
-    }))
+    m.mockResolvedValueOnce(jsonResponse({ ok: true, slug: 's', status: 'building', url: null }))
     await createStack(fakeFile('a.tar.gz', 100), {})
     const body = m.mock.calls[0][1]!.body as FormData
     expect(body.has('name')).toBe(false)
-    expect(body.has('port')).toBe(false)
-    expect(body.has('env_vars')).toBe(false)
-    // env always lands (defaults to 'development').
-    expect(body.has('env')).toBe(true)
+    // manifest + app tarball are always sent.
+    expect(body.has('manifest')).toBe(true)
+    expect(body.has('app')).toBe(true)
   })
 
   it('sends an Authorization: Bearer header when a token is present', async () => {
@@ -1587,24 +1603,39 @@ describe('createStack()', () => {
   })
 })
 
-// ─── fetchStackStatus() — GET /api/v1/stacks/:slug polling helper ───────
+// ─── fetchStackStatus() — GET /api/v1/stacks/:slug polling helper (D09/C06) ──
+// The server response is FLAT — fields are at the top level, NOT nested under
+// a 'stack' or 'item' key. Shape: { ok, stack_id, status, tier, name, services }.
+// stack_id is the slug string. Previously the function polled a non-existent
+// endpoint and could never resolve (D09 fix: route now registered + parser fixed).
 describe('fetchStackStatus()', () => {
-  it('GETs /api/v1/stacks/:slug and adapts the response shape', async () => {
+  it('GETs /api/v1/stacks/:slug and adapts the flat response shape', async () => {
     const m = installFetch()
+    // Server returns flat fields — no nested 'stack' wrapper.
     m.mockResolvedValueOnce(jsonResponse({
       ok: true,
-      stack: {
-        stack_id: 's1', slug: 's1', name: 'my-stack', status: 'running',
-        url: 'https://s1.deployment.instanode.dev', env: 'production', tier: 'pro',
-        created_at: '2026-05-13T00:00:00Z',
-      },
+      stack_id: 's1',
+      name: 'my-stack',
+      status: 'running',
+      tier: 'pro',
+      services: [{ name: 'app', url: 'https://s1.deployment.instanode.dev', status: 'healthy' }],
     }))
     const r = await fetchStackStatus('s1')
     expect(r.ok).toBe(true)
     expect(r.stack?.slug).toBe('s1')
     expect(r.stack?.status).toBe('running')
+    // url is derived from the first service that has one.
     expect(r.stack?.url).toBe('https://s1.deployment.instanode.dev')
     expect(String(m.mock.calls[0][0])).toContain('/api/v1/stacks/s1')
+  })
+
+  it('returns stack=null when stack_id is absent in the response', async () => {
+    const m = installFetch()
+    // Response with no stack_id = not a valid stack record.
+    m.mockResolvedValueOnce(jsonResponse({ ok: true }))
+    const r = await fetchStackStatus('missing')
+    expect(r.ok).toBe(true)
+    expect(r.stack).toBeNull()
   })
 
   it('returns stack=null on 404 instead of throwing', async () => {
@@ -1617,7 +1648,7 @@ describe('fetchStackStatus()', () => {
 
   it('URI-encodes the slug', async () => {
     const m = installFetch()
-    m.mockResolvedValueOnce(jsonResponse({ ok: true, stack: { slug: 'a b', status: 'building' } }))
+    m.mockResolvedValueOnce(jsonResponse({ ok: true, stack_id: 'a b', status: 'building' }))
     await fetchStackStatus('a b')
     expect(String(m.mock.calls[0][0])).toContain('/api/v1/stacks/a%20b')
   })

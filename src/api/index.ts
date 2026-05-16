@@ -741,6 +741,8 @@ function normaliseDeploymentStatus(s: string | undefined): DeploymentStatus {
     case 'stopped':
     case 'running':
       return s
+    case 'expired':
+      return 'expired' // C02: TTL-expired — render badge not spinner
     default:
       return 'building'
   }
@@ -860,27 +862,48 @@ export interface CreateDeployInput {
 
 export async function createDeploy(
   input: CreateDeployInput,
+  tarball?: File,
 ): Promise<{ ok: true; deployment: DashboardDeployment }> {
-  // Wire shape matches the Track A `POST /deploy/new` contract: env_vars
-  // is sent as `env` (legacy alias) for symmetry with the list-response
-  // adapter above. The dedicated `environment` field carries the env
-  // scope. `private` + `allowed_ips` ride alongside as top-level fields.
-  const body: Record<string, unknown> = {}
-  if (input.name) body.name = input.name
-  if (input.port !== undefined) body.port = input.port
-  if (input.env) body.environment = input.env
-  if (input.env_vars) body.env = input.env_vars
-  if (input.resource_id) body.resource_id = input.resource_id
-  if (input.private !== undefined) body.private = input.private
-  if (input.allowed_ips !== undefined) body.allowed_ips = input.allowed_ips
-  const r = await call<DeploymentGetResp>('/deploy/new', {
-    method: 'POST',
-    body: JSON.stringify(body),
-  })
-  if (!r.item) {
+  // POST /deploy/new is multipart-only — c.MultipartForm() returns 400 on JSON.
+  // Build FormData; do NOT set Content-Type (browser generates the boundary).
+  const fd = new FormData()
+  if (tarball) fd.append('tarball', tarball)
+  if (input.name) fd.append('name', input.name)
+  if (input.port !== undefined) fd.append('port', String(input.port))
+  if (input.env) fd.append('env', input.env)
+  if (input.env_vars && Object.keys(input.env_vars).length > 0) {
+    fd.append('env_vars', JSON.stringify(input.env_vars))
+  }
+  if (input.resource_id) fd.append('resource_id', input.resource_id)
+  if (input.private !== undefined) fd.append('private', String(input.private))
+  if (input.allowed_ips !== undefined) fd.append('allowed_ips', JSON.stringify(input.allowed_ips))
+
+  const headers = new Headers()
+  const tok = getToken()
+  if (tok) headers.set('Authorization', `Bearer ${tok}`)
+
+  const base = getAPIBaseURL()
+  const deployURL = new URL(
+    '/deploy/new',
+    base || (typeof window !== 'undefined' ? window.location.origin : 'http://localhost'),
+  )
+  const res = await fetch(deployURL.toString(), { method: 'POST', headers, body: fd })
+  const ct = res.headers.get('content-type') ?? ''
+  const respBody: any = ct.includes('application/json')
+    ? await res.json().catch(() => null)
+    : await res.text()
+
+  if (!res.ok) {
+    const code = (respBody && respBody.error) || `http_${res.status}`
+    const msg =
+      (respBody && (respBody.message || respBody.error_description)) || res.statusText
+    throw new APIError(res.status, code, msg)
+  }
+
+  if (!respBody?.item) {
     throw new APIError(500, 'invalid_response', 'POST /deploy/new returned no item')
   }
-  return { ok: true, deployment: adaptDeployment(r.item) }
+  return { ok: true, deployment: adaptDeployment(respBody.item) }
 }
 
 // ─── updateDeploymentAccess — PATCH /api/v1/deployments/:id (Track A) ────
@@ -1313,10 +1336,13 @@ export async function createStack(
 }
 
 /**
- * Poll a single stack's current state. Returns null when the slug is not
- * found (server returns 404 if the stack was deleted mid-poll, or if the
- * caller doesn't own it). Other errors propagate so the page can show a
- * real banner instead of pretending the build is still in flight.
+ * Poll a single stack's current state via GET /api/v1/stacks/:slug (D09/C06 fix).
+ *
+ * The server response is flat — stack fields are at the top level, NOT under
+ * a nested 'stack' or 'item' key. Shape: { ok, stack_id, status, tier, name,
+ * services, expires_at? } where stack_id is the slug string.
+ *
+ * Returns null on 404 (deleted or not owned). Other errors propagate.
  */
 export async function fetchStackStatus(
   slug: string,
@@ -1324,41 +1350,28 @@ export async function fetchStackStatus(
   try {
     type StackGetResp = {
       ok: boolean
-      stack?: {
-        stack_id?: string
-        slug?: string
-        name?: string
-        status?: string
-        tier?: string
-        url?: string | null
-        env?: string
-        created_at?: string
-      }
-      // Some api builds return the row at the top level under `item`.
-      item?: {
-        stack_id?: string
-        slug?: string
-        name?: string
-        status?: string
-        tier?: string
-        url?: string | null
-        env?: string
-        created_at?: string
-      }
+      // stack_id is the slug (not the internal UUID).
+      stack_id?: string
+      status?: string
+      tier?: string
+      name?: string
+      services?: Array<{ name?: string; url?: string; status?: string }>
+      expires_at?: string
     }
     const r = await call<StackGetResp>(`/api/v1/stacks/${encodeURIComponent(slug)}`)
-    const s = r.stack ?? r.item
-    if (!s) return { ok: true as const, stack: null }
+    if (!r.stack_id) return { ok: true as const, stack: null }
+    // Derive URL from the first service that has one (stack row has no top-level url).
+    const derivedURL = r.services?.find((svc) => !!svc.url)?.url ?? null
     const stack: DashboardStack = {
-      id: s.stack_id ?? s.slug ?? slug,
-      slug: s.slug ?? s.stack_id ?? slug,
-      name: s.name ?? '',
-      status: (s.status as DashboardStack['status']) ?? 'building',
-      url: s.url ?? null,
-      created_at: s.created_at ?? '',
+      id: r.stack_id,
+      slug: r.stack_id,
+      name: r.name ?? '',
+      status: (r.status as DashboardStack['status']) ?? 'building',
+      url: derivedURL,
+      created_at: '',
       team_id: '',
-      env: (s.env as DashboardStack['env']) ?? 'production',
-      tier: (s.tier as DashboardStack['tier']) ?? 'free',
+      env: 'production', // GET /stacks/:slug does not return env scope
+      tier: (r.tier as DashboardStack['tier']) ?? 'free',
     }
     return { ok: true as const, stack }
   } catch (e: any) {
