@@ -62,6 +62,24 @@ export function clearToken(): void {
   localStorage.removeItem(TOKEN_KEY)
 }
 
+// D08 (P1): logout hook registry.
+//
+// The `logout()` function lives in this module (api/index.ts). The bootstrap
+// state that needs resetting lives in hooks/useDashboardCtx.ts. A direct
+// import would create a circular dependency (hooks → api is fine; api → hooks
+// is not). Instead, useDashboardCtx.ts calls registerLogoutHook(resetBootstrap)
+// once at module load, and logout() invokes every registered callback before
+// returning. This is the same decoupled pattern used for the 401 clearToken
+// behaviour in the `call` helper.
+const _logoutHooks: Array<() => void> = []
+
+/** Register a callback to run synchronously during logout (after server
+ *  invalidation, before clearToken). Idempotent — registering the same
+ *  function reference twice is a no-op. */
+export function registerLogoutHook(fn: () => void): void {
+  if (!_logoutHooks.includes(fn)) _logoutHooks.push(fn)
+}
+
 // ─── Low-level fetch ─────────────────────────────────────────────────────
 
 export class APIError extends Error {
@@ -340,6 +358,21 @@ function emptyStatus(): StatusPayload {
 }
 
 export async function logout(): Promise<{ ok: true }> {
+  // A03 (P1): server-side session invalidation — POST /auth/logout stores
+  // the JWT's jti in Redis so subsequent requests with the same bearer token
+  // are rejected by RequireAuth. We fire this BEFORE clearToken so the
+  // Authorization header is still present. On server error (network / Redis
+  // down) we proceed with client-side cleanup — the caller still considers
+  // the logout successful, and the token will auto-expire at most 24h later.
+  try {
+    await call<{ ok: boolean }>('/auth/logout', { method: 'POST' })
+  } catch {
+    // Fail-soft on server error — always clear the local token.
+  }
+  // D08 (P1): reset module-level state (bootstrapped flag + cached identity)
+  // so the next same-tab login performs a fresh /auth/me fetch. Registered by
+  // useDashboardCtx.ts at module load via registerLogoutHook(resetBootstrap).
+  for (const fn of _logoutHooks) fn()
   clearToken()
   // Drop the admin URL prefix on logout. A stale prefix in module-local
   // state would survive across a re-login by a different user (admin →

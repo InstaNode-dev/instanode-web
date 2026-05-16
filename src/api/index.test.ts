@@ -37,6 +37,7 @@ import {
   validatePromotion,
   createStack,
   fetchStackStatus,
+  registerLogoutHook,
 } from './index'
 // §10.21: FIXTURE_BILLING / FIXTURE_INVOICES imports retired. The 503
 // fallback paths in fetchBilling() and listInvoices() were removed —
@@ -148,6 +149,80 @@ describe('token storage', () => {
     const r = await logout()
     expect(r).toEqual({ ok: true })
     expect(getToken()).toBeNull()
+  })
+})
+
+// ─── logout() — server-side invalidation (A03) + bootstrap reset (D08) ───
+describe('logout() — A03 + D08', () => {
+  it('A03: calls POST /auth/logout before clearing the local token', async () => {
+    setToken('my-jwt-token')
+    const m = installFetch()
+    // Server returns ok
+    m.mockResolvedValueOnce(jsonResponse({ ok: true }))
+
+    await logout()
+
+    // Verify the server was called.
+    expect(m).toHaveBeenCalledTimes(1)
+    const [url, init] = m.mock.calls[0]
+    expect(String(url)).toContain('/auth/logout')
+    expect((init as RequestInit).method).toBe('POST')
+
+    // Token cleared after server call.
+    expect(getToken()).toBeNull()
+  })
+
+  it('A03: clears local token even when server returns 503 (fail-soft)', async () => {
+    setToken('expiring-token')
+    const m = installFetch()
+    // Server is down
+    m.mockRejectedValueOnce(new Error('network error'))
+
+    const r = await logout()
+    expect(r).toEqual({ ok: true }) // logout is always "successful" from UX perspective
+    expect(getToken()).toBeNull()   // local token must be cleared regardless
+  })
+
+  it('A03: sends Authorization header while token is still set (before clearToken)', async () => {
+    const token = 'bearer-to-revoke'
+    setToken(token)
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse({ ok: true }))
+
+    await logout()
+
+    const [, init] = m.mock.calls[0]
+    const headers = (init as RequestInit).headers
+    const authHeader = headers instanceof Headers
+      ? headers.get('Authorization')
+      : (headers as Record<string, string>)['Authorization']
+    expect(authHeader).toBe(`Bearer ${token}`)
+  })
+
+  it('D08: registerLogoutHook() callbacks are called on logout', async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse({ ok: true }))
+
+    let called = false
+    registerLogoutHook(() => { called = true })
+    setToken('tok')
+    await logout()
+
+    expect(called).toBe(true)
+  })
+
+  it('D08: registerLogoutHook() is idempotent (same fn registered twice → called once)', async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse({ ok: true }))
+
+    let callCount = 0
+    const fn = () => { callCount++ }
+    registerLogoutHook(fn)
+    registerLogoutHook(fn) // second registration must not double-count
+    setToken('tok')
+    await logout()
+
+    expect(callCount).toBe(1)
   })
 })
 
