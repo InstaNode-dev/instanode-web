@@ -18,12 +18,26 @@ import { useDashboardCtx } from '../hooks/useDashboardCtx'
 // FIX-U15 (W11): added hobby_plus (5 GB) and growth (10 GB), which were
 // missing — a hobby_plus or growth user previously hit the `?? 5` fallback,
 // which is the same as Pro's bar and made the upgrade math look wrong.
+// FIX-K (2026-05-16): pro was 5 GB (10x too low). Added anonymous/free/yearly
+// variants that were missing (fell through to ?? 5 fallback).
+// Values from plans.yaml storage_storage_mb / 1024 (binary MiB):
+//   anonymous/free: 10 MB = ~0.01 GB
+//   hobby / hobby_yearly: 512 MB = 0.5 GB
+//   hobby_plus / hobby_plus_yearly: 5120 MB = 5 GB
+//   pro / pro_yearly: 51200 MB = 50 GB
+//   growth / team: -1 unlimited, visual cap at 50 GB
 const TIER_LIMIT_GB: Record<string, number> = {
+  anonymous: 0.01,
+  free: 0.01,
   hobby: 0.5,
+  hobby_yearly: 0.5,
   hobby_plus: 5,
-  pro: 5,
-  growth: 10,
+  hobby_plus_yearly: 5,
+  pro: 50,
+  pro_yearly: 50,
+  growth: 50,
   team: 50,
+  team_yearly: 50,
 }
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000
 
@@ -134,8 +148,9 @@ export function OverviewPage() {
 
   // computed stats — no /overview endpoint exists, derived client-side
   const totalStorageMB = Math.round(resources.reduce((s, r) => s + r.storage_bytes, 0) / 1_000_000)
-  const tierLimitGB = TIER_LIMIT_GB[tier] ?? 5
-  const tierLimitMB = tierLimitGB * 1000
+  const tierLimitGB = TIER_LIMIT_GB[tier] ?? 50
+  // FIX-K (2026-05-16): plans.yaml uses binary MiB; use *1024 (was *1000).
+  const tierLimitMB = tierLimitGB * 1024
   const storagePct = tierLimitMB > 0 ? Math.round((totalStorageMB / tierLimitMB) * 100) : 0
   const conn = resources.reduce((s, r) => s + (r.connections_in_use ?? 0), 0)
   const connLim = resources.reduce((s, r) => s + (r.connections_limit ?? 0), 0)
@@ -209,7 +224,7 @@ export function OverviewPage() {
                 data-testid={`recently-active-row-${r.id}`}
                 style={{ gridTemplateColumns: '1.4fr 0.5fr 0.55fr 1fr 0.6fr 28px' }}
               >
-                <Link to={`/app/resources/${r.id}`} className="res-name">
+                <Link to={`/app/resources/${r.token}`} className="res-name">
                   <ResourceIcon type={r.resource_type} />
                   <div className="info">
                     <span
@@ -225,7 +240,11 @@ export function OverviewPage() {
                 </Link>
                 <TierPill tier={r.tier} />
                 <EnvPill env={r.env} />
-                <UsageBar used={Math.round(r.storage_bytes / 1_000_000)} limit={Math.round(r.storage_limit_bytes / 1_000_000)} format={(a, b) => `${a} / ${b}`} />
+                <UsageBar
+                  used={Math.round(r.storage_bytes / 1_000_000)}
+                  limit={r.storage_limit_bytes === -1 ? 0 : Math.round(r.storage_limit_bytes / 1_000_000)}
+                  format={(a, b) => r.storage_limit_bytes === -1 ? `${a} / ∞` : `${a} / ${b}`}
+                />
                 <RelTime at={r.created_at} />
                 <button className="res-action" aria-label="actions">⋯</button>
               </div>

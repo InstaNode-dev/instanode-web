@@ -55,7 +55,8 @@ const TIERS: {
     key: 'hobby',
     name: 'Hobby',
     monthly: { price: '$9', sub: '/ mo' },
-    yearly: { price: '$8.25', sub: '/ mo billed yearly', saveLabel: 'save $9/yr' },
+    // FIX-K (2026-05-16): plans.yaml hobby_yearly=9000c=$90/yr=$7.50/mo. Was $8.25/save $9/yr.
+    yearly: { price: '$7.50', sub: '/ mo billed yearly', saveLabel: 'save $18/yr' },
     cta: 'Start hobby →',
     // W12 C1: CTAs go to /app/checkout (under AuthGate) instead of the
     // unregistered /checkout path. The auth bounce sends anon visitors
