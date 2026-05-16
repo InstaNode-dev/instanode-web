@@ -480,20 +480,21 @@ export async function deleteResource(id: string): Promise<void> {
 // (5xx, network) propagate so the UI can surface a real banner.
 //
 // Status semantics:
-//   POST /api/v1/resources/:id/pause   → { ok, item: <resource with status='paused'> }
-//   POST /api/v1/resources/:id/resume  → { ok, item: <resource with status='active'> }
+//   POST /api/v1/resources/:id/pause   → { ok, resource: <resource with status='paused'> }
+//   POST /api/v1/resources/:id/resume  → { ok, resource: <resource with status='active'> }
 //
-// We re-use the existing GetResp adapter so the returned Resource mirrors
-// what GET /:id would have produced — callers can replace state directly
-// without a second fetch.
+// Note: the envelope key is "resource" (not "item") — the Go handler returns
+// `fiber.Map{"resource": resourceToMap(resource)}`. Reading r.item returns
+// undefined, adaptResource(undefined) throws TypeError, and the UI shows an
+// error even though the server-side pause/resume succeeded (D02-02 fix).
 export async function pauseResource(id: string): Promise<{ ok: true; resource: Resource }> {
-  const r = await call<ResourceGetResp>(`/api/v1/resources/${id}/pause`, { method: 'POST' })
-  return { ok: true, resource: adaptResource(r.item) }
+  const r = await call<{ ok: boolean; resource: any }>(`/api/v1/resources/${id}/pause`, { method: 'POST' })
+  return { ok: true, resource: adaptResource(r.resource) }
 }
 
 export async function resumeResource(id: string): Promise<{ ok: true; resource: Resource }> {
-  const r = await call<ResourceGetResp>(`/api/v1/resources/${id}/resume`, { method: 'POST' })
-  return { ok: true, resource: adaptResource(r.item) }
+  const r = await call<{ ok: boolean; resource: any }>(`/api/v1/resources/${id}/resume`, { method: 'POST' })
+  return { ok: true, resource: adaptResource(r.resource) }
 }
 
 export async function rotateResource(id: string): Promise<{ ok: true; connection_url: string; resource: Resource }> {

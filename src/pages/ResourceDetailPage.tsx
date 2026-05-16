@@ -215,8 +215,16 @@ export function ResourceDetailPage() {
               <Kv k="tier" v={r.tier} />
               <Kv k="env" v={r.env} />
               <Kv k="name" v={r.name?.trim() ? r.name : displayName(null, r.resource_type)} />
-              <Kv k="storage" v={`${(r.storage_bytes / 1_000_000).toFixed(1)} / ${(r.storage_limit_bytes / 1_000_000).toFixed(0)} MB · ${Math.round((r.storage_bytes / r.storage_limit_bytes) * 100)}%`} />
-              <Kv k="connections" v={`${r.connections_in_use ?? '—'} / ${r.connections_limit ?? '—'}`} />
+              <Kv k="storage" v={(() => {
+                const usedMB = (r.storage_bytes / 1_000_000).toFixed(1)
+                if (r.storage_limit_bytes === -1) return `${usedMB} MB / ∞ (unlimited)`
+                const limitMB = (r.storage_limit_bytes / 1_000_000).toFixed(0)
+                const pct = r.storage_limit_bytes > 0
+                  ? `${Math.round((r.storage_bytes / r.storage_limit_bytes) * 100)}%`
+                  : '—'
+                return `${usedMB} / ${limitMB} MB · ${pct}`
+              })()} />
+              <Kv k="connections" v={`${r.connections_in_use ?? '—'} / ${r.connections_limit == null ? '—' : r.connections_limit === -1 ? '∞' : r.connections_limit}`} />
               <Kv k="cloud_vendor" v={`${r.cloud_vendor ?? '—'} · ${r.country_code ?? '—'}`} />
               <Kv k="expires_at" v={r.expires_at ?? 'never · claimed'} />
               <Kv k="created_at" v={r.created_at} />
