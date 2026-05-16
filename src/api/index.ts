@@ -9,7 +9,7 @@
 
 import type {
   Resource, DashboardStack, StackStatus,
-  DashboardDeployment, DeploymentStatus,
+  DashboardDeployment, DeploymentStatus, DeploymentFailure,
   DashboardTeam, BillingDetails, Invoice,
   TeamMember, TeamInvitation, AuthMeResponse, VaultEntry, ActivityItem,
   AdminCustomerListResponse, AdminCustomerDetailResponse,
@@ -751,6 +751,17 @@ type DeploymentRespItem = {
   reminders_sent?: number
   make_permanent_url?: string
   extend_ttl_url?: string
+  // Phase 0 Failure Autopsy — present only on failed deploys where the
+  // backend has captured diagnostics. Absent on healthy / building / stopped
+  // deploys, and on failed deploys where autopsy is still in flight.
+  failure?: {
+    reason?: string
+    exit_code?: number | null
+    event?: string
+    last_lines?: string[]
+    hint?: string
+    occurred_at?: string
+  }
 }
 
 type DeploymentsListResp = {
@@ -823,6 +834,29 @@ function adaptDeployment(d: DeploymentRespItem): DashboardDeployment {
     reminders_sent: typeof d.reminders_sent === 'number' ? d.reminders_sent : undefined,
     make_permanent_url: d.make_permanent_url,
     extend_ttl_url: d.extend_ttl_url,
+    // Phase 0 Failure Autopsy. Validate that the raw server payload has
+    // the minimum required fields (reason + hint) before surfacing it.
+    // Absent, malformed, or incomplete payloads are dropped so the UI
+    // renders the "diagnostics pending" fallback instead of crashing.
+    failure: adaptFailure(d.failure),
+  }
+}
+
+function adaptFailure(
+  raw: DeploymentRespItem['failure'],
+): DeploymentFailure | undefined {
+  if (!raw) return undefined
+  // Both `reason` and `hint` are required for the panel to render
+  // meaningfully. Drop the payload if either is missing — the page
+  // renders the "diagnostics pending" state in that case.
+  if (!raw.reason || !raw.hint) return undefined
+  return {
+    reason: raw.reason as DeploymentFailure['reason'],
+    exit_code: raw.exit_code ?? null,
+    event: raw.event ?? '',
+    last_lines: Array.isArray(raw.last_lines) ? raw.last_lines : [],
+    hint: raw.hint,
+    occurred_at: raw.occurred_at ?? '',
   }
 }
 

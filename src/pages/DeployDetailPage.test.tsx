@@ -779,3 +779,124 @@ describe('DeployDetailPage — Audit tab (W12 H12)', () => {
     expect((button!.textContent ?? '').toLowerCase()).not.toContain('blocked')
   })
 })
+
+// ─── DeployDetailPage — Phase 0 Failure Autopsy panel integration ─────────
+//
+// We drive the full page and assert the panel appears (or not) based on the
+// deployment's status + failure payload. These tests verify:
+//   1. No panel on a healthy deployment.
+//   2. "Diagnostics pending" banner on status=failed without a failure payload.
+//   3. Full autopsy panel on status=failed with a failure payload — heading,
+//      hint, event, exit_code, log toggle.
+//   4. Panel does not appear for stacks (only single-container deployments).
+
+import type { DeploymentFailure } from '../api'
+
+describe('DeployDetailPage — Failure Autopsy panel (Phase 0)', () => {
+  function failurePayload(overrides: Partial<DeploymentFailure> = {}): DeploymentFailure {
+    return {
+      reason: 'CrashLoopBackOff',
+      exit_code: 1,
+      event: 'Back-off restarting failed container',
+      last_lines: ['Error: Cannot connect to database', 'Process exited with code 1'],
+      hint: 'Your container is repeatedly crashing on startup. Check the DATABASE_URL env var and make sure the database is reachable.',
+      occurred_at: '2026-05-16T09:15:00Z',
+      ...overrides,
+    }
+  }
+
+  it('does NOT show the autopsy panel when status is healthy/running', async () => {
+    mockGetDeployment.mockResolvedValueOnce({
+      ok: true,
+      deployment: deployment({ status: 'running' }),
+    })
+    const { container } = renderPage(`/deployments/${deployment().id}`)
+    await waitFor(() => expect(mockGetDeployment).toHaveBeenCalled())
+    await waitFor(() => expect(screen.getByTestId('deploy-detail-name')).toBeTruthy())
+    expect(container.querySelector('[data-testid="failure-autopsy-panel"]')).toBeNull()
+    expect(container.querySelector('[data-testid="failure-autopsy-pending"]')).toBeNull()
+  })
+
+  it('shows "diagnostics pending" when status=failed but no failure payload', async () => {
+    mockGetDeployment.mockResolvedValueOnce({
+      ok: true,
+      deployment: deployment({ status: 'failed' }),
+    })
+    renderPage(`/deployments/${deployment().id}`)
+    await waitFor(() => expect(mockGetDeployment).toHaveBeenCalled())
+    // The pending banner must appear ABOVE the tab content.
+    await waitFor(() => expect(screen.getByTestId('failure-autopsy-pending')).toBeTruthy())
+    // Full panel must NOT appear.
+    expect(screen.queryByTestId('failure-autopsy-panel')).toBeNull()
+    // Banner text includes "diagnostics pending"
+    expect(screen.getByTestId('failure-autopsy-pending').textContent ?? '').toMatch(
+      /diagnostics pending/i,
+    )
+  })
+
+  it('shows the full autopsy panel when status=failed with a failure payload', async () => {
+    const fp = failurePayload()
+    mockGetDeployment.mockResolvedValueOnce({
+      ok: true,
+      deployment: deployment({ status: 'failed', failure: fp } as any),
+    })
+    renderPage(`/deployments/${deployment().id}`)
+    await waitFor(() => expect(mockGetDeployment).toHaveBeenCalled())
+
+    const panel = await waitFor(() => screen.getByTestId('failure-autopsy-panel'))
+    expect(panel).toBeTruthy()
+
+    // Heading must be humanised (not the raw 'CrashLoopBackOff' key).
+    const heading = screen.getByTestId('failure-autopsy-heading')
+    expect(heading.textContent).toContain('crash-loop')
+
+    // Hint renders as the primary explanation.
+    expect(screen.getByTestId('failure-autopsy-hint').textContent).toContain(
+      'repeatedly crashing',
+    )
+
+    // k8s event block
+    expect(screen.getByTestId('failure-autopsy-event').textContent).toContain(
+      'Back-off restarting',
+    )
+
+    // exit_code
+    expect(screen.getByTestId('failure-autopsy-exit-code').textContent).toContain('1')
+
+    // Log toggle — collapsed by default, logs shown after click
+    const toggle = screen.getByTestId('failure-autopsy-log-toggle')
+    expect(toggle).toBeTruthy()
+    expect(screen.queryByTestId('failure-autopsy-log-block')).toBeNull()
+    fireEvent.click(toggle)
+    await waitFor(() => expect(screen.getByTestId('failure-autopsy-log-block')).toBeTruthy())
+    expect(screen.getByTestId('failure-autopsy-log-block').textContent).toContain(
+      'Cannot connect to database',
+    )
+  })
+
+  it('panel does not appear for legacy stack deploys (stacks have no failure field)', async () => {
+    // Deployment lookup returns null → falls through to stack lookup.
+    mockGetDeployment.mockResolvedValueOnce({ ok: true, deployment: null })
+    mockListStacks.mockResolvedValueOnce({
+      ok: true,
+      total: 1,
+      items: [{
+        id: 'stk-failed',
+        slug: 'demo-failed',
+        name: 'demo',
+        status: 'failed',
+        url: null,
+        created_at: 'x',
+        team_id: '',
+        env: 'production',
+        tier: 'pro',
+      } as any],
+    })
+    const { container } = renderPage(`/deployments/stk-failed`)
+    await waitFor(() => expect(mockListStacks).toHaveBeenCalled())
+    await waitFor(() => expect(screen.getByTestId('deploy-detail-name')).toBeTruthy())
+    // No autopsy panel for stack-kind deploys.
+    expect(container.querySelector('[data-testid="failure-autopsy-panel"]')).toBeNull()
+    expect(container.querySelector('[data-testid="failure-autopsy-pending"]')).toBeNull()
+  })
+})
