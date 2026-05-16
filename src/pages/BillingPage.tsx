@@ -13,7 +13,8 @@ import { useDashboardCtx } from '../hooks/useDashboardCtx'
 // plan endpoint returns 400 no_subscription for them — they upgrade through
 // the regular createCheckout grid below instead. Showing the button for
 // those tiers would be a dead click.
-const TIERS_WITH_SUBSCRIPTION = new Set<string>(['hobby', 'pro', 'team', 'growth'])
+// FIX-K (2026-05-16): hobby_plus added — subscribers can now use in-place Change-plan modal.
+const TIERS_WITH_SUBSCRIPTION = new Set<string>(['hobby', 'hobby_plus', 'pro', 'team', 'growth'])
 
 // Next-tier-up suggestion the Change-plan modal opens onto. Mirrors the
 // LIMITS.nextTier values further down but typed as ChangePlanTier — the
@@ -21,6 +22,8 @@ const TIERS_WITH_SUBSCRIPTION = new Set<string>(['hobby', 'pro', 'team', 'growth
 // tier set, so we keep them separate to avoid coercion.
 const NEXT_CHANGE_PLAN_TIER: Record<string, ChangePlanTier> = {
   hobby: 'pro',
+  // FIX-K (2026-05-16): hobby_plus was missing.
+  hobby_plus: 'pro',
   pro: 'team',
   growth: 'team',
   // team has no next tier — the button won't render for team users
@@ -109,7 +112,8 @@ const LIMITS: Record<string, { label: string; limits: PlanLimits; nextTier?: Tie
   pro: {
     label: 'Pro',
     nextTier: 'team',
-    limits: { postgres_mb: 5120, redis_mb: 256, mongodb_mb: 2048, deployments: 10, webhooks: 10000, team_seats: 5 },
+    // FIX-K (2026-05-16): 2026-05-15 storage bump. Was: postgres_mb: 5120, redis_mb: 256, mongodb_mb: 2048.
+    limits: { postgres_mb: 10240, redis_mb: 512, mongodb_mb: 5120, deployments: 10, webhooks: 10000, team_seats: 5 },
   },
   team: {
     label: 'Team',
@@ -127,6 +131,8 @@ function gridTierFromTier(tier: string): TierKey {
   if (tier === 'hobby' || tier === 'hobby_plus' || tier === 'pro' || tier === 'team' || tier === 'free') {
     return tier
   }
+  // FIX-K (2026-05-16): growth maps to pro (nearest grid tier).
+  if (tier === 'growth') return 'pro'
   // anonymous + unknown → free
   return 'free'
 }
