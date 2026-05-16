@@ -185,7 +185,7 @@ export function ResourcesPage() {
             ))
           : filtered.map((r) => (
               <Link
-                to={`/resources/${r.id}`}
+                to={`/resources/${r.token}`}
                 key={r.id}
                 className="table-row"
                 style={{ gridTemplateColumns: '1.6fr 70px 80px 1fr 80px 90px 80px', textDecoration: 'none', color: 'inherit' }}
@@ -228,11 +228,11 @@ export function ResourcesPage() {
                 <EnvPill env={r.env} />
                 <UsageBar
                   used={Math.round(r.storage_bytes / 1_000_000)}
-                  limit={Math.round(r.storage_limit_bytes / 1_000_000)}
-                  format={(a, b) => `${a} / ${b} MB`}
+                  limit={r.storage_limit_bytes === -1 ? 0 : Math.round(r.storage_limit_bytes / 1_000_000)}
+                  format={(a, b) => r.storage_limit_bytes === -1 ? `${a} / ∞ MB` : `${a} / ${b} MB`}
                 />
                 <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-dim)' }}>
-                  {r.connections_in_use ?? '—'} / {r.connections_limit ?? '—'}
+                  {r.connections_in_use ?? '—'} / {r.connections_limit == null ? '—' : r.connections_limit === -1 ? '∞' : r.connections_limit}
                 </span>
                 <RelTime at={r.created_at} />
                 <span onClick={(e) => e.preventDefault()}>
