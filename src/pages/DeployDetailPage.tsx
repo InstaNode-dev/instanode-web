@@ -1036,7 +1036,49 @@ const VAULT_REF_RE = /^vault:\/\/(?:[a-zA-Z0-9_-]+\/)?[A-Z_][A-Z0-9_]*$/
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
+// ENV_VAR_MASK_DISPLAY is the placeholder shown in the value cell when a row
+// is masked. Uses bullet characters so screen-readers narrate "masked" rather
+// than reading a meaningless string.
+const ENV_VAR_MASK_DISPLAY = '••••••••'
+
+// ENV_VAR_REDACTED_SENTINEL is the value the API returns when it has already
+// redacted a secret server-side (P0 fix in deploy_env_redact.go). When the
+// API returns "***" we know the value is secret; the reveal toggle has
+// nothing to show and is disabled.
+const ENV_VAR_REDACTED_SENTINEL = '***'
+
+// SECRET_KEY_FRAGMENTS — uppercase substrings that classify an env-var key
+// as secret. Mirrors the server-side heuristic in deploy_env_redact.go so
+// the two layers agree on which keys are sensitive.
+const SECRET_KEY_FRAGMENTS = [
+  'SECRET', 'PASSWORD', 'PASSWD', 'PWD', 'TOKEN', '_KEY', 'APIKEY',
+] as const
+
+// SECRET_KEY_SUFFIXES — uppercase suffixes that classify an env-var key as
+// secret (mirrors deploy_env_redact.go).
+const SECRET_KEY_SUFFIXES = ['URL', 'URI', 'DSN'] as const
+
+// isSensitiveEnvKey returns true when the key matches the secret heuristic.
+// Defence-in-depth layer 2: even if the API sends a plaintext value for a
+// key that should be masked (e.g. during a rollout window or for manually-
+// set inline keys that don't go through resource_bindings), the dashboard
+// still hides it by default.
+function isSensitiveEnvKey(key: string): boolean {
+  const upper = key.toUpperCase()
+  for (const frag of SECRET_KEY_FRAGMENTS) {
+    if (upper.includes(frag)) return true
+  }
+  for (const suf of SECRET_KEY_SUFFIXES) {
+    if (upper.endsWith(suf)) return true
+  }
+  return false
+}
+
 function EnvVars({ view }: { view: DeployView }) {
+  // revealed tracks which env-var keys have had their value revealed via the
+  // toggle button. Keyed by env-var key string; absent = masked.
+  const [revealed, setReveal] = useState<Record<string, boolean>>({})
+
   // Stack view doesn't surface env_vars on the listStacks() payload yet;
   // keep the legacy hint for that path. Deployment view parses the real
   // env_vars map from the API response.
@@ -1088,6 +1130,21 @@ function EnvVars({ view }: { view: DeployView }) {
         </div>
         {entries.map(([k, v]) => {
           const isVaultRef = VAULT_REF_RE.test(v)
+          // A value is already redacted server-side when the API returned "***".
+          const isServerRedacted = v === ENV_VAR_REDACTED_SENTINEL
+          // Mask by default when the key matches the secret heuristic OR the
+          // API has already redacted the value. vault refs are excluded (they
+          // have no embedded credentials and need to be readable for debugging).
+          const shouldMaskByDefault = !isVaultRef && (isServerRedacted || isSensitiveEnvKey(k))
+          const isCurrentlyRevealed = !!revealed[k]
+          // A value can only be "revealed" when the API actually returned it
+          // (i.e. not server-redacted). For server-redacted values the reveal
+          // button is disabled — there is nothing to show.
+          const canReveal = shouldMaskByDefault && !isServerRedacted
+
+          const displayValue =
+            shouldMaskByDefault && !isCurrentlyRevealed ? ENV_VAR_MASK_DISPLAY : v
+
           return (
             <div
               key={k}
@@ -1104,10 +1161,16 @@ function EnvVars({ view }: { view: DeployView }) {
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
                   whiteSpace: 'nowrap',
+                  // No title tooltip for masked/sensitive rows — avoids over-the-
+                  // shoulder leak even when the reveal toggle is not clicked.
                 }}
-                title={v}
+                // Only show the full value as a tooltip when the row is not
+                // considered sensitive (e.g. NODE_ENV, PORT). For sensitive rows
+                // the title is omitted or shows the masked placeholder.
+                title={shouldMaskByDefault ? undefined : v}
+                data-testid={`env-var-value-${k}`}
               >
-                {v}
+                {displayValue}
               </span>
               {isVaultRef ? (
                 <span
@@ -1117,6 +1180,33 @@ function EnvVars({ view }: { view: DeployView }) {
                 >
                   vault
                 </span>
+              ) : shouldMaskByDefault ? (
+                // Reveal / hide toggle for sensitive non-vault rows.
+                <button
+                  data-testid={`env-var-reveal-${k}`}
+                  disabled={!canReveal}
+                  onClick={() =>
+                    setReveal((prev) => ({ ...prev, [k]: !prev[k] }))
+                  }
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    cursor: canReveal ? 'pointer' : 'default',
+                    fontSize: 10.5,
+                    color: canReveal ? 'var(--text-dim)' : 'var(--text-faint)',
+                    padding: '2px 4px',
+                  }}
+                  title={
+                    !canReveal
+                      ? 'Value is redacted server-side — use the API or CLI to retrieve it'
+                      : isCurrentlyRevealed
+                        ? 'Hide value'
+                        : 'Reveal value'
+                  }
+                  aria-label={isCurrentlyRevealed ? `Hide value for ${k}` : `Reveal value for ${k}`}
+                >
+                  {isCurrentlyRevealed ? 'hide' : 'reveal'}
+                </button>
               ) : (
                 <span style={{ fontSize: 10.5, color: 'var(--text-faint)' }}>inline</span>
               )}

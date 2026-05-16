@@ -306,6 +306,109 @@ describe('DeployDetailPage — env_vars panel parses + renders real rows', () =>
     envTab.click()
     await waitFor(() => expect(screen.getByTestId('env-vars-empty')).toBeTruthy())
   })
+
+  // ── P0 security fix: secret values masked by default ──────────────────────
+  //
+  // Defence-in-depth layer 2 (dashboard side). The API (layer 1) redacts
+  // credential-bearing values server-side. The dashboard provides a second
+  // layer: any non-vault env var whose key matches the secret heuristic is
+  // shown as bullets by default with a per-row reveal toggle.
+  it('masks secret-keyed env vars by default and shows a reveal button', async () => {
+    mockGetDeployment.mockResolvedValueOnce({
+      ok: true,
+      deployment: deployment({
+        env_vars: {
+          // Secret key heuristic — masked by default.
+          DATABASE_URL: '***',       // server-redacted sentinel (API layer 1)
+          SESSION_TOKEN: 'tok_abc',  // inline token — key heuristic catches it
+          // Plain innocuous var — should NOT be masked.
+          NODE_ENV: 'production',
+          PORT: '8080',
+        },
+      }),
+    })
+
+    const { container } = renderPage(`/deployments/${deployment().id}`)
+    await waitFor(() => expect(mockGetDeployment).toHaveBeenCalled())
+    const envTab = await waitFor(() => screen.getByText('Env vars'))
+    envTab.click()
+    await waitFor(() => expect(screen.getByTestId('env-vars-panel')).toBeTruthy())
+
+    // DATABASE_URL — server-redacted: value cell shows bullets, no reveal.
+    const dbValueEl = container.querySelector('[data-testid="env-var-value-DATABASE_URL"]')
+    expect(dbValueEl).toBeTruthy()
+    expect(dbValueEl!.textContent).toBe('••••••••')
+    // Reveal button exists but is disabled (server-redacted = nothing to reveal).
+    const dbReveal = container.querySelector('[data-testid="env-var-reveal-DATABASE_URL"]')
+    expect(dbReveal).toBeTruthy()
+    expect((dbReveal as HTMLButtonElement).disabled).toBe(true)
+
+    // SESSION_TOKEN — inline value, key heuristic: masked but revealable.
+    const tokenValueEl = container.querySelector('[data-testid="env-var-value-SESSION_TOKEN"]')
+    expect(tokenValueEl).toBeTruthy()
+    expect(tokenValueEl!.textContent).toBe('••••••••')
+    const tokenReveal = container.querySelector('[data-testid="env-var-reveal-SESSION_TOKEN"]')
+    expect(tokenReveal).toBeTruthy()
+    expect((tokenReveal as HTMLButtonElement).disabled).toBe(false)
+
+    // NODE_ENV — innocuous: value is shown plaintext, no reveal button.
+    const nodeEnvEl = container.querySelector('[data-testid="env-var-value-NODE_ENV"]')
+    expect(nodeEnvEl).toBeTruthy()
+    expect(nodeEnvEl!.textContent).toBe('production')
+    expect(container.querySelector('[data-testid="env-var-reveal-NODE_ENV"]')).toBeNull()
+  })
+
+  it('reveals the value when the reveal button is clicked', async () => {
+    mockGetDeployment.mockResolvedValueOnce({
+      ok: true,
+      deployment: deployment({
+        env_vars: {
+          SESSION_TOKEN: 'tok_live_abc',
+        },
+      }),
+    })
+
+    const { container } = renderPage(`/deployments/${deployment().id}`)
+    await waitFor(() => expect(mockGetDeployment).toHaveBeenCalled())
+    const envTab = await waitFor(() => screen.getByText('Env vars'))
+    envTab.click()
+    await waitFor(() => expect(screen.getByTestId('env-vars-panel')).toBeTruthy())
+
+    // Initially masked.
+    const valueEl = container.querySelector('[data-testid="env-var-value-SESSION_TOKEN"]')
+    expect(valueEl!.textContent).toBe('••••••••')
+
+    // Click the reveal button.
+    const revealBtn = container.querySelector('[data-testid="env-var-reveal-SESSION_TOKEN"]') as HTMLButtonElement
+    expect(revealBtn).toBeTruthy()
+    revealBtn.click()
+
+    // After reveal, value is visible.
+    await waitFor(() => expect(valueEl!.textContent).toBe('tok_live_abc'))
+  })
+
+  it('vault refs are NOT masked (no credentials embedded)', async () => {
+    mockGetDeployment.mockResolvedValueOnce({
+      ok: true,
+      deployment: deployment({
+        env_vars: {
+          DATABASE_URL: 'vault://production/DATABASE_URL',
+        },
+      }),
+    })
+
+    const { container } = renderPage(`/deployments/${deployment().id}`)
+    await waitFor(() => expect(mockGetDeployment).toHaveBeenCalled())
+    const envTab = await waitFor(() => screen.getByText('Env vars'))
+    envTab.click()
+    await waitFor(() => expect(screen.getByTestId('env-vars-panel')).toBeTruthy())
+
+    // Vault refs shown as-is: no masking, vault badge present, no reveal button.
+    const valueEl = container.querySelector('[data-testid="env-var-value-DATABASE_URL"]')
+    expect(valueEl!.textContent).toBe('vault://production/DATABASE_URL')
+    expect(screen.getByTestId('env-var-vault-badge-DATABASE_URL')).toBeTruthy()
+    expect(container.querySelector('[data-testid="env-var-reveal-DATABASE_URL"]')).toBeNull()
+  })
 })
 
 // ─── DeployDetailPage — bound resources surface from env_vars ────────────
