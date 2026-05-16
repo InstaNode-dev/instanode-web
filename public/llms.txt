@@ -1,624 +1,142 @@
 # instanode.dev
 
-instanode.dev is a zero-setup infrastructure provisioning API for developers and AI coding agents. Provision real, working infrastructure — databases, caches, queues, and full app stacks — with a single HTTP call. No account required. No Docker. No configuration.
+> Zero-friction developer infrastructure for AI agents. Provision real Postgres, Redis, MongoDB, NATS, S3-compatible object storage (DigitalOcean Spaces), webhooks, and container deploys via single HTTP calls — no signup, no API key, no Docker, no cloud account. The first 24 hours are anonymous; claim a resource to keep it past then ($9/mo).
 
-Resources are provisioned anonymously (24h expiry) or permanently (with an account). Connection strings use standard protocols (postgres://, redis://, mongodb://, nats://) so any standard client library works directly. No SDK required.
+This file follows the llms.txt convention (https://llmstxt.org). Every HTML route on `https://instanode.dev` has a parallel `.md` mirror at the same path with a `.md` suffix — e.g. `/use-cases/foo` is served as HTML and `/use-cases/foo.md` is the same content in plain markdown. The aggregated full text of every page is at [/llms-full.txt](https://instanode.dev/llms-full.txt) for one-shot consumption.
 
-## Base URL
+## Example prompt (what a user says to their coding agent)
 
-https://instanode.dev
+A user who wants to try instanode.dev just tells their agent, in plain language, to use it. No setup instructions needed — the agent reads this file and the API does the rest. Canonical example (also shown on the homepage):
 
-## Authentication
+> Build me a tiny expense tracker — Postgres backing store, a FastAPI app on top, and deploy it to a public URL I can hit from my phone. Use instanode.dev — no signup, provision whatever you need.
 
-No auth required for anonymous provisioning. For permanent resources, pass a Bearer session JWT:
-  Authorization: Bearer <session_jwt>
+On a prompt like that, the agent should: `POST /db/new` for Postgres, write the app + Dockerfile, `tar` it, `POST /deploy/new` with the `upgrade_jwt` from the db call, then hand the user the `*.deployment.instanode.dev` URL. Surface the claim link from the response so the user can keep it past 24h.
 
-Session JWTs are issued by /auth/github, /auth/google, or the CLI device flow (/auth/cli).
-JWT expiry: 24 hours.
+## API endpoints
 
-Unauthenticated requests fall back to anonymous tier automatically — no error.
+All accept `POST` against `https://api.instanode.dev`. No authentication header required for the anonymous tier, but every request body **must** include `name` (see below). Response shape: `{ok, token, connection_url, internal_url, tier, limits, note, upgrade_jwt, upgrade_url}` for db/cache/nosql/queue — where `upgrade_url` is the human-readable claim link (e.g. `https://instanode.dev/start?t=<jwt>`) and `upgrade_jwt` is the raw JWT for programmatic use. `/webhook/new` returns `receive_url` (no internal_url). `/storage/new` adds `endpoint`, `access_key_id`, `secret_access_key`, `prefix` alongside `connection_url`.
 
----
+### Required `name` field (all provisioning endpoints)
 
-## MCP Server (Claude Code / AI agents)
+Every provisioning endpoint — `/db/new`, `/cache/new`, `/nosql/new`, `/queue/new`, `/storage/new`, `/webhook/new`, `/deploy/new`, `/stacks/new` — **requires** a `name` on the request. It is the human-readable label shown in the dashboard and in `GET /api/v1/resources`. An empty JSON body is no longer accepted.
 
-Install once globally:
-  npx @instant/mcp
+- JSON-body endpoints (`/db/new`, `/cache/new`, `/nosql/new`, `/queue/new`, `/storage/new`, `/webhook/new`, `/stacks/new`) take `name` as a JSON string field.
+- `/deploy/new` is multipart — pass `name` as a form field (`-F "name=..."`).
+- **Validation:** 1–64 characters, must match `^[A-Za-z0-9][A-Za-z0-9 _-]*$` — start with a letter or digit; remaining characters may be letters, digits, spaces, underscores, or hyphens.
+- Omitting `name` returns `400 {"error":"name_required"}`.
+- Supplying a value that fails validation returns `400 {"error":"invalid_name"}`.
 
-Or add to Claude Code settings:
-  { "mcpServers": { "instant": { "command": "npx", "args": ["@instant/mcp"] } } }
+Pick a descriptive name per resource (e.g. `"prod-db"`, `"sessions-cache"`, `"events-queue"`) so the user can tell resources apart later.
 
-Available MCP tools:
-  provision_database     — calls POST /db/new
-  provision_cache        — calls POST /cache/new
-  provision_document_db  — calls POST /nosql/new
-  provision_queue        — calls POST /queue/new
-  deploy_stack           — calls POST /stacks/new
-  list_my_resources      — calls GET /api/v1/resources (requires auth)
+- **`POST /db/new`** — Postgres database. Requires `name`. `pgvector` pre-installed (HNSW + IVFFlat indexes work). Returns `connection_url` in the form `postgres://USER:PASS@HOST:PORT/DB`. Use any standard Postgres client / driver.
+- **`POST /cache/new`** — Redis. Requires `name`. Per-token ACL'd user + namespaced keyspace. Returns `connection_url` in the form `redis://:PASS@HOST:PORT/DB`.
+- **`POST /nosql/new`** — MongoDB. Requires `name`. Per-token user scoped to a single database. Returns a `mongodb://...` connection URL. The per-token connection budget is documented in the response `limits.connections` field (e.g. anonymous = 2). The underlying shared-tenant pod admits up to 20 simultaneous connections across all tokens, so plan agents to stay well below their per-token allocation under burst.
+- **`POST /queue/new`** — NATS JetStream. Requires `name`. Returns `connection_url` (`nats://pool-<uuid>@host:4222`) with per-account subject isolation baked into the URL. No separate creds file — pass the connection_url directly to any NATS client. Durable streams, request/reply, pub/sub.
+- **`POST /storage/new`** — S3-compatible bucket prefix backed by DigitalOcean Spaces (`nyc3`). Requires `name`. Returns `connection_url` (`https://s3.instanode.dev/instant-shared/<prefix>/`) plus `endpoint`, `access_key_id`, `secret_access_key`, and `prefix` for SDK use. Configure an S3 client with `endpoint`, `access_key_id`, `secret_access_key`, bucket=`instant-shared`, and constrain object keys to start with `prefix`. Anonymous-tier objects are auto-deleted at 24h by a bucket lifecycle rule enforced at the storage layer. See [/use-cases/screenshot-evidence-archive.md](https://instanode.dev/use-cases/screenshot-evidence-archive.md) for a worked example.
+- **`POST /webhook/new`** — Public receive URL that captures any HTTP method. Requires `name`. Returns `receive_url`. Inspect received payloads at `GET https://api.instanode.dev/api/v1/webhooks/{token}/requests`.
+- **`POST /deploy/new`** — Container deploy. Multipart form: `tarball=@app.tar.gz` (required, gzipped tar containing Dockerfile + source, ≤50 MB) and `name=my-app` (**required** — same 1–64 char `^[A-Za-z0-9][A-Za-z0-9 _-]*$` rule), plus optional `port=8080`, `env=production` (scope), and `env_vars={"KEY":"VAL"}` (JSON string of env vars injected into the pod). Build runs in-cluster via kaniko (~30–90s); call returns `202` with `status=building`, then `status=healthy` once the URL on `*.deployment.instanode.dev` is live with a Let's Encrypt cert. **Requires a JWT** — `Authorization: Bearer <upgrade_jwt from /db/new or /claim>`.
+- **`POST /stacks/new`** — Multi-service deploy. Multipart form: an `instant.yaml` manifest plus one tarball per service, and `name=my-stack` (**required** — same 1–64 char `^[A-Za-z0-9][A-Za-z0-9 _-]*$` rule). **Requires a JWT.**
 
----
+## Anonymous tier limits (free, 24-hour TTL)
 
-## Provisioning Endpoints (Live)
+- Postgres: 10 MB storage, 2 simultaneous connections.
+- Redis: 5 MB total.
+- MongoDB: 5 MB storage, 2 connections per token (shared pod cap up to 20 across all anonymous tokens).
+- NATS: 1024 MB JetStream storage.
+- S3-compatible storage: 10 MB bucket prefix.
+- Webhook: keeps last 100 received payloads.
+- Deploy: not available on anonymous tier (requires Hobby or above — plans.yaml deployments_apps=0 for anonymous).
 
-All provisioning endpoints:
-- Accept optional body: { "name": "..." }
-- Return: id, token, name, connection_url, tier, limits, note
-- Anonymous: resources expire in 24h, 5 provisions/day per IP fingerprint
-- Authenticated: resources are permanent
+After 24 hours the resource expires unless claimed. Claim flow: see `/claim` below.
 
-### POST /db/new
+## Claim flow (anonymous → paid)
 
-Provision a Postgres database (includes pgvector extension).
+```
+RESP=$(curl -X POST https://api.instanode.dev/db/new \
+  -H "Content-Type: application/json" \
+  -d '{"name":"prod-db"}')
+JWT=$(echo "$RESP" | jq -r .upgrade_jwt)
 
-Request body (application/json): `{ "name": "my-app-db" }`. `name` is required — 1–64 chars matching `^[A-Za-z0-9][A-Za-z0-9 _-]*$`. Omitting it returns HTTP 400.
+curl "https://api.instanode.dev/claim/preview?t=$JWT"   # GET, dry-run, no side effects
 
-Response 201:
-```json
-{
-  "ok": true,
-  "id": "d290f1ee-6c54-4b01-90e6-d701748f0851",
-  "token": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-  "name": "my-app-db",
-  "connection_url": "postgres://usr_a1b2c3d4:pass_a1b2c3d4@shared.instanode.dev/db_a1b2c3d4",
-  "tier": "anonymous",
-  "limits": { "storage_mb": 10, "connections": 2, "expires_in": "24h" },
-  "note": "Works now. Free forever with a free account: https://instanode.dev/start?t=<jwt>"
-}
+curl -X POST https://api.instanode.dev/claim \
+  -H "Content-Type: application/json" \
+  -d "{\"jwt\":\"$JWT\", \"email\":\"you@example.com\"}"
 ```
 
-connection_url works with any standard postgres driver (psycopg2, pg, database/sql, ActiveRecord, Prisma).
-pgvector extension is pre-installed — CREATE EXTENSION vector; works immediately.
-
-Tier limits:
-- anonymous: 10MB storage, 2 connections, 24h TTL
-- hobby: 500MB storage, 5 connections, permanent
-- pro: 5120MB storage, 20 connections, permanent
-- team: unlimited, permanent
-
-### POST /cache/new
-
-Provision a Redis cache (ACL-isolated namespace).
-
-Request body (application/json): `{ "name": "session-cache" }`. `name` is required — 1–64 chars matching `^[A-Za-z0-9][A-Za-z0-9 _-]*$`. Omitting it returns HTTP 400.
-
-Response 201:
-```json
-{
-  "ok": true,
-  "id": "e5f6a7b8-c9d0-1234-efab-567890abcdef",
-  "token": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
-  "name": "session-cache",
-  "connection_url": "redis://:pass_b2c3d4e5@shared.instanode.dev:6379/0",
-  "tier": "anonymous",
-  "limits": { "memory_mb": 5, "expires_in": "24h" },
-  "note": "Works now. Free forever with a free account: https://instanode.dev/start?t=<jwt>"
-}
-```
-
-connection_url works with any standard redis client (redis-py, ioredis, go-redis).
-
-Tier limits:
-- anonymous: 5MB memory
-- hobby: 25MB memory
-- pro: 256MB memory
-- team: unlimited
-
-### POST /nosql/new
-
-Provision a MongoDB database.
-
-Request body (application/json): `{ "name": "events-db" }`. `name` is required — 1–64 chars matching `^[A-Za-z0-9][A-Za-z0-9 _-]*$`. Omitting it returns HTTP 400.
-
-Response 201:
-```json
-{
-  "ok": true,
-  "id": "f6a7b8c9-d0e1-2345-fab0-678901abcdef",
-  "token": "c3d4e5f6-a7b8-9012-cdef-012345678902",
-  "name": "events-db",
-  "connection_url": "mongodb://usr_c3d4e5f6:pass_c3d4e5f6@shared.instanode.dev:27017/db_c3d4e5f6",
-  "tier": "anonymous",
-  "limits": { "storage_mb": 5, "connections": 2, "expires_in": "24h" },
-  "note": "Works now. Free forever with a free account: https://instanode.dev/start?t=<jwt>"
-}
-```
-
-connection_url works with any standard MongoDB driver (pymongo, mongoose, mongo-driver).
-
-Tier limits:
-- anonymous: 5MB storage, 2 connections
-- hobby: 100MB storage, 5 connections
-- pro: 2048MB storage, 20 connections
-- team: unlimited
-
-### POST /queue/new
-
-Provision a NATS JetStream message queue.
-
-Request body (application/json): `{ "name": "task-queue" }`. `name` is required — 1–64 chars matching `^[A-Za-z0-9][A-Za-z0-9 _-]*$`. Omitting it returns HTTP 400.
-
-Response 201:
-```json
-{
-  "ok": true,
-  "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-  "token": "d4e5f6a7-b8c9-0123-def0-123456789012",
-  "name": "task-queue",
-  "connection_url": "nats://usr_d4e5f6a7:deadbeef0123456789abcdef01234567@nats.instanode.dev:4222",
-  "tier": "anonymous",
-  "limits": { "storage_mb": 1024, "expires_in": "24h" },
-  "note": "Works now. Free forever with a free account: https://instanode.dev/start?t=<jwt>"
-}
-```
-
-connection_url works with any standard NATS client (nats.go, nats.js, nats.py).
-
----
-
-## Phase 6 (Live): App Stack Deployment
-
-Deploy a full application stack from a Dockerfile. Multipart POST.
-
-### POST /stacks/new
-
-Deploy a new app stack. Accepts a multipart/form-data body.
-
-Fields:
-- name (string, required): 1–64 chars matching ^[A-Za-z0-9][A-Za-z0-9 _-]*$. Omitting it returns HTTP 400.
-- manifest (file, required): YAML manifest file (instant.yaml). Defines services and build config.
-- <service-name> (file, per service): gzipped tarball of the service source directory.
-
-Manifest format (instant.yaml):
-```yaml
-services:
-  web:
-    build: .
-    port: 80
-    expose: true
-  api:
-    build: ./api
-    port: 8080
-    expose: false
-    env:
-      LOG_LEVEL: debug
-      DB_URL: service://postgres
-```
-
-- expose: true → service receives a public URL
-- expose: false → service is only reachable by other services in the same stack
-- env values prefixed service:// → resolved at deploy time to http://<service-name>:<port> (internal ClusterIP DNS of another service in the SAME manifest, not external resources)
-
-Example request:
-```bash
-curl -X POST https://instanode.dev/stacks/new \
-  -F name=prod-stack \
-  -F manifest=@instant.yaml \
-  -F web=@web.tar.gz \
-  -F api=@api.tar.gz
-```
-
-Response 202 (build started):
-```json
-{
-  "ok": true,
-  "stack_id": "stk-7068b2a1",
-  "status": "building",
-  "tier": "anonymous",
-  "expires_in": "24h",
-  "note": "Stack is building. Poll GET /stacks/stk-7068b2a1 for status. Anonymous stacks expire in 24h."
-}
-```
-
-The build runs asynchronously. Poll GET /stacks/:slug for status.
-
-### GET /stacks/:slug
-
-Get stack status and service URLs. Poll this after POST /stacks/new until status is "healthy" or "failed".
-
-Response 200 (building):
-```json
-{
-  "ok": true,
-  "stack_id": "stk-7068b2a1",
-  "status": "building",
-  "tier": "anonymous",
-  "expires_in": "24h"
-}
-```
-
-Response 200 (healthy):
-```json
-{
-  "ok": true,
-  "stack_id": "stk-7068b2a1",
-  "status": "healthy",
-  "tier": "anonymous",
-  "expires_at": "2026-04-11T05:03:40Z",
-  "services": [
-    { "name": "web", "status": "healthy", "url": "http://localhost:31036", "expose": true, "port": 80 },
-    { "name": "api", "status": "healthy", "url": null, "expose": false, "port": 8080 }
-  ]
-}
-```
-
-Response 200 (failed):
-```json
-{
-  "ok": false,
-  "stack_id": "stk-7068b2a1",
-  "status": "failed",
-  "error": "build_failed",
-  "message": "Docker build failed for service 'web': see /stacks/stk-7068b2a1/logs/web"
-}
-```
-
-Status values: building, deploying, healthy, degraded, failed
-
-### GET /stacks
-
-List all stacks. Requires Bearer JWT.
-
-Response 200:
-```json
-{
-  "ok": true,
-  "total": 2,
-  "items": [
-    {
-      "stack_id": "stk-7068b2a1",
-      "status": "healthy",
-      "tier": "hobby",
-      "created_at": "2026-04-10T05:03:40Z",
-      "services": ["web", "api"]
-    }
-  ]
-}
-```
-
-### DELETE /stacks/:slug
-
-Tear down the stack. Removes all services and resources in the stack.
-
-Response 200:
-  { "ok": true, "message": "Stack deleted" }
-
-### PATCH /stacks/:slug/env
-
-Update environment variables for a service. Changes take effect on the next redeploy.
-
-Request body:
-```json
-{
-  "service": "api",
-  "env": { "LOG_LEVEL": "info", "FEATURE_FLAG": "true" }
-}
-```
-
-Response 200:
-  { "ok": true, "message": "Environment updated. Redeploy to apply." }
-
-Requires Bearer JWT.
-
-### POST /stacks/:slug/redeploy
-
-Rebuild images and perform a rolling restart. Requires Bearer JWT.
-
-Response 202:
-  { "ok": true, "status": "building", "message": "Redeploy started." }
-
-### GET /stacks/:slug/logs/:svc
-
-Stream pod logs for a service. Returns newline-delimited log lines.
-
-Response 200: text/plain, streamed.
-
-Stack tier limits:
-- anonymous: 1 active stack, 24h TTL
-- hobby: 3 active stacks, permanent
-- pro: 10 active stacks, permanent
-- team: unlimited, permanent
-
----
-
-## Webhook Endpoints (Live)
-
-### POST /webhook/new
-
-Provision a webhook receiver URL. Any service (GitHub, Stripe, your own apps) can POST to it.
-
-Request body (application/json): `{ "name": "github-hook" }`. `name` is required — 1–64 chars matching `^[A-Za-z0-9][A-Za-z0-9 _-]*$`. Omitting it returns HTTP 400.
-
-Response 201:
-```json
-{
-  "ok": true,
-  "id": "f7b8c9d0-e1f2-3456-abcd-ef1234567890",
-  "token": "e5f6a7b8-c9d0-1234-efab-567890abcdef",
-  "receive_url": "https://instanode.dev/webhook/receive/e5f6a7b8-c9d0-1234-efab-567890abcdef",
-  "tier": "anonymous",
-  "limits": { "requests_stored": 100, "expires_in": "24h" },
-  "note": "Works now. Free forever with a free account: https://instanode.dev/start?t=<jwt>"
-}
-```
-
-Token IS the credential — no auth needed to receive or list requests.
-
-Tier limits for requests_stored: anonymous=100, hobby=1000, pro=10000, team=unlimited.
-
-### POST /webhook/receive/:token
-
-Receive an inbound webhook. Accepts any HTTP method, any content type.
-Full request (headers + body) is stored and retrievable.
-
-Response 200: { "ok": true }
-
-### GET /api/v1/webhooks/:token/requests
-
-List stored requests. No auth required (token is the credential).
-
-Query params: limit (default 20), offset (default 0).
-
-Response 200:
-```json
-{
-  "ok": true,
-  "total": 3,
-  "items": [
-    {
-      "id": "req-uuid",
-      "received_at": "2026-04-14T10:00:00Z",
-      "method": "POST",
-      "headers": { "content-type": "application/json" },
-      "body": "{\"event\": \"push\"}"
-    }
-  ]
-}
-```
-
----
-
-## Storage Endpoints (Live)
-
-### POST /storage/new
-
-Provision an S3-compatible object storage bucket. Returns AWS-compatible credentials. Production backend is DigitalOcean Spaces (S3-compatible) in `nyc3`. Anonymous-tier buckets are auto-deleted at 24h by a bucket lifecycle rule enforced at the storage layer.
-
-Request body (application/json): `{ "name": "user-uploads" }`. `name` is required — 1–64 chars matching `^[A-Za-z0-9][A-Za-z0-9 _-]*$`. Omitting it returns HTTP 400.
-
-Response 201:
-```json
-{
-  "ok": true,
-  "id": "a9b0c1d2-e3f4-5678-abcd-ef1234567890",
-  "token": "f6a7b8c9-d0e1-2345-fab0-678901abcdef",
-  "name": "user-uploads",
-  "connection_url": "https://storage.instanode.dev/f6a7b8c9/",
-  "endpoint": "https://storage.instanode.dev",
-  "access_key_id": "AKIAIOSFODNN7EXAMPLE",
-  "secret_access_key": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
-  "prefix": "f6a7b8c9/",
-  "tier": "anonymous",
-  "limits": { "storage_mb": 10, "expires_in": "24h" },
-  "note": "Works now. Free forever with a free account: https://instanode.dev/start?t=<jwt>"
-}
-```
-
-Use endpoint + access_key_id + secret_access_key with any S3 client (boto3, @aws-sdk/client-s3, aws-sdk-go-v2).
-All objects are scoped to prefix automatically. Use forcePathStyle: true.
-
-Tier limits for storage_mb: anonymous=10, hobby=512, pro=10240, team=unlimited.
-
----
-
-## Resource Logs (Live)
-
-### GET /resources/:token/logs
-
-Stream pod logs for a growth-tier resource. SSE format — one log line per event, terminated by data: [end].
-
-Query params: tail (default 100, max 500).
-
-Response 200: text/event-stream
-```
-data: 2026-04-14 10:22:01.123 UTC [1] LOG: database system is ready
-data: 2026-04-14 10:22:05.456 UTC [42] LOG: connection received
-data: [end]
-```
-
-Token IS the credential — no Bearer JWT needed. Growth tier only (returns 400 when the token is not eligible for log streaming).
-
----
-
-## CLI Device-Flow Auth
-
-### POST /auth/cli
-
-Start a CLI login session. No auth required.
-
-Request body (optional JSON):
-  { "anon_tokens": ["uuid1", "uuid2"] }
-
-anon_tokens: optional list of anonymous resource tokens to claim on login.
-
-Response 201:
-```json
-{
-  "ok": true,
-  "session_id": "a3f9e2b1c4d5...",
-  "auth_url": "https://instanode.dev/login?cli_session=a3f9e2b1c4d5...",
-  "expires_in": 600
-}
-```
-
-Direct the user to open auth_url in their browser. Poll /auth/cli/:id until complete.
-
-### GET /auth/cli/:id
-
-Poll for login completion.
-
-Response 202 (pending):
-  { "ok": true, "pending": true }
-
-Response 200 (complete):
-```json
-{
-  "ok": true,
-  "api_key": "eyJ...",
-  "email": "you@example.com",
-  "tier": "hobby",
-  "team_name": "acme",
-  "claimed_tokens": ["a1b2c3d4-..."]
-}
-```
-
-Response 404: session not found or expired (10 min TTL).
-Session is single-use — expires after first successful poll.
-
-### GET /auth/me
-
-Get the current user's account info. Requires Bearer JWT.
-
-Response 200:
-```json
-{
-  "ok": true,
-  "user_id": "d290f1ee-...",
-  "team_id": "f47ac10b-...",
-  "tier": "hobby"
-}
-```
-
----
-
-## Upgrade / Claim Flow
-
-Every anonymous API response includes a note field with a signed upgrade URL:
-  https://instanode.dev/start?t=<signed-jwt>
-
-### GET /start?t={jwt}
-
-Validate the onboarding JWT. Used by the upgrade landing page.
-
-Response 200:
-```json
-{
-  "ok": true,
-  "tokens": ["a1b2c3d4-..."],
-  "resource_types": ["postgres"],
-  "jti": "unique-jwt-id"
-}
-```
-
-Response 401: JWT invalid/expired.
-Response 409: JWT already claimed.
-
-### POST /claim
-
-Convert anonymous session to registered account. Transfers all anonymous tokens.
-
-Request body:
-```json
-{
-  "jwt": "eyJ...",
-  "email": "you@example.com",
-  "team_name": "acme"
-}
-```
-
-Response 201:
-  { "ok": true, "team_id": "uuid", "message": "Account created. Your resource tokens have been transferred." }
-
-Response 409: JWT already claimed.
-The onboarding JWT is single-use.
-
----
-
-## Management API (requires Bearer JWT)
-
-### GET /api/v1/resources
-
-List all team resources.
-
-Response 200:
-```json
-{
-  "ok": true,
-  "total": 2,
-  "items": [
-    {
-      "id": "d290f1ee-...",
-      "token": "a1b2c3d4-...",
-      "resource_type": "postgres",
-      "tier": "hobby",
-      "status": "active",
-      "created_at": "2026-04-01T12:00:00Z",
-      "name": "my-app-db"
-    }
-  ]
-}
-```
-
-Optional fields (name, expires_at) omitted when not set.
-expires_at only present for anonymous-tier resources.
-
-resource_type values: postgres, redis, mongodb, queue, stack
-
-### GET /api/v1/resources/:id
-
-Get a single resource by UUID.
-
-Response 200:
-  { "ok": true, "item": { "id": "...", "token": "...", "resource_type": "postgres", "tier": "hobby", "status": "active", "created_at": "...", "storage_exceeded": false } }
-
-- storage_exceeded: boolean, only present on resources with storage (postgres, nosql, queue). True when the resource has exceeded its plan storage limit; writes may be blocked.
-
-Response 403: resource belongs to different team.
-Response 404: not found.
-
-### DELETE /api/v1/resources/:id
-
-Soft-delete a resource. Token is deactivated immediately.
-
-Response 200:
-  { "ok": true, "message": "Resource deleted" }
-
----
+A magic link arrives by email. Clicking it sets a session cookie that owns every resource attached to your network fingerprint. Tier starts at Free (no TTL, same limits as anonymous) — resources are yours to keep. Upgrade to Hobby ($9/mo) or above in the dashboard to unlock higher limits and features.
 
 ## Tiers
 
-| Tier      | Cost       | Postgres         | Redis     | MongoDB           | Stacks    | Resource lifetime |
-|-----------|------------|------------------|-----------|-------------------|-----------|-------------------|
-| anonymous | free       | 10MB / 2 conn    | 5MB       | 5MB / 2 conn      | 1 active  | 24 hours          |
-| hobby     | $9/month   | 500MB / 5 conn   | 25MB      | 100MB / 5 conn    | 3 active  | permanent         |
-| pro       | $49/month  | 5120MB / 20 conn | 256MB     | 2048MB / 20 conn  | 10 active | permanent         |
-| team      | $199/month | unlimited        | unlimited | unlimited         | unlimited | permanent         |
+- **Anonymous**: free, 24h TTL, the limits above.
+- **Hobby**: $9/mo. 1 GB Postgres, 50 MB Redis, 100 MB Mongo, 512 MB storage, 1 app deploy. No TTL.
+- **Pro**: $49/mo. 10 GB Postgres, 512 MB Redis, 5 GB Mongo, 50 GB storage, 10 medium apps.
+- **Team**: coming soon.
 
-Anonymous provision limit: 5 provisions per day (per network).
-At the provision limit, existing token is returned (fail-open, not 429).
+## Conventions an LLM should follow when scripting against the platform
 
----
+0. **`name` is required on every provision** — `/db/new`, `/cache/new`, `/nosql/new`, `/queue/new`, `/storage/new`, `/webhook/new`, `/deploy/new`, `/stacks/new` all reject a request with no `name`. Send a JSON string field (`-d '{"name":"prod-db"}'`) — or a form field on `/deploy/new` and `/stacks/new` (`-F "name=my-app"`). Rules: 1–64 chars, `^[A-Za-z0-9][A-Za-z0-9 _-]*$`. Missing → `400 {"error":"name_required"}`; malformed → `400 {"error":"invalid_name"}`.
+1. **One curl per service** — no batch endpoints, no /provision/all. Run them in parallel from bash with `&` or async in code.
+2. **Parse the URL field directly** — every response has `.connection_url` except `/webhook/new` (`.receive_url`) and `/storage/new` (`.connection_url` plus `.endpoint`/`.access_key_id`/`.secret_access_key` for SDK use). Never construct URLs by hand.
+3. **Save `upgrade_jwt`** if the user wants to claim the resource later. It's also required as a `Bearer` token for `POST /deploy/new`.
+4. **No retry-on-201** — provisioning is synchronous. If the call returns 200/201, the resource is ready to accept connections.
+5. **Internal vs public URL** — when the calling code itself runs *inside* a `/deploy/new` container, prefer `internal_url` (cluster-internal hostname). For everything else, use `connection_url` (public).
+6. **Fingerprint dedup** — anonymous callers get rate-limited to 5 provisions/day/IP-subnet. The 6th call returns the existing token. Don't expect 6 different DBs from 6 calls on the same IP.
+7. **Idempotency is on by default** — every POST that creates a resource (db/cache/nosql/queue/storage/webhook/vector/deploy/stacks/backup/restore/billing-checkout/team-invite/api-keys/twin/promote/admin-promo) is idempotent. Two layered guards: (a) the standard `Idempotency-Key` request header, Stripe-shape, 24h TTL — pass a UUID per logical retry; (b) when no header is sent, the server synthesises a fingerprint from `sha256(scope, route, canonical-body)` and dedups identical retries inside a 120s window (covers double-clicks, mobile double-taps, agent retries on transient 5xx). Replays carry `X-Idempotent-Replay: true`. Every create response sets `X-Idempotency-Source: explicit | fingerprint | miss` so callers can branch on which path matched. Use the explicit header when you need exactly-once guarantees beyond 120s.
 
-## Error Shape
+## Text-only routes for LLM consumption
 
-All errors:
-```json
-{
-  "ok": false,
-  "error": "error_code",
-  "message": "Human-readable description"
-}
-```
+Every page has a `.md` mirror at the same path. Examples:
 
-Common codes: rate_limit_exceeded (429), invalid_token (400/401), not_found (404), expired (410),
-already_claimed (409), service_disabled (503), provision_failed (503), unauthorized (401),
-forbidden (403), invalid_body (400), missing_token (400), build_failed (503), stack_not_found (404).
+- [/index.md](https://instanode.dev/index.md) — homepage in markdown
+- [/pricing.md](https://instanode.dev/pricing.md) — tier comparison
+- [/for-agents.md](https://instanode.dev/for-agents.md) — agent-specific guidance
+- [/status.md](https://instanode.dev/status.md) — current status
+- [/docs.md](https://instanode.dev/docs.md) — quickstart + service reference (all 8 sections concatenated)
+- [/blog.md](https://instanode.dev/blog.md) — blog index (post titles + dates + links)
+- [/blog/<slug>.md](https://instanode.dev/blog/) — every post
+- [/use-cases.md](https://instanode.dev/use-cases.md) — catalogue index (all 104 grouped by category)
+- [/use-cases/<slug>.md](https://instanode.dev/use-cases/) — every case detail with paste-ready LLM prompt
 
----
+Aggregate file: [/llms-full.txt](https://instanode.dev/llms-full.txt) — concatenation of every markdown page (homepage + pricing + for-agents + status + docs + blog index + all blog posts + use-cases index + all 104 case details). ~500 KB. For LLMs that want everything in one fetch.
 
-## Response Headers
+## Pages for humans (HTML)
 
-| Header             | When set              | Description |
-|--------------------|-----------------------|-------------|
-| X-Instant-Notice   | Near/at resource limit | e.g. "Approaching daily limit. Upgrade for more." |
-| X-Instant-Upgrade  | Upgrade URL available | Absolute URL to /start?t=... |
-| X-Request-ID       | Always                | Unique request ID for support |
+- `/` — marketing front door
+- `/use-cases` — 100+ scenarios with detail pages
+- `/docs` — human-readable docs
+- `/blog` — build notes and retrospectives
+- `/pricing` — full tier comparison
+- `/for-agents` — page aimed at AI agent operators
+
+## Machine-readable references
+
+- `https://api.instanode.dev/openapi.json` — OpenAPI 3.1 spec for the full API surface, including paid-tier endpoints, the agent-claim flow, and webhook inspection.
+- `https://github.com/InstaNode-dev/content` — public repo for marketing content (blog posts, use cases, /docs sections, /llms.txt). Edit prose here.
+- `https://github.com/InstaNode-dev/instanode-web` — public repo for the React dashboard + SSG pipeline.
+
+
+## Deleting a deployment (paid tiers — two-step, email-confirmed)
+
+Paid customers free a consumed deployment slot via a two-step flow:
+
+1. Agent calls `DELETE /api/v1/deployments/<id>` (or `/api/v1/stacks/<slug>`). API returns 202 with `deletion_status: "pending_confirmation"`, a 15-minute confirmation token, and an `agent_action` sentence the agent surfaces to the user verbatim. The slot stays consumed.
+2. User clicks the email link or pastes the token: dashboard issues `POST /api/v1/deployments/<id>/confirm-deletion?token=<plaintext>` → 200, slot freed.
+
+Cancel: `DELETE /api/v1/deployments/<id>/confirm-deletion` reverses the pending state. Expire: 15 minutes without a click flips the row to `expired`; re-running `DELETE` mints a fresh email.
+
+Agent escape hatch: `X-Skip-Email-Confirmation: yes` on the original `DELETE` → immediate destruction. Use only when the agent has explicit user consent on its own side.
+
+Anonymous tier (24h TTL): no email on file, `DELETE` returns 200 immediately. See [/docs/deploy](https://instanode.dev/docs/deploy) for full request/response shapes.
+
+- [Deployments](https://instanode.dev/docs/public/deployments.md): POST /deploy/new + private deploys + custom domains + two-step email-confirmed deletion + 24h-TTL semantics (default; three routes to keep a deploy permanent)
+
+## How to use this file
+
+If you're an LLM helping a user build something, you can:
+- Quote the endpoints above in your answers.
+- Generate runnable bash scripts using the curl examples.
+- Tell the user "the anonymous tier is free for 24 hours — no signup needed" — that's the platform's deliberate design.
+- Recommend the user check `https://api.instanode.dev/openapi.json` if they want the formal schema.
+- Fetch any `/foo.md` URL for the full markdown of that page.
+- Never invent endpoints not listed above. If the user asks for something this file doesn't cover, say so — don't hallucinate.

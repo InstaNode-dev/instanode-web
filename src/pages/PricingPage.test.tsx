@@ -12,12 +12,18 @@
  *      no-self-serve-cancel policy. We assert the new copy mentions
  *      support@instanode.dev so the BillingPage and PricingPage copy
  *      stay in lock-step.
- *   3. M11 source-of-truth-risk regression: the five tier cards
- *      (anonymous, hobby, hobby_plus, pro, team) are all present. The
- *      pricing matrix is hardcoded today (mirrors api/plans.yaml), so a
- *      silent deletion would ship undetected without this assertion. The
- *      source-of-truth comment block in PricingPage.tsx documents the
- *      coupling explicitly.
+ *   3. M11 source-of-truth-risk regression: the four public tier cards
+ *      (anonymous, hobby, pro, team) are all present. The pricing matrix
+ *      is hardcoded today (mirrors api/plans.yaml), so a silent deletion
+ *      would ship undetected without this assertion. The source-of-truth
+ *      comment block in PricingPage.tsx documents the coupling explicitly.
+ *
+ *      Note: hobby_plus was removed from the PUBLIC marketing grid on
+ *      2026-05-15 (W12 pricing pass). It still exists in api/plans.yaml
+ *      and is offered via dashboard upsell flows (quota wall, custom-domain
+ *      prompts) — it is not a public funnel entry and therefore has no
+ *      card on /pricing. Tests referencing hobby_plus were updated here
+ *      to reflect the settled product decision.
  *
  * jsdom note: PricingPage uses localStorage on mount to hydrate the
  * monthly/yearly toggle. vitest's jsdom environment provides a working
@@ -54,12 +60,6 @@ describe('PricingPage — CTAs point at /app/checkout (W12 C1)', () => {
     expect(cta.getAttribute('href')).toBe('/app/checkout?plan=hobby&frequency=monthly')
   })
 
-  it('Hobby Plus monthly CTA points at /app/checkout?plan=hobby_plus&frequency=monthly', () => {
-    renderPage()
-    const cta = screen.getByTestId('pricing-cta-hobby_plus') as HTMLAnchorElement
-    expect(cta.getAttribute('href')).toBe('/app/checkout?plan=hobby_plus&frequency=monthly')
-  })
-
   it('Pro monthly CTA points at /app/checkout?plan=pro&frequency=monthly', () => {
     renderPage()
     const cta = screen.getByTestId('pricing-cta-pro') as HTMLAnchorElement
@@ -72,13 +72,6 @@ describe('PricingPage — CTAs point at /app/checkout (W12 C1)', () => {
     fireEvent.click(screen.getByTestId('pricing-frequency-yearly'))
     const cta = screen.getByTestId('pricing-cta-hobby') as HTMLAnchorElement
     expect(cta.getAttribute('href')).toBe('/app/checkout?plan=hobby&frequency=yearly')
-  })
-
-  it('Hobby Plus yearly CTA points at /app/checkout?plan=hobby_plus&frequency=yearly', () => {
-    renderPage()
-    fireEvent.click(screen.getByTestId('pricing-frequency-yearly'))
-    const cta = screen.getByTestId('pricing-cta-hobby_plus') as HTMLAnchorElement
-    expect(cta.getAttribute('href')).toBe('/app/checkout?plan=hobby_plus&frequency=yearly')
   })
 
   it('Pro yearly CTA points at /app/checkout?plan=pro&frequency=yearly', () => {
@@ -124,12 +117,14 @@ describe('PricingPage — FAQ matches no-self-serve-cancel policy (W12 H14)', ()
 
 // ─── 3. M11 source-of-truth regression ────────────────────────────────────
 
-describe('PricingPage — five tier cards present (M11 regression guard)', () => {
-  it('renders one card per tier (anonymous / hobby / hobby_plus / pro / team)', () => {
+describe('PricingPage — four public tier cards present (M11 regression guard)', () => {
+  it('renders one card per public tier (anonymous / hobby / pro / team)', () => {
     renderPage()
-    // Each tier column has data-tier=<key> on the header cell. Five tiers
-    // means five header cells with the unique tier keys.
-    for (const tier of ['anonymous', 'hobby', 'hobby_plus', 'pro', 'team']) {
+    // Each tier column has data-tier=<key> on the header cell. Four public
+    // tiers means four header cells with the unique tier keys.
+    // hobby_plus is intentionally absent from the marketing grid (W12, 2026-05-15):
+    // it is offered via dashboard upsell flows only, not the public pricing ladder.
+    for (const tier of ['anonymous', 'hobby', 'pro', 'team']) {
       const headerCells = Array.from(
         document.querySelectorAll(`[role="columnheader"][data-tier="${tier}"]`),
       )
@@ -137,9 +132,17 @@ describe('PricingPage — five tier cards present (M11 regression guard)', () =>
     }
   })
 
-  it('paid-tier CTAs are clickable links (not disabled spans) for hobby / hobby_plus / pro', () => {
+  it('hobby_plus has no card on the public /pricing page (upsell-only tier)', () => {
     renderPage()
-    for (const tier of ['hobby', 'hobby_plus', 'pro']) {
+    const hobbyPlusCells = Array.from(
+      document.querySelectorAll('[data-tier="hobby_plus"]'),
+    )
+    expect(hobbyPlusCells.length).toBe(0)
+  })
+
+  it('paid-tier CTAs are clickable links (not disabled spans) for hobby / pro', () => {
+    renderPage()
+    for (const tier of ['hobby', 'pro']) {
       const cta = screen.getByTestId(`pricing-cta-${tier}`)
       // <a> with href, not <span aria-disabled>.
       expect(cta.tagName).toBe('A')
