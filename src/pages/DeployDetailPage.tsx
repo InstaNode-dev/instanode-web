@@ -9,6 +9,7 @@ import { CustomDomainPanel } from '../components/CustomDomainPanel'
 import { UpgradePromptCard } from '../components/UpgradePromptCard'
 import { IpAllowList } from '../components/IpAllowList'
 import { TtlBadge } from '../components/TtlBadge'
+import { FailureAutopsyPanel } from '../components/FailureAutopsyPanel'
 import { useDashboardCtx } from '../hooks/useDashboardCtx'
 import * as api from '../api'
 import type { DashboardStack, DashboardDeployment, Tier, StackFamilyMember } from '../api'
@@ -285,6 +286,18 @@ export function DeployDetailPage() {
         />
       )}
 
+      {/* Phase 0 Failure Autopsy — rendered above the tab bar so the
+          user sees WHY the deploy failed before they see any tab content.
+          Renders in two states:
+          (a) failure payload present → full panel with heading + hint + logs
+          (b) status=failed but no failure payload → "diagnostics pending" banner
+          For non-failed deploys this returns null. */}
+      {view.kind === 'deployment' && (
+        <FailureAutopsyPanel
+          status={view.status}
+          failure={view.raw.failure}
+        />
+      )}
 
       <div className="tabs">
         {TABS.map((t) => (
