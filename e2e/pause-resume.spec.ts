@@ -22,6 +22,12 @@ test.describe('Pause + Resume', () => {
     // Mock POST /api/v1/resources/:id/pause to return the resource flipped
     // to 'paused'. After the click the page should re-read this state and
     // re-render the button label.
+    //
+    // The body key MUST be `resource` — that is the real contract: the
+    // backend Pause/Resume handler responds `{ok, id, token, status,
+    // message, resource}` and api.pauseResource() reads `r.resource`.
+    // A stale `item` key here makes adaptResource(undefined) throw, the
+    // confirm() catch fires, and the modal never closes.
     await page.route(`**/api/v1/resources/${r.token}/pause`, (route) => {
       if (route.request().method() !== 'POST') return route.continue()
       return route.fulfill({
@@ -29,7 +35,7 @@ test.describe('Pause + Resume', () => {
         contentType: 'application/json',
         body: JSON.stringify({
           ok: true,
-          item: { ...r, status: 'paused' },
+          resource: { ...r, status: 'paused' },
         }),
       })
     })
@@ -41,7 +47,7 @@ test.describe('Pause + Resume', () => {
         contentType: 'application/json',
         body: JSON.stringify({
           ok: true,
-          item: { ...r, status: 'active' },
+          resource: { ...r, status: 'active' },
         }),
       })
     })
