@@ -271,12 +271,12 @@ export function MarketingPage() {
                 </span>
                 <span className="line out">
                   <span className="ok">→</span>{' '}
-                  <span className="key">expires_in:</span>{' '}
-                  <span className="num">86400s</span>
+                  <span className="key">tier:</span>{' '}
+                  <span className="str">anonymous</span>
                 </span>
                 <span className="line out">
                   <span className="ok">→</span>{' '}
-                  <span className="key">claim_url:</span>{' '}
+                  <span className="key">upgrade_url:</span>{' '}
                   <span className="claim">https://instanode.dev/start?t=eyJhbGc...</span>
                 </span>
                 <span className="line">

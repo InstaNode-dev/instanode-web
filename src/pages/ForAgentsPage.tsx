@@ -41,16 +41,16 @@ const REASONS: { eyebrow: string; body: string }[] = [
 
 const PLAYGROUND_CURL = `curl -X POST https://api.instanode.dev/db/new \\
   -H 'Content-Type: application/json' \\
-  -d '{"name":"prod-db","engine":"postgres"}'`
+  -d '{"name":"prod-db"}'`
 
 const PLAYGROUND_RESPONSE = `{
-  "id": "res_2RtL9k4mP",
-  "engine": "postgres",
+  "ok": true,
+  "token": "res_2RtL9k4mP",
   "connection_url": "postgres://u_3jX:••••@shared-1.instanode.dev:5432/db_2rtL9k4mp",
   "tier": "anonymous",
-  "expires_at": "2026-05-11T17:42:08Z",
-  "limits": { "storage_mb": 10, "max_connections": 2 },
-  "claim_url": "https://instanode.dev/start?t=eyJhbGciOi...",
+  "limits": { "storage_mb": 10, "connections": 2 },
+  "upgrade_url": "https://instanode.dev/start?t=eyJhbGciOi...",
+  "upgrade_jwt": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
   "note": "Resource expires in 24h. Claim with the link above to keep it."
 }`
 
