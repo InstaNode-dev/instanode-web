@@ -1283,20 +1283,40 @@ export interface CreateStackResponse {
  *   - 413: tarball too large (the api enforces ≤ 50 MB)
  *   - any other 4xx/5xx: propagate as APIError so the page renders a banner
  */
+// Default container port baked into a generated single-service manifest
+// when the caller omits one.
+const defaultStackServicePort = 8080
+// The single service name in a dashboard-generated stack manifest. The
+// tarball MUST be uploaded under a form field of this same name — the api
+// matches each service in the manifest to its `<service>` multipart file.
+const singleServiceName = 'app'
+
+// buildSingleServiceManifest renders the minimal instant.yaml a one-service
+// stack needs. POST /stacks/new REQUIRES a `manifest` field — without it the
+// server 400s. port and env vars are embedded here, NOT sent as sibling
+// multipart fields.
+export function buildSingleServiceManifest(opts: CreateStackInput = {}): string {
+  const port = opts.port ?? defaultStackServicePort
+  let m = `services:\n  ${singleServiceName}:\n    port: ${port}\n`
+  if (opts.env_vars && Object.keys(opts.env_vars).length > 0) {
+    m += `    env:\n`
+    for (const [k, v] of Object.entries(opts.env_vars)) {
+      // single-quote the value; escape embedded quotes per YAML rules.
+      m += `      ${k}: '${String(v).replace(/'/g, "''")}'\n`
+    }
+  }
+  return m
+}
+
 export async function createStack(
   file: File,
   opts: CreateStackInput = {},
 ): Promise<{ ok: true; stack: CreateStackResponse }> {
   const fd = new FormData()
-  fd.append('tarball', file)
+  // manifest is REQUIRED; tarball is keyed by the service name ("app").
+  fd.append('manifest', buildSingleServiceManifest(opts))
+  fd.append(singleServiceName, file)
   if (opts.name) fd.append('name', opts.name)
-  if (opts.port !== undefined) fd.append('port', String(opts.port))
-  // Default env: 'development' per the 2026-05-13 platform memory. Caller
-  // can override to production / staging / custom.
-  fd.append('env', opts.env ?? 'development')
-  if (opts.env_vars && Object.keys(opts.env_vars).length > 0) {
-    fd.append('env_vars', JSON.stringify(opts.env_vars))
-  }
 
   const headers = new Headers()
   const tok = getToken()
