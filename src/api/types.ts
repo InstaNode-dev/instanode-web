@@ -77,6 +77,8 @@ export type DeploymentStatus =
   | 'stopped'
   // Mapped onto StackStatus for shared UI: 'healthy' → 'running'.
   | 'running'
+  // C02: TTL-expired deployments; worker marks status='expired' after anonymous 24h TTL.
+  | 'expired'
 
 export interface DashboardDeployment {
   /** UUID of the deployment row (used in /deploy/:id paths). */
