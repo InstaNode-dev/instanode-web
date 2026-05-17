@@ -7,7 +7,7 @@ import {
 import { QuotaWallBanner } from '../components/QuotaWallBanner'
 import { UpgradeButton } from '../components/UpgradeButton'
 import * as api from '../api'
-import type { Resource, ActivityItem } from '../api'
+import type { Resource, ActivityItem, DashboardDeployment } from '../api'
 import { useDashboardCtx } from '../hooks/useDashboardCtx'
 
 // Storage limit per tier in GB, used for the Overview usage chart.
@@ -67,6 +67,10 @@ function stripHtmlTags(s: string | null | undefined): string {
 export function OverviewPage() {
   const [resources, setResources] = useState<Resource[]>([])
   const [activity, setActivity] = useState<ActivityItem[]>([])
+  // Deployments live in their own table served by GET /api/v1/deployments —
+  // they are NOT rows in `resources` (resource_type === 'deploy' never
+  // appears there), so the deployments tile must source them separately.
+  const [deployments, setDeployments] = useState<DashboardDeployment[]>([])
   const [loading, setLoading] = useState(true)
   const [copiedPrompt, setCopiedPrompt] = useState<string | null>(null)
   const ctx = useDashboardCtx()
@@ -135,10 +139,17 @@ export function OverviewPage() {
 
   useEffect(() => {
     let alive = true
-    Promise.all([api.listResources(ctx.env), api.fetchActivity()]).then(([r, a]) => {
+    Promise.all([
+      api.listResources(ctx.env),
+      api.fetchActivity(),
+      // Deployments are a separate table — fail-soft to [] so a deployments
+      // outage doesn't blank the resources/activity tiles.
+      api.listDeployments(ctx.env).catch(() => ({ ok: true as const, items: [], total: 0 })),
+    ]).then(([r, a, d]) => {
       if (!alive) return
       setResources(r.items)
       setActivity(a.items)
+      setDeployments(d.items)
       setLoading(false)
     })
     return () => {
@@ -152,19 +163,27 @@ export function OverviewPage() {
   // FIX-K (2026-05-16): plans.yaml uses binary MiB; use *1024 (was *1000).
   const tierLimitMB = tierLimitGB * 1024
   const storagePct = tierLimitMB > 0 ? Math.round((totalStorageMB / tierLimitMB) * 100) : 0
-  const conn = resources.reduce((s, r) => s + (r.connections_in_use ?? 0), 0)
-  const connLim = resources.reduce((s, r) => s + (r.connections_limit ?? 0), 0)
+  // Connections tile: the API never emits `connections_in_use`, so a numerator
+  // sourced from it is always 0 — show the per-tier connection ceiling only.
+  // `-1` (team/growth unlimited) is excluded from the sum so it can't corrupt
+  // the denominator; if any resource is unlimited the tile reports ∞.
+  const connUnlimited = resources.some((r) => (r.connections_limit ?? 0) < 0)
+  const connLim = resources.reduce(
+    (s, r) => s + ((r.connections_limit ?? 0) > 0 ? (r.connections_limit as number) : 0),
+    0,
+  )
   const recent = [...resources].sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at)).slice(0, 4)
 
   const now = Date.now()
   const newThisWeek = resources.filter((r) => now - +new Date(r.created_at) <= SEVEN_DAYS_MS).length
-  const deploys = resources.filter((r) => r.resource_type === 'deploy')
-  const deployCount = deploys.length
-  const deployHealthy = deploys.filter((r) => r.status === 'active').length
+  // Deployments are a separate table (GET /api/v1/deployments) — never rows in
+  // `resources`. Source the count + health from the dedicated fetch.
+  const deployCount = deployments.length
+  const deployHealthy = deployments.filter((d) => d.status === 'running').length
   const webhookCount = resources.filter((r) => r.resource_type === 'webhook').length
 
   const storageSub = resources.length === 0 ? tier : `${storagePct}% of ${tier} tier`
-  const connSub = connLim === 0 ? '' : `${conn}/${connLim} active`
+  const connSub = connUnlimited ? 'unlimited' : connLim === 0 ? '' : `${connLim} max`
   const deploySub = deployCount === 0 ? 'none yet' : `${deployHealthy}/${deployCount} healthy`
   const vaultSub = vaultCount === 0 ? '' : `scoped to ${env}`
 
@@ -187,7 +206,10 @@ export function OverviewPage() {
             stats/series is live. */}
         <Stat k="resources" v={loading ? '—' : resources.length.toString()} d={newThisWeek === 0 ? '—' : `+${newThisWeek} this week`} series={undefined} />
         <Stat k={`storage / ${tierLimitGB} GB`} v={loading ? '—' : (totalStorageMB / 1000).toFixed(1)} unit="GB" d={storageSub} dCls="dim" series={undefined} />
-        <Stat k={`conn / ${connLim}`} v={loading ? '—' : conn.toString()} d={connSub} dCls="dim" series={undefined} />
+        {/* Connections tile shows the aggregate per-tier connection ceiling.
+            The API does not emit a live in-use count, so a numerator would
+            always read 0 — show the ceiling honestly instead. */}
+        <Stat k="connection limit" v={loading ? '—' : connUnlimited ? '∞' : connLim.toString()} d={connSub} dCls="dim" series={undefined} />
         <Stat k="deployments" v={loading ? '—' : deployCount.toString()} d={deploySub} series={undefined} />
         <Stat k="webhooks · 24h" v={loading ? '—' : webhookCount.toString()} d="" series={undefined} />
         <Stat k="vault entries" v={vaultCount.toString()} d={vaultSub} dCls="dim" series={undefined} />
@@ -242,8 +264,7 @@ export function OverviewPage() {
                 <EnvPill env={r.env} />
                 <UsageBar
                   used={Math.round(r.storage_bytes / 1_000_000)}
-                  limit={r.storage_limit_bytes === -1 ? 0 : Math.round(r.storage_limit_bytes / 1_000_000)}
-                  format={(a, b) => r.storage_limit_bytes === -1 ? `${a} / ∞` : `${a} / ${b}`}
+                  limit={r.storage_limit_bytes < 0 ? -1 : Math.round(r.storage_limit_bytes / 1_000_000)}
                 />
                 <RelTime at={r.created_at} />
                 <button className="res-action" aria-label="actions">⋯</button>
