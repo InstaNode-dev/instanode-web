@@ -14,7 +14,7 @@ On a prompt like that, the agent should: `POST /db/new` for Postgres, write the 
 
 ## API endpoints
 
-All accept `POST` against `https://api.instanode.dev`. No authentication header required for the anonymous tier, but every request body **must** include `name` (see below). Response shape: `{ok, token, connection_url, internal_url, tier, limits, note, upgrade_jwt, upgrade_url}` for db/cache/nosql/queue — where `upgrade_url` is the human-readable claim link (e.g. `https://instanode.dev/start?t=<jwt>`) and `upgrade_jwt` is the raw JWT for programmatic use. `/webhook/new` returns `receive_url` (no internal_url). `/storage/new` adds `endpoint`, `access_key_id`, `secret_access_key`, `prefix` alongside `connection_url`.
+All accept `POST` against `https://api.instanode.dev`. No authentication header required for the anonymous tier, but every request body **must** include `name` (see below). Response shape: `{ok, token, connection_url, internal_url, tier, limits, note, upgrade_jwt, upgrade}` for db/cache/nosql/queue — where `upgrade` is the human-readable claim link (e.g. `https://api.instanode.dev/start?t=<jwt>`) and `upgrade_jwt` is the raw JWT for programmatic use. `/webhook/new` returns `receive_url` (no internal_url). `/storage/new` adds `endpoint`, `access_key_id`, `secret_access_key`, `prefix` alongside `connection_url`.
 
 ### Required `name` field (all provisioning endpoints)
 
@@ -28,7 +28,7 @@ Every provisioning endpoint — `/db/new`, `/cache/new`, `/nosql/new`, `/queue/n
 
 Pick a descriptive name per resource (e.g. `"prod-db"`, `"sessions-cache"`, `"events-queue"`) so the user can tell resources apart later.
 
-- **`POST /db/new`** — Postgres database. Requires `name`. `pgvector` pre-installed (HNSW + IVFFlat indexes work). Returns `connection_url` in the form `postgres://USER:PASS@HOST:PORT/DB`. Use any standard Postgres client / driver.
+- **`POST /db/new`** — Postgres database. Requires `name`. Returns `connection_url` in the form `postgres://USER:PASS@HOST:PORT/DB`. Use any standard Postgres client / driver. (For pgvector / HNSW + IVFFlat similarity search, use the separate `POST /vector/new` endpoint.)
 - **`POST /cache/new`** — Redis. Requires `name`. Per-token ACL'd user + namespaced keyspace. Returns `connection_url` in the form `redis://:PASS@HOST:PORT/DB`.
 - **`POST /nosql/new`** — MongoDB. Requires `name`. Per-token user scoped to a single database. Returns a `mongodb://...` connection URL. The per-token connection budget is documented in the response `limits.connections` field (e.g. anonymous = 2). The underlying shared-tenant pod admits up to 20 simultaneous connections across all tokens, so plan agents to stay well below their per-token allocation under burst.
 - **`POST /queue/new`** — NATS JetStream. Requires `name`. Returns `connection_url` (`nats://pool-<uuid>@host:4222`) with per-account subject isolation baked into the URL. No separate creds file — pass the connection_url directly to any NATS client. Durable streams, request/reply, pub/sub.

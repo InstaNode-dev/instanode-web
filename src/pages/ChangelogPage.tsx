@@ -38,6 +38,37 @@ interface ChangelogEntry {
  * procurement reviewer or an on-call engineer checking what changed. */
 const ENTRIES: ChangelogEntry[] = [
   {
+    date: '2026-05-17',
+    title: 'Bug-hunt remediation — P0/P1 fixes',
+    bullets: [
+      'Hardened POST /claim against account-takeover: a claim now requires the session it claims into and no longer mints a token for a pre-existing email.',
+      'Large deploy tarballs are read in full (io.ReadAll) — fixed a truncation bug where big multipart uploads built on a partly-zero buffer.',
+      'Redeploys now re-resolve vault:// env references, so vault-backed apps no longer break on redeploy.',
+      'Customer-deploy NetworkPolicy egress now covers the production DOKS pod/service CIDRs (was hardcoded to the dev cluster ranges).',
+    ],
+  },
+  {
+    date: '2026-05-16',
+    title: 'Tier enforcement + billing resilience',
+    bullets: [
+      'Provisioning responses now redact secret-bearing env values (credential URLs, *_KEY/_SECRET/_TOKEN keys); the dashboard masks them behind a reveal toggle.',
+      'Storage-quota enforcement now does a real provisioner-side revoke (Postgres REVOKE CONNECT, Redis ACL disable, Mongo role revoke) with auto-unsuspend when usage drops.',
+      'Plan upgrades now elevate deployments and stacks alongside resources and clear their anonymous 24h TTL — a paid app is no longer expired by the lifecycle worker.',
+      'Billing reconciler added: a 15-minute poll against Razorpay closes any missed-webhook gap in either direction.',
+      'Dedicated Redis is capped at provision time with a per-tier maxmemory; the entitlement reconciler re-applies the cap on tier changes.',
+    ],
+  },
+  {
+    date: '2026-05-15',
+    title: 'Pro storage bump + annual pricing',
+    bullets: [
+      'Pro-tier storage raised to 10 GB Postgres / 512 MB Redis / 5 GB MongoDB — a material limits increase across all Pro subscriptions.',
+      'Annual billing added for Hobby, Hobby Plus, Pro, and Team: same limits as the monthly plans, billed yearly at a discount.',
+      'Free, Hobby Plus, and Growth tiers reconciled across the pricing page, billing page, and API documentation so every surface quotes the same numbers.',
+      'Default provisioning environment is now "development" — a call that omits `env` lands in the lowest-stakes bucket instead of merging with production state.',
+    ],
+  },
+  {
     date: '2026-05-14',
     title: 'Trust + marketing accuracy pass (W12)',
     bullets: [

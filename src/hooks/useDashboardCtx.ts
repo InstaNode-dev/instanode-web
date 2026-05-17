@@ -113,9 +113,14 @@ async function refreshMe() {
 
 async function refreshCounts() {
   try {
-    const [r, v] = await Promise.all([
+    // Deployments live in their own table (GET /api/v1/deployments) — they
+    // are NOT rows in the `resources` list (resource_type === 'deploy' never
+    // appears there), so the sidebar deployments count must be sourced from
+    // api.listDeployments(), not a filter over `resources`.
+    const [r, v, d] = await Promise.all([
       api.listResources().catch(() => ({ items: [], total: 0 })),
       api.listVault(state.env).catch(() => ({ entries: [] })),
+      api.listDeployments(state.env).catch(() => ({ ok: true as const, items: [], total: 0 })),
     ])
     // Merge envs from resources too — surfaces real env names.
     const fromAPI = new Set(state.envs)
@@ -130,7 +135,7 @@ async function refreshCounts() {
       resources: items,
       counts: {
         resources: filtered.length,
-        deployments: filtered.filter((x) => x.resource_type === 'deploy').length,
+        deployments: ((d as any).items ?? []).length,
         vault: ((v as any).entries ?? []).length,
         team: 1, // no /team/members endpoint; placeholder
       },

@@ -324,6 +324,11 @@ export function Sparkline({
 }
 
 // ------------- usage bar -------------
+// The agent API emits `limit = -1` for unlimited (team-tier) quotas. A bare
+// `-1` would render a literal "-1" in the label and a NaN/negative ratio for
+// the bar fill, so `limit < 0` is treated as "unlimited": the fill stays
+// neutral (no usage ratio is meaningful against an unbounded limit) and the
+// label shows the used value against an ∞ symbol.
 export function UsageBar({
   used,
   limit,
@@ -333,7 +338,8 @@ export function UsageBar({
   limit: number
   format?: (used: string, limit: string) => string
 }) {
-  const ratio = limit > 0 ? Math.min(used / limit, 1) : 0
+  const unlimited = limit < 0
+  const ratio = !unlimited && limit > 0 ? Math.min(used / limit, 1) : 0
   const cls = ratio > 0.95 ? 'fill danger' : ratio > 0.8 ? 'fill warn' : 'fill'
   const fmt = (n: number) => {
     if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(1)} GB`
@@ -346,7 +352,7 @@ export function UsageBar({
       <span className="bar">
         <span className={cls} style={{ width: `${ratio * 100}%` }} />
       </span>
-      <span className="num">{format(fmt(used), fmt(limit))}</span>
+      <span className="num">{format(fmt(used), unlimited ? '∞' : fmt(limit))}</span>
     </div>
   )
 }

@@ -24,6 +24,7 @@ vi.mock('../api', async () => {
     ...actual,
     listResources: vi.fn().mockResolvedValue({ ok: true, items: [], total: 0 }),
     fetchActivity: vi.fn().mockResolvedValue({ ok: true, items: [] }),
+    listDeployments: vi.fn().mockResolvedValue({ ok: true, items: [], total: 0 }),
   }
 })
 
