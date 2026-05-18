@@ -162,8 +162,11 @@ const FAQ: { q: string; a: string }[] = [
     a: 'Yes — Pro and Team include multi-env workflows: POST /api/v1/stacks/:slug/promote moves a stack from staging to production (config + resource bindings preserved), and POST /api/v1/vault/copy bulk-copies vault secrets across envs with a dry-run preview. Hobby is single-env (production only).'
   },
   {
+    // P2-29: downgrades are support-only, not self-serve — matches the
+    // platform's no-self-serve-cancel/downgrade policy and the sibling
+    // billing FAQ above. The previous copy implied a self-serve toggle.
     q: 'What happens if I downgrade?',
-    a: 'Existing resources retain their old tier limits as a courtesy. New provisions follow the new tier.'
+    a: "Downgrades are handled by support — email support@instanode.dev and we'll process within 24h. Existing resources retain their old tier limits as a courtesy; new provisions follow the new tier."
   }
 ]
 
@@ -302,8 +305,11 @@ export function PricingPage() {
                   role="cell"
                 >
                   {t.comingSoon ? (
+                    // L-03: the Team tier's `cta` is an empty string, so this
+                    // pill rendered as a dead empty rounded box. Fall back to
+                    // a "coming soon" label so the cell carries meaning.
                     <span className="pricing-cta pricing-cta--disabled" aria-disabled="true">
-                      {t.cta}
+                      {t.cta || 'Coming soon'}
                     </span>
                   ) : (
                     <a
@@ -514,11 +520,13 @@ function PricingStyles() {
       }
       .pricing-row {
         display: grid;
-        /* W11: bumped to 1 feature col + 5 tier cols (anonymous, hobby,
-           hobby_plus, pro, team). Keep the feature column 1.3fr (down
-           from 1.4fr) so the extra tier column doesn't squeeze the
-           tier prices into a single line on a 1440px laptop screen. */
-        grid-template-columns: 1.3fr 1fr 1fr 1fr 1fr 1fr;
+        /* P2-30: 1 feature col + 4 tier cols — the TIERS array has exactly
+           four entries (Anonymous, Hobby, Pro, Team). hobby_plus was
+           removed from the marketing matrix on 2026-05-15, but this
+           grid-template still had its stale 6-track (1 + 5) layout, so
+           every row rendered 5 cells into 6 tracks — leaving a dead empty
+           rightmost column and narrower-than-intended cells. */
+        grid-template-columns: 1.3fr 1fr 1fr 1fr 1fr;
         align-items: stretch;
         border-bottom: 1px solid var(--border);
       }

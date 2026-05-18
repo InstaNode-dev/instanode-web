@@ -6,10 +6,16 @@ import { useState, type ReactNode } from 'react'
 import { PublicShell } from '../layout/PublicShell'
 import { copyToClipboard } from '../components/Common'
 
-const MCP_PACKAGE = '@instanode/mcp'
+// The MCP server is published to npm as the unscoped `instanode-mcp`
+// (see mcp/package.json `name`). The earlier `@instanode/mcp` scoped name
+// was never published — `npx -y @instanode/mcp` 404s. Keep this in sync
+// with mcp/package.json.
+const MCP_PACKAGE = 'instanode-mcp'
 
-const CLAUDE_CMD = `claude mcp add instanode npx -y ${MCP_PACKAGE}`
-const CURSOR_CMD = `cursor mcp add instanode npx -y ${MCP_PACKAGE}`
+// `claude mcp add` and `cursor mcp add` need a `--` separator before the
+// command + args, otherwise the CLI parses `npx` / `-y` as its own flags.
+const CLAUDE_CMD = `claude mcp add instanode -- npx -y ${MCP_PACKAGE}`
+const CURSOR_CMD = `cursor mcp add instanode -- npx -y ${MCP_PACKAGE}`
 const MCP_JSON = JSON.stringify(
   { mcpServers: { instanode: { command: 'npx', args: ['-y', MCP_PACKAGE] } } },
   null,
@@ -43,11 +49,16 @@ const PLAYGROUND_CURL = `curl -X POST https://api.instanode.dev/db/new \\
   -H 'Content-Type: application/json' \\
   -d '{"name":"prod-db"}'`
 
+// Mirrors a real POST /db/new response. `env` is echoed on every
+// provisioning response (CLAUDE.md convention #11) — a caller that omits
+// `env` lands in `development`, the lowest-stakes bucket. The earlier
+// sample dropped it, so the page misrepresented the wire shape.
 const PLAYGROUND_RESPONSE = `{
   "ok": true,
   "token": "res_2RtL9k4mP",
   "connection_url": "postgres://u_3jX:••••@shared-1.instanode.dev:5432/db_2rtL9k4mp",
   "tier": "anonymous",
+  "env": "development",
   "limits": { "storage_mb": 10, "connections": 2 },
   "upgrade_url": "https://instanode.dev/start?t=eyJhbGciOi...",
   "upgrade_jwt": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",

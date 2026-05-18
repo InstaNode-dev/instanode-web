@@ -38,6 +38,7 @@ import {
   createStack,
   fetchStackStatus,
   registerLogoutHook,
+  APIError,
 } from './index'
 // §10.21: FIXTURE_BILLING / FIXTURE_INVOICES imports retired. The 503
 // fallback paths in fetchBilling() and listInvoices() were removed —
@@ -48,13 +49,16 @@ import {
 type FetchMock = ReturnType<typeof vi.fn>
 
 /** Build a Response-like object that fetch() returns. */
-function jsonResponse(body: any, init: { status?: number; statusText?: string } = {}): Response {
+function jsonResponse(
+  body: any,
+  init: { status?: number; statusText?: string; headers?: Record<string, string> } = {},
+): Response {
   const status = init.status ?? 200
   return {
     ok: status >= 200 && status < 300,
     status,
     statusText: init.statusText ?? 'OK',
-    headers: new Headers({ 'content-type': 'application/json' }),
+    headers: new Headers({ 'content-type': 'application/json', ...(init.headers ?? {}) }),
     json: async () => body,
     text: async () => JSON.stringify(body),
   } as unknown as Response
@@ -260,12 +264,25 @@ describe('fetchBilling()', () => {
     expect(String(url)).toContain('/api/v1/billing')
   })
 
-  it("flags razorpay_configured=false when subscription_status='none'", async () => {
+  // P2-19: razorpay_configured no longer infers itself from
+  // subscription_status. A freshly-claimed paid team has no subscription
+  // yet (status='none') but Razorpay IS configured — checkout must not be
+  // suppressed. When the API omits the explicit flag we default to true.
+  it("keeps razorpay_configured=true when subscription_status='none' (API omits the flag)", async () => {
     const m = installFetch()
     m.mockResolvedValueOnce(jsonResponse({ ok: true, tier: 'hobby', subscription_status: 'none' }))
     const r = await fetchBilling()
-    expect(r.billing.razorpay_configured).toBe(false)
+    expect(r.billing.razorpay_configured).toBe(true)
     expect(r.billing.status).toBe('none')
+  })
+
+  it('honors an explicit razorpay_configured=false from the API', async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse({
+      ok: true, tier: 'hobby', subscription_status: 'none', razorpay_configured: false,
+    }))
+    const r = await fetchBilling()
+    expect(r.billing.razorpay_configured).toBe(false)
   })
 
   it("defaults billing.status to 'none' when the agent API omits subscription_status", async () => {
@@ -1732,5 +1749,65 @@ describe('fetchStackStatus()', () => {
     const m = installFetch()
     m.mockResolvedValueOnce(jsonResponse({ error: 'internal' }, { status: 500 }))
     await expect(fetchStackStatus('s1')).rejects.toMatchObject({ status: 500 })
+  })
+})
+
+// ─── APIError tier-wall envelope (P2-W2-16) ──────────────────────────────
+// A 402/403 tier-wall response carries `agent_action` + `upgrade_url`; a 429
+// carries a `Retry-After` header. The thrown APIError must preserve all
+// three so ChangePlanModal / QuotaWallBanner can render the sharpened copy
+// and a rate-limited caller has a backoff hint.
+describe('APIError — tier-wall envelope', () => {
+  it('carries agent_action + upgrade_url from a 402 body', async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse(
+      {
+        error: 'tier_limit',
+        message: 'Upgrade required',
+        agent_action: 'Tell the user to upgrade to Pro at instanode.dev/pricing',
+        upgrade_url: 'https://instanode.dev/pricing',
+      },
+      { status: 402 },
+    ))
+    try {
+      await listResources()
+      expect.unreachable('should have thrown')
+    } catch (e) {
+      expect(e).toBeInstanceOf(APIError)
+      const err = e as APIError
+      expect(err.status).toBe(402)
+      expect(err.agentAction).toContain('upgrade to Pro')
+      expect(err.upgradeUrl).toBe('https://instanode.dev/pricing')
+    }
+  })
+
+  it('parses a numeric Retry-After header on a 429', async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse(
+      { error: 'rate_limited', message: 'Too many requests' },
+      { status: 429, headers: { 'Retry-After': '30' } },
+    ))
+    try {
+      await listResources()
+      expect.unreachable('should have thrown')
+    } catch (e) {
+      const err = e as APIError
+      expect(err.status).toBe(429)
+      expect(err.retryAfter).toBe(30)
+    }
+  })
+
+  it('leaves the extras undefined on a plain error with no envelope', async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse({ error: 'db_error' }, { status: 500 }))
+    try {
+      await listResources()
+      expect.unreachable('should have thrown')
+    } catch (e) {
+      const err = e as APIError
+      expect(err.agentAction).toBeUndefined()
+      expect(err.upgradeUrl).toBeUndefined()
+      expect(err.retryAfter).toBeUndefined()
+    }
   })
 })

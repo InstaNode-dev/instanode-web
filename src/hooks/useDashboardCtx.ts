@@ -98,16 +98,21 @@ export function addEnv(name: string) {
   setEnv(clean)
 }
 
-async function refreshMe() {
+// refreshMe resolves to `true` only when the identity fetch succeeded.
+// ensureBootstrap uses that to decide whether to fire the dependent
+// counts/billing fetches — see the L-01 note there.
+async function refreshMe(): Promise<boolean> {
   state = { ...state, meLoading: true, meErr: null }
   emit()
   try {
     const me = await api.fetchMe()
     state = { ...state, me, meLoading: false }
     emit()
+    return true
   } catch (e: any) {
     state = { ...state, me: null, meErr: e?.message ?? 'auth failed', meLoading: false }
     emit()
+    return false
   }
 }
 
@@ -206,7 +211,15 @@ export function ensureBootstrap() {
   // empty localStorage. Surfaced live 2026-05-14 via Playwright debug.
   if (!api.getToken()) return
   bootstrapped = true
-  void refreshMe().then(() => {
+  void refreshMe().then((ok) => {
+    // L-01: only fan out the dependent fetches when /auth/me actually
+    // succeeded. A visitor carrying a STALE token (expired session left in
+    // localStorage) used to fire all five calls — refreshMe + the three
+    // counts calls + billing — and every one 401'd, polluting the browser
+    // console and NR RUM on the public marketing pages. fetchMe()'s 401
+    // already cleared the token via the central interceptor; skipping the
+    // dependent fetches here cuts the noise from 5 failed requests to 1.
+    if (!ok) return
     // Counts and billing are independent — fire in parallel once auth resolves.
     void refreshCounts()
     void refreshBilling()
