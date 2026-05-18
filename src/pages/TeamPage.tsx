@@ -4,17 +4,45 @@ import { ContractBanner, RolePill, RelTime, PromptCard, Card } from '../componen
 import * as api from '../api'
 import type { TeamMember, TeamInvitation } from '../api'
 import { useDashboardCtx } from '../hooks/useDashboardCtx'
+import { isRateLimited, retryAfterSeconds, formatRetryHint } from '../lib/retryHint'
+
+// LoadError — what the team-list fetch failed with. `rateLimited` lets the
+// banner show the user-facing "retry in Ns" hint for an HTTP 429 instead
+// of a bare error string (BugBash: the 429 data layer landed earlier; this
+// is the user-facing half).
+type LoadError = { message: string; rateLimited: boolean; retrySeconds: number | null }
 
 export function TeamPage() {
   const ctx = useDashboardCtx()
   const [members, setMembers] = useState<TeamMember[]>([])
   const [invites, setInvites] = useState<TeamInvitation[]>([])
+  const [err, setErr] = useState<LoadError | null>(null)
 
   useEffect(() => {
-    Promise.all([api.listMembers(), api.listInvitations()]).then(([m, i]) => {
-      setMembers(m.members)
-      setInvites(i.invitations)
-    })
+    // BugBash P3: the Promise.all had no .catch() and no cancellation
+    // guard. If either /team/members or /team/invitations rejected (429,
+    // 5xx, network), the rejection went unhandled and the page sat
+    // silently empty with zero feedback. Mirror the load pattern used by
+    // ResourcesPage / DeploymentsPage: catch → surface an error string,
+    // and an `alive` flag so a fast unmount can't setState on a dead
+    // component.
+    let alive = true
+    setErr(null)
+    Promise.all([api.listMembers(), api.listInvitations()])
+      .then(([m, i]) => {
+        if (!alive) return
+        setMembers(m.members)
+        setInvites(i.invitations)
+      })
+      .catch((e) => {
+        if (!alive) return
+        setErr({
+          message: e?.message ?? 'Could not load team members',
+          rateLimited: isRateLimited(e),
+          retrySeconds: retryAfterSeconds(e),
+        })
+      })
+    return () => { alive = false }
   }, [])
 
   // Build a personalized example invite from the current user's email domain
@@ -39,7 +67,28 @@ export function TeamPage() {
 
   return (
     <>
-
+      {err && (
+        <div
+          role="alert"
+          className="card"
+          style={{
+            padding: '10px 14px',
+            marginBottom: 16,
+            borderColor: err.rateLimited ? 'var(--amber)' : 'var(--rose)',
+            color: err.rateLimited ? 'var(--amber)' : 'var(--rose)',
+            fontSize: 12.5,
+          }}
+        >
+          {err.rateLimited ? (
+            <>
+              Too many requests — the team list is rate-limited.{' '}
+              {formatRetryHint(err.retrySeconds)}
+            </>
+          ) : (
+            <>Could not load team members — {err.message}. Reload the page to try again.</>
+          )}
+        </div>
+      )}
 
       <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr', gap: 16 }}>
         <div>

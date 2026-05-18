@@ -23,9 +23,14 @@
     <meta name="twitter:description" content="Zero-setup infrastructure for AI agents. Provision real Postgres, Redis, MongoDB, queues, storage, and deployed apps with a single HTTP call." />
     <meta name="twitter:image" content="https://instanode.dev/apple-touch-icon.png" />
 
+    <!-- favicon.ico is listed first so the browser's implicit /favicon.ico
+         request (fired regardless of <link> tags) resolves to a real file
+         instead of 404ing — BugBash P3 (W5 T10). -->
+    <link rel="icon" href="/favicon.ico" sizes="any" />
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
     <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/site.webmanifest" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link

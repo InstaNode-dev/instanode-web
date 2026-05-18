@@ -149,7 +149,7 @@ export function inline(text: string, keyPrefix = 'i'): ReactNode {
     } else {
       const href = m[2]
       if (isSafeHref(href)) {
-        parts.push(<a key={k} href={href}>{m[1]}</a>)
+        parts.push(<a key={k} href={normalizeInternalHref(href)}>{m[1]}</a>)
       } else {
         // Unsafe href (e.g. javascript:) — render as plain text
         parts.push(matched)
@@ -176,4 +176,23 @@ function isSafeHref(href: string): boolean {
   if (href.startsWith('/') || href.startsWith('#')) return true
   if (/^https?:\/\//i.test(href)) return true
   return false
+}
+
+/* normalizeInternalHref — fixes the .md-suffix inconsistency in
+ * content-repo cross-links (BugBash P3).
+ *
+ * Blog posts and use-case pages in the content repo link to sibling
+ * pages two ways: some authors write `/use-cases/foo` (the real SPA
+ * route), others write `/use-cases/foo.md` (the source filename). The
+ * `.md` form hits the SPA catch-all and silently falls back to the
+ * homepage — a dead internal link.
+ *
+ * We strip a trailing `.md` from internal hrefs (those starting with
+ * `/`) so both authoring styles resolve to the same working route.
+ * External http(s) links and anchors are left untouched — a real `.md`
+ * file on an external host is a legitimate target. A query/hash after
+ * the `.md` is preserved (e.g. `/blog/x.md#section` → `/blog/x#section`). */
+function normalizeInternalHref(href: string): string {
+  if (!href.startsWith('/')) return href
+  return href.replace(/\.md(?=$|[?#])/, '')
 }
