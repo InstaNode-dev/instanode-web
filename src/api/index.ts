@@ -82,14 +82,57 @@ export function registerLogoutHook(fn: () => void): void {
 
 // ─── Low-level fetch ─────────────────────────────────────────────────────
 
+// P2-W2-16: the tier-wall envelope. A 402 (and some 403 admin walls) carry
+// an `agent_action` — a copy-pasteable agent prompt task #33 sharpened — and
+// an `upgrade_url`. A 429 carries a `Retry-After` header (seconds). The old
+// APIError dropped all three, so every wall rendered generic "Payment
+// Required" copy and rate-limited callers had no backoff hint. APIError now
+// preserves them; callers (ChangePlanModal, QuotaWallBanner, the 429 retry
+// path) read them off the thrown error.
 export class APIError extends Error {
   status: number
   code: string
-  constructor(status: number, code: string, message: string) {
+  /** Agent prompt string from a 402/403 tier-wall envelope, if present. */
+  agentAction?: string
+  /** Upgrade/pricing URL from a 402/403 tier-wall envelope, if present. */
+  upgradeUrl?: string
+  /** Seconds to wait before retrying — from a 429 `Retry-After` header. */
+  retryAfter?: number
+  constructor(
+    status: number,
+    code: string,
+    message: string,
+    extra?: { agentAction?: string; upgradeUrl?: string; retryAfter?: number },
+  ) {
     super(message)
     this.status = status
     this.code = code
+    this.agentAction = extra?.agentAction
+    this.upgradeUrl = extra?.upgradeUrl
+    this.retryAfter = extra?.retryAfter
   }
+}
+
+// parseErrorEnvelope — pulls the wall extras (agent_action, upgrade_url) out
+// of a parsed JSON error body and the Retry-After out of the response
+// headers. Shared by call() and the three multipart helpers that build
+// their own APIError. `Retry-After` may be a delay in seconds or an HTTP
+// date; we only honor the numeric-seconds form (the API emits seconds).
+function parseErrorEnvelope(
+  res: Response,
+  body: any,
+): { agentAction?: string; upgradeUrl?: string; retryAfter?: number } {
+  const agentAction =
+    body && typeof body.agent_action === 'string' ? body.agent_action : undefined
+  const upgradeUrl =
+    body && typeof body.upgrade_url === 'string' ? body.upgrade_url : undefined
+  let retryAfter: number | undefined
+  const ra = res.headers.get('Retry-After')
+  if (ra) {
+    const secs = Number(ra)
+    if (Number.isFinite(secs) && secs >= 0) retryAfter = secs
+  }
+  return { agentAction, upgradeUrl, retryAfter }
 }
 
 // Paths where a 401 SHOULD auto-redirect to /login. Only the gated `/app/*`
@@ -120,6 +163,38 @@ const RETURN_TO_KEY = 'instanode.return_to'
  * for an anonymous visitor. The function is also a no-op outside a
  * browser environment (SSR / unit tests).
  */
+// handle401 — the shared 401 reaction: clear the stale token, and (only
+// when the user is already inside the gated `/app/*` subtree) stash the
+// return-to path and redirect to /login. Extracted from call() so the
+// multipart helpers (createDeploy / createStack) — which build their own
+// fetch and bypass call() — give an expired token the same treatment
+// instead of leaving the user in a dead retry loop (P1-W3-20).
+export function handle401(status: number): void {
+  if (status !== 401) return
+  let inGatedAppArea = false
+  try {
+    const p = location.pathname
+    inGatedAppArea = AUTH_REDIRECT_REQUIRED_PREFIXES.some(
+      (prefix) => p === prefix || p.startsWith(prefix + '/'),
+    )
+  } catch {
+    /* non-browser env (jsdom-less tests) — treat as not in /app */
+  }
+  // Always clear the stale token so subsequent calls don't re-attach it.
+  // Only navigate when we're already inside the gated area.
+  clearToken()
+  if (inGatedAppArea) {
+    try {
+      localStorage.setItem(RETURN_TO_KEY, location.pathname + location.search)
+    } catch {
+      /* localStorage / location unavailable — best-effort only */
+    }
+    if (typeof window !== 'undefined') {
+      window.location.replace('/login')
+    }
+  }
+}
+
 async function call<T>(
   path: string,
   init: RequestInit = {},
@@ -145,33 +220,10 @@ async function call<T>(
   const ct = res.headers.get('content-type') ?? ''
   const body: any = ct.includes('application/json') ? await res.json().catch(() => null) : await res.text()
   if (!res.ok) {
-    if (res.status === 401) {
-      let inGatedAppArea = false
-      try {
-        const p = location.pathname
-        inGatedAppArea = AUTH_REDIRECT_REQUIRED_PREFIXES.some(
-          (prefix) => p === prefix || p.startsWith(prefix + '/'),
-        )
-      } catch {
-        /* non-browser env (jsdom-less tests) — treat as not in /app */
-      }
-      // Always clear the stale token so subsequent calls don't re-attach
-      // it. Only navigate when we're already inside the gated area.
-      clearToken()
-      if (inGatedAppArea) {
-        try {
-          localStorage.setItem(RETURN_TO_KEY, location.pathname + location.search)
-        } catch {
-          /* localStorage / location unavailable — best-effort only */
-        }
-        if (typeof window !== 'undefined') {
-          window.location.replace('/login')
-        }
-      }
-    }
+    handle401(res.status)
     const code = (body && body.error) || `http_${res.status}`
     const msg = (body && (body.message || body.error_description)) || res.statusText
-    throw new APIError(res.status, code, msg)
+    throw new APIError(res.status, code, msg, parseErrorEnvelope(res, body))
   }
   return body as T
 }
@@ -984,7 +1036,11 @@ export async function createDeploy(
     const code = (respBody && respBody.error) || `http_${res.status}`
     const msg =
       (respBody && (respBody.message || respBody.error_description)) || res.statusText
-    throw new APIError(res.status, code, msg)
+    // P1-W3-20: this multipart path bypasses call() (and its central 401
+    // redirect). Re-run the 401 token-clear here so an expired token on a
+    // deploy doesn't leave the user in a dead retry loop.
+    if (res.status === 401) handle401(res.status)
+    throw new APIError(res.status, code, msg, parseErrorEnvelope(res, respBody))
   }
 
   if (!respBody?.item) {
@@ -1426,14 +1482,21 @@ export async function createStack(
   if (!res.ok) {
     const code = (body && body.error) || `http_${res.status}`
     const msg = (body && (body.message || body.error_description)) || res.statusText
-    throw new APIError(res.status, code, msg)
+    // P1-W3-20: mirror call()'s 401 handling — this multipart path bypasses
+    // the central interceptor.
+    if (res.status === 401) handle401(res.status)
+    throw new APIError(res.status, code, msg, parseErrorEnvelope(res, body))
   }
 
   // Synchronous 202 / 200 — the server hands back the slug + initial state.
   // Fields tolerated as optional because the api may add/drop them across
   // versions; the page polls /api/v1/stacks/:slug for the canonical state.
+  // P2 (W3 T5): `/stacks/new` may return the slug under `slug`, `stack_id`,
+  // or `stack_slug` across api versions — accept all three so the polling
+  // loop in StackCreatePage always has a key (an empty slug silently never
+  // resolved).
   const stack: CreateStackResponse = {
-    slug: body?.slug ?? body?.stack_id ?? '',
+    slug: body?.slug ?? body?.stack_id ?? body?.stack_slug ?? '',
     status: (body?.status as StackStatus) ?? 'building',
     url: body?.url ?? null,
     name: body?.name,
@@ -1591,6 +1654,10 @@ type BillingStateResp = {
   billing_email?: string
   razorpay_subscription_id?: string | null
   razorpay_customer_id?: string | null
+  // Explicit "is Razorpay configured in this environment" flag. Older API
+  // builds (GET /api/v1/billing) omit it — see mapBillingState for how an
+  // absent value is resolved.
+  razorpay_configured?: boolean
 }
 
 /* Map the agent API's BillingStateResp into the dashboard's BillingDetails
@@ -1601,7 +1668,14 @@ function mapBillingState(r: BillingStateResp): BillingDetails {
   return {
     status: r.subscription_status ?? 'none',
     current_period_end: r.next_renewal_at ?? null,
-    razorpay_configured: r.subscription_status !== 'none',
+    // P2-19: `razorpay_configured` previously inferred itself from
+    // `subscription_status !== 'none'`. That conflates "the team already
+    // has a subscription" with "checkout is available" — a freshly-claimed
+    // paid team (subscription_status='none') would see checkout suppressed
+    // even though Razorpay is configured. Prefer the explicit wire field
+    // when the API sends it; otherwise default to `true` (Razorpay is
+    // configured in production) so checkout is never wrongly hidden.
+    razorpay_configured: r.razorpay_configured ?? true,
     subscription_status: r.subscription_status,
     payment_last4: r.payment_method?.last4,
     payment_network: r.payment_method?.brand,
@@ -1619,14 +1693,52 @@ export async function fetchBilling(): Promise<{ ok: true; plan: string; billing:
   return { ok: true as const, plan: r.tier, billing: mapBillingState(r) }
 }
 
-type InvoicesResp = { ok: boolean; invoices?: Invoice[] }
+// Wire shape of one invoice row from GET /api/v1/billing/invoices. Mirrors
+// api/internal/handlers/billing.go::ListInvoicesAPI exactly: a Razorpay
+// invoice has a single `amount` (in the currency's smallest unit — paise
+// for INR) and a single `date`, with no billing period or plan tier.
+type InvoiceWire = {
+  id: string
+  amount: number
+  currency: string
+  status: string
+  date: string
+  pdf_url?: string
+}
+type InvoicesResp = { ok: boolean; invoices?: InvoiceWire[] }
+
+// VALID_INVOICE_STATUSES — the three states the dashboard's Invoice type
+// models. Razorpay can also emit 'issued' / 'expired' / 'cancelled'; any
+// status outside this set collapses to 'pending' so the UI renders a
+// neutral pill instead of an unstyled raw string.
+const VALID_INVOICE_STATUSES: ReadonlySet<string> = new Set(['paid', 'pending', 'failed'])
+
+// mapInvoice — converts the agent API's wire shape into the dashboard's
+// normalized Invoice type. The previous `r.invoices ?? []` blind cast let
+// the wire's {amount,date} reach a UI expecting {amount_cents,period_*},
+// rendering "Invalid Date" / "$NaN" on every row. `amount` is already in
+// the smallest currency unit (paise/cents) — it maps to `amount_cents`
+// directly, NO ×100. `period_start` / `period_end` / `plan` are not on
+// the wire and stay undefined; the BillingPage renders around them.
+function mapInvoice(w: InvoiceWire): Invoice {
+  return {
+    id: w.id,
+    issued_at: w.date,
+    amount_cents: w.amount,
+    currency: w.currency,
+    status: VALID_INVOICE_STATUSES.has(w.status)
+      ? (w.status as Invoice['status'])
+      : 'pending',
+    pdf_url: w.pdf_url,
+  }
+}
 
 export async function listInvoices(): Promise<{ ok: true; invoices: Invoice[] }> {
   // §10.21: errors propagate. The previous 503 fallback returned three
   // mock "paid" invoices that didn't correspond to any real payment;
   // BillingPage now surfaces the failure honestly.
   const r = await call<InvoicesResp>('/api/v1/billing/invoices')
-  return { ok: true, invoices: r.invoices ?? [] }
+  return { ok: true, invoices: (r.invoices ?? []).map(mapInvoice) }
 }
 
 // PlanFrequency selects between the monthly and yearly Razorpay plan_id at
@@ -1771,6 +1883,26 @@ export async function updatePaymentMethod(): Promise<{ ok: true; short_url: stri
 // dependency on src/components/TierCard.tsx (which restricts TierKey to
 // the grid's four columns for an unrelated UI reason).
 export type ChangePlanTier = 'hobby' | 'hobby_plus' | 'pro' | 'team' | 'growth'
+
+// TIER_RANK — the single canonical totally-ordered rank of plan tiers for
+// the dashboard. Higher rank = more capacity. Anchored to api/plans.yaml
+// pricing (hobby $9 < hobby_plus $19 < pro $49 < growth $99 < team $199)
+// and kept byte-for-byte aligned with the backend's common/plans/rank.go.
+//
+// IMPORTANT: pro sits strictly BELOW growth. An earlier inverted copy
+// (growth:4, pro:5) lived independently in ChangePlanModal and
+// TierChangeModal — the admin console then showed "DEMOTE" for a
+// pro→growth upgrade. Both modals now import this one table so they can't
+// re-diverge. If the tier ladder changes, edit here AND rank.go together.
+export const TIER_RANK: Record<string, number> = {
+  anonymous: 0,
+  free: 1,
+  hobby: 2,
+  hobby_plus: 3,
+  pro: 4,
+  growth: 5,
+  team: 6,
+}
 
 // changePlan — LIVE. POST /api/v1/billing/change-plan upgrades an *existing*
 // Razorpay subscription to a different plan tier in-place, rather than

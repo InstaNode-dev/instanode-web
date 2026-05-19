@@ -36,6 +36,7 @@
 import { useEffect } from 'react'
 import { useLocation } from 'react-router-dom'
 import { useDashboardCtx } from '../hooks/useDashboardCtx'
+import { titleForPath } from '../lib/routeMeta'
 
 // NR API surface — typed loosely because the agent attaches at runtime
 // and may be absent (no license key, ad-blocker, agent boot failed).
@@ -55,6 +56,17 @@ const COMMIT_ID_FALLBACK = 'dev'
 export function RouteTracker(): null {
   const location = useLocation()
   const ctx = useDashboardCtx()
+
+  // Per-route document.title for SPA soft navigation (WCAG 2.4.2 "Page
+  // Titled"). The build-time prerender writes the correct <title> into the
+  // first-byte HTML, but React Router never updates document.title on a
+  // client-side navigation — so every soft-navigated page kept the
+  // previous (often the homepage) title in the tab, browser history, and
+  // for screen-reader users. This runs independently of the NR agent.
+  useEffect(() => {
+    if (typeof document === 'undefined') return
+    document.title = titleForPath(location.pathname || '/')
+  }, [location.pathname])
 
   useEffect(() => {
     // The agent might not have booted yet on the first render (the npm

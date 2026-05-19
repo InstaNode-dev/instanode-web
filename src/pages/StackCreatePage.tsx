@@ -217,6 +217,17 @@ export function StackCreatePage() {
             setStage('failed')
             return
           }
+        } else {
+          // P2 (W3 T5): fetchStackStatus returns { stack: null } on a 404 —
+          // the stack was deleted (or never owned by this team). Previously
+          // a null was indistinguishable from "still building", so the page
+          // polled a dead slug for the full 5-minute window. Stop now and
+          // surface the failure instead of spinning.
+          setErrorMsg(
+            'Stack not found — it may have been deleted. Start a new deploy from the form.',
+          )
+          setStage('error')
+          return
         }
       } catch {
         // transient — let the timeout decide. We don't want a one-off 5xx

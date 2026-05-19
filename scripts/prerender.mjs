@@ -27,7 +27,7 @@
 
 import { build } from 'vite'
 import { readFile, writeFile, mkdir, rm } from 'fs/promises'
-import { existsSync, readdirSync } from 'fs'
+import { existsSync, readdirSync, readFileSync } from 'fs'
 import { resolve, dirname } from 'path'
 import { fileURLToPath } from 'url'
 
@@ -80,6 +80,170 @@ async function loadRoutes() {
     ...blogSlugs.map((s) => `/blog/${s}`),
     ...useCaseSlugs.map((s) => `/use-cases/${s}`),
   ]
+}
+
+const SITE_ORIGIN = 'https://instanode.dev'
+const DEFAULT_OG_IMAGE = `${SITE_ORIGIN}/apple-touch-icon.png`
+
+/** ROUTE_META — per-route <head> overrides. Without this every pre-rendered
+ * subpage shipped the homepage <title> + canonical (self-canonicalizing to
+ * https://instanode.dev/), so Google could drop /pricing, /docs, /blog from
+ * the index, and SPA navigation never updated the document title (WCAG
+ * 2.4.2). Blog-post and use-case detail pages are NOT listed here — their
+ * title/description come from each file's frontmatter (see metaForRoute). */
+const ROUTE_META = {
+  '/': {
+    title: 'instanode · Real infrastructure for AI agents',
+    description:
+      'Zero-setup infrastructure for AI agents. Provision real Postgres, Redis, MongoDB, queues, storage, and deployed apps with a single HTTP call. No account, no Docker, no configuration.',
+  },
+  '/pricing': {
+    title: 'Pricing · instanode',
+    description:
+      'Simple pricing for instanode. Anonymous tier free with a 24h TTL; Hobby $9/mo and Pro $49/mo for everything an AI agent needs to ship a working app — database, cache, queue, storage, and deployment.',
+  },
+  '/for-agents': {
+    title: 'For agents · instanode',
+    description:
+      'How AI coding agents use instanode: a single HTTP call provisions real Postgres, Redis, MongoDB, queues, storage, and deployments — no account, no MCP install required.',
+  },
+  '/status': {
+    title: 'Status · instanode',
+    description: 'Live operational status for the instanode platform and its provisioning services.',
+  },
+  '/incidents': {
+    title: 'Incidents · instanode',
+    description: 'Incident history and post-mortems for the instanode platform.',
+  },
+  '/docs': {
+    title: 'Documentation · instanode',
+    description:
+      'instanode API documentation — provision databases, caches, queues, storage, and deploy applications. Every curl example works against https://api.instanode.dev as-is.',
+  },
+  '/blog': {
+    title: 'Blog · instanode',
+    description:
+      'Build notes, retrospectives, and engineering writing on what "frictionless for AI agents" actually means.',
+  },
+  '/use-cases': {
+    title: 'Use cases · instanode',
+    description:
+      'Real scenarios where AI agents provision and deploy with instanode — each with a paste-ready prompt any LLM can act on.',
+  },
+  '/changelog': {
+    title: 'Changelog · instanode',
+    description: 'What shipped, and when — the running changelog for the instanode platform.',
+  },
+  '/privacy': {
+    title: 'Privacy · instanode',
+    description: 'The instanode privacy policy.',
+  },
+  '/terms': {
+    title: 'Terms · instanode',
+    description: 'The instanode terms of service.',
+  },
+}
+
+/** escapeHtmlAttr — minimal escaping for text injected into an HTML
+ * attribute value. Frontmatter titles/excerpts are author-controlled but
+ * may legitimately contain quotes / ampersands. */
+function escapeHtmlAttr(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+}
+
+/** metaForRoute — resolve the {title, description} for a route. Static
+ * routes come from ROUTE_META; /blog/:slug and /use-cases/:slug detail
+ * pages derive theirs from the content file's frontmatter. */
+function metaForRoute(route) {
+  if (ROUTE_META[route]) return ROUTE_META[route]
+
+  const blogMatch = route.match(/^\/blog\/(.+)$/)
+  if (blogMatch) {
+    const src = resolve(ROOT, '.content/blog', `${blogMatch[1]}.md`)
+    if (existsSync(src)) {
+      const meta = parseFrontmatter(readFileSync(src, 'utf-8'))
+      return {
+        title: meta.title ? `${meta.title} · instanode blog` : ROUTE_META['/blog'].title,
+        description: meta.excerpt || ROUTE_META['/blog'].description,
+      }
+    }
+    return ROUTE_META['/blog']
+  }
+
+  const useCaseMatch = route.match(/^\/use-cases\/(.+)$/)
+  if (useCaseMatch) {
+    const src = resolve(ROOT, '.content/use-cases', `${useCaseMatch[1]}.md`)
+    if (existsSync(src)) {
+      const meta = parseFrontmatter(readFileSync(src, 'utf-8'))
+      return {
+        title: meta.title ? `${meta.title} · instanode use case` : ROUTE_META['/use-cases'].title,
+        description: meta.scenario || meta.excerpt || ROUTE_META['/use-cases'].description,
+      }
+    }
+    return ROUTE_META['/use-cases']
+  }
+
+  // Unknown route — fall back to the homepage meta rather than leaving the
+  // stale template values.
+  return ROUTE_META['/']
+}
+
+/** rewriteHead — replace the homepage-default <head> tags in the SPA
+ * template with the route's own title / description / canonical / OG /
+ * Twitter values. Each tag is matched by a stable signature and swapped in
+ * place, so the rest of <head> (favicons, fonts, theme-color) is untouched. */
+function rewriteHead(template, route, meta) {
+  const canonical = route === '/' ? `${SITE_ORIGIN}/` : `${SITE_ORIGIN}${route}`
+  const title = escapeHtmlAttr(meta.title)
+  const desc = escapeHtmlAttr(meta.description)
+  let html = template
+
+  // <title>
+  html = html.replace(
+    /<title>[\s\S]*?<\/title>/,
+    `<title>${title}</title>`,
+  )
+  // <meta name="description">
+  html = html.replace(
+    /<meta name="description" content="[\s\S]*?" \/>/,
+    `<meta name="description" content="${desc}" />`,
+  )
+  // <link rel="canonical">
+  html = html.replace(
+    /<link rel="canonical" href="[\s\S]*?" \/>/,
+    `<link rel="canonical" href="${canonical}" />`,
+  )
+  // Open Graph
+  html = html.replace(
+    /<meta property="og:title" content="[\s\S]*?" \/>/,
+    `<meta property="og:title" content="${title}" />`,
+  )
+  html = html.replace(
+    /<meta property="og:description" content="[\s\S]*?" \/>/,
+    `<meta property="og:description" content="${desc}" />`,
+  )
+  html = html.replace(
+    /<meta property="og:url" content="[\s\S]*?" \/>/,
+    `<meta property="og:url" content="${canonical}" />`,
+  )
+  html = html.replace(
+    /<meta property="og:image" content="[\s\S]*?" \/>/,
+    `<meta property="og:image" content="${DEFAULT_OG_IMAGE}" />`,
+  )
+  // Twitter
+  html = html.replace(
+    /<meta name="twitter:title" content="[\s\S]*?" \/>/,
+    `<meta name="twitter:title" content="${title}" />`,
+  )
+  html = html.replace(
+    /<meta name="twitter:description" content="[\s\S]*?" \/>/,
+    `<meta name="twitter:description" content="${desc}" />`,
+  )
+  return html
 }
 
 /** routeToFile — map a URL to its on-disk index.html path under dist/.
@@ -135,7 +299,12 @@ async function main() {
   let written = 0
   for (const route of routes) {
     const html = render(route)
-    const rendered = template.replace('<div id="root"></div>', `<div id="root">${html}</div>`)
+    // Per-route <head>: swap the homepage-default title / description /
+    // canonical / OG / Twitter tags for this route's own values before
+    // splicing in the SSR body. Without this every subpage self-
+    // canonicalized to https://instanode.dev/ and shared one <title>.
+    const head = rewriteHead(template, route, metaForRoute(route))
+    const rendered = head.replace('<div id="root"></div>', `<div id="root">${html}</div>`)
     const outPath = routeToFile(route)
     await mkdir(dirname(outPath), { recursive: true })
     await writeFile(outPath, rendered, 'utf-8')
@@ -242,6 +411,16 @@ async function main() {
   await writeAggregate(mdRoutes)
   console.log('prerender: wrote llms-full.txt aggregate')
 
+  // Step 7.5: generate sitemap.xml from the exact set of pre-rendered
+  // routes. The previous static public/sitemap.xml was hand-maintained
+  // and listed only 7 of ~130 URLs (no /incidents, /use-cases,
+  // /changelog, /privacy, /terms, and none of the blog / use-case detail
+  // pages) with a frozen lastmod. Deriving it from `routes` here means
+  // adding a blog post or use-case in the content repo automatically
+  // expands the sitemap with no manual edit.
+  await writeSitemap(routes)
+  console.log(`prerender: wrote sitemap.xml (${routes.length + 1} urls)`)
+
   // Step 8: clean up the SSR bundle — it's only needed during this script.
   // Leaving it in dist-ssr would inflate the GH Pages upload by ~400 KB.
   await rm(SSR_DIST, { recursive: true, force: true })
@@ -329,6 +508,55 @@ async function emitMarkdownRoutes() {
   }
 
   return out
+}
+
+/* writeSitemap — emit dist/sitemap.xml covering every pre-rendered route
+ * plus /llms.txt. Per-route priority/changefreq are derived from the path
+ * shape; lastmod is the build date so the file is never stale. */
+async function writeSitemap(routes) {
+  const today = new Date().toISOString().slice(0, 10)
+
+  function hints(route) {
+    if (route === '/') return { priority: '1.0', changefreq: 'weekly' }
+    if (route === '/pricing') return { priority: '0.9', changefreq: 'weekly' }
+    if (route === '/status') return { priority: '0.6', changefreq: 'hourly' }
+    if (route === '/changelog' || route === '/incidents')
+      return { priority: '0.6', changefreq: 'weekly' }
+    if (route === '/privacy' || route === '/terms')
+      return { priority: '0.3', changefreq: 'yearly' }
+    if (route.startsWith('/blog/') || route.startsWith('/use-cases/'))
+      return { priority: '0.6', changefreq: 'monthly' }
+    return { priority: '0.7', changefreq: 'weekly' }
+  }
+
+  // Every pre-rendered route + the llms.txt manifest.
+  const entries = [
+    ...routes.map((route) => ({
+      loc: route === '/' ? `${SITE_ORIGIN}/` : `${SITE_ORIGIN}${route}`,
+      ...hints(route),
+    })),
+    { loc: `${SITE_ORIGIN}/llms.txt`, priority: '0.6', changefreq: 'monthly' },
+  ]
+
+  const body = entries
+    .map(
+      (e) =>
+        `  <url>\n` +
+        `    <loc>${e.loc}</loc>\n` +
+        `    <lastmod>${today}</lastmod>\n` +
+        `    <changefreq>${e.changefreq}</changefreq>\n` +
+        `    <priority>${e.priority}</priority>\n` +
+        `  </url>`,
+    )
+    .join('\n')
+
+  const xml =
+    `<?xml version="1.0" encoding="UTF-8"?>\n` +
+    `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n` +
+    `${body}\n` +
+    `</urlset>\n`
+
+  await writeFile(resolve(DIST, 'sitemap.xml'), xml, 'utf-8')
 }
 
 /* writeAggregate — bundle every .md mirror into one llms-full.txt at

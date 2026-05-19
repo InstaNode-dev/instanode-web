@@ -38,6 +38,8 @@ import {
   createStack,
   fetchStackStatus,
   registerLogoutHook,
+  APIError,
+  TIER_RANK,
 } from './index'
 // §10.21: FIXTURE_BILLING / FIXTURE_INVOICES imports retired. The 503
 // fallback paths in fetchBilling() and listInvoices() were removed —
@@ -48,13 +50,16 @@ import {
 type FetchMock = ReturnType<typeof vi.fn>
 
 /** Build a Response-like object that fetch() returns. */
-function jsonResponse(body: any, init: { status?: number; statusText?: string } = {}): Response {
+function jsonResponse(
+  body: any,
+  init: { status?: number; statusText?: string; headers?: Record<string, string> } = {},
+): Response {
   const status = init.status ?? 200
   return {
     ok: status >= 200 && status < 300,
     status,
     statusText: init.statusText ?? 'OK',
-    headers: new Headers({ 'content-type': 'application/json' }),
+    headers: new Headers({ 'content-type': 'application/json', ...(init.headers ?? {}) }),
     json: async () => body,
     text: async () => JSON.stringify(body),
   } as unknown as Response
@@ -260,12 +265,25 @@ describe('fetchBilling()', () => {
     expect(String(url)).toContain('/api/v1/billing')
   })
 
-  it("flags razorpay_configured=false when subscription_status='none'", async () => {
+  // P2-19: razorpay_configured no longer infers itself from
+  // subscription_status. A freshly-claimed paid team has no subscription
+  // yet (status='none') but Razorpay IS configured — checkout must not be
+  // suppressed. When the API omits the explicit flag we default to true.
+  it("keeps razorpay_configured=true when subscription_status='none' (API omits the flag)", async () => {
     const m = installFetch()
     m.mockResolvedValueOnce(jsonResponse({ ok: true, tier: 'hobby', subscription_status: 'none' }))
     const r = await fetchBilling()
-    expect(r.billing.razorpay_configured).toBe(false)
+    expect(r.billing.razorpay_configured).toBe(true)
     expect(r.billing.status).toBe('none')
+  })
+
+  it('honors an explicit razorpay_configured=false from the API', async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse({
+      ok: true, tier: 'hobby', subscription_status: 'none', razorpay_configured: false,
+    }))
+    const r = await fetchBilling()
+    expect(r.billing.razorpay_configured).toBe(false)
   })
 
   it("defaults billing.status to 'none' when the agent API omits subscription_status", async () => {
@@ -330,16 +348,36 @@ describe('fetchBilling()', () => {
 
 // ─── listInvoices() ──────────────────────────────────────────────────────
 describe('listInvoices()', () => {
-  it('returns the API invoices on a successful response', async () => {
+  // D4 (P1-W4-09): the agent API emits each invoice as the Razorpay wire
+  // shape { id, amount, currency, status, date, pdf_url } — `amount` is
+  // already in the smallest currency unit (paise/cents) and there is no
+  // billing period or plan tier. listInvoices() now maps that into the
+  // dashboard's normalized Invoice type instead of a blind cast.
+  it('maps the Razorpay wire shape into the normalized Invoice type', async () => {
     const m = installFetch()
-    const sample = [
-      { id: 'inv_a', period_start: '2026-04-01', period_end: '2026-05-01', plan: 'pro', amount_cents: 4900, currency: 'USD', status: 'paid' },
-      { id: 'inv_b', period_start: '2026-03-01', period_end: '2026-04-01', plan: 'pro', amount_cents: 4900, currency: 'USD', status: 'paid' },
+    const wire = [
+      { id: 'inv_a', amount: 4900, currency: 'USD', status: 'paid', date: '2026-05-01T00:00:00Z', pdf_url: 'https://x/a.pdf' },
+      { id: 'inv_b', amount: 4900, currency: 'USD', status: 'paid', date: '2026-04-01T00:00:00Z' },
     ]
-    m.mockResolvedValueOnce(jsonResponse({ ok: true, invoices: sample }))
+    m.mockResolvedValueOnce(jsonResponse({ ok: true, invoices: wire }))
     const r = await listInvoices()
     expect(r.ok).toBe(true)
-    expect(r.invoices).toEqual(sample)
+    // `amount` → `amount_cents` is a direct copy (NOT ×100); `date` →
+    // `issued_at`; period/plan are absent and stay undefined.
+    expect(r.invoices).toEqual([
+      { id: 'inv_a', issued_at: '2026-05-01T00:00:00Z', amount_cents: 4900, currency: 'USD', status: 'paid', pdf_url: 'https://x/a.pdf' },
+      { id: 'inv_b', issued_at: '2026-04-01T00:00:00Z', amount_cents: 4900, currency: 'USD', status: 'paid', pdf_url: undefined },
+    ])
+  })
+
+  it('collapses an unknown invoice status to "pending"', async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse({
+      ok: true,
+      invoices: [{ id: 'inv_c', amount: 900, currency: 'INR', status: 'issued', date: '2026-05-10T00:00:00Z' }],
+    }))
+    const r = await listInvoices()
+    expect(r.invoices[0].status).toBe('pending')
   })
 
   it('hits GET /api/v1/billing/invoices', async () => {
@@ -375,6 +413,38 @@ describe('listInvoices()', () => {
       { status: 500 },
     ))
     await expect(listInvoices()).rejects.toMatchObject({ status: 500 })
+  })
+})
+
+// ─── TIER_RANK ordering (D3 / P1-W4-10) ──────────────────────────────────
+// Pins the canonical tier ladder. The bug this guards against: an inverted
+// copy with growth:4, pro:5 lived independently in ChangePlanModal and
+// TierChangeModal, so the admin console showed "DEMOTE" for a pro→growth
+// upgrade. growth ($99) must rank strictly ABOVE pro ($49). This table is
+// the single source both modals import — kept aligned with the backend's
+// common/plans/rank.go.
+describe('TIER_RANK — canonical tier ladder (D3)', () => {
+  it('orders tiers low → high by price', () => {
+    expect(TIER_RANK).toEqual({
+      anonymous: 0,
+      free: 1,
+      hobby: 2,
+      hobby_plus: 3,
+      pro: 4,
+      growth: 5,
+      team: 6,
+    })
+  })
+
+  it('ranks growth strictly above pro (the inversion the bug had backwards)', () => {
+    expect(TIER_RANK.growth).toBeGreaterThan(TIER_RANK.pro)
+  })
+
+  it('is strictly monotonic across the full ladder', () => {
+    const ladder = ['anonymous', 'free', 'hobby', 'hobby_plus', 'pro', 'growth', 'team']
+    for (let i = 1; i < ladder.length; i++) {
+      expect(TIER_RANK[ladder[i]]).toBeGreaterThan(TIER_RANK[ladder[i - 1]])
+    }
   })
 })
 
@@ -1732,5 +1802,65 @@ describe('fetchStackStatus()', () => {
     const m = installFetch()
     m.mockResolvedValueOnce(jsonResponse({ error: 'internal' }, { status: 500 }))
     await expect(fetchStackStatus('s1')).rejects.toMatchObject({ status: 500 })
+  })
+})
+
+// ─── APIError tier-wall envelope (P2-W2-16) ──────────────────────────────
+// A 402/403 tier-wall response carries `agent_action` + `upgrade_url`; a 429
+// carries a `Retry-After` header. The thrown APIError must preserve all
+// three so ChangePlanModal / QuotaWallBanner can render the sharpened copy
+// and a rate-limited caller has a backoff hint.
+describe('APIError — tier-wall envelope', () => {
+  it('carries agent_action + upgrade_url from a 402 body', async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse(
+      {
+        error: 'tier_limit',
+        message: 'Upgrade required',
+        agent_action: 'Tell the user to upgrade to Pro at instanode.dev/pricing',
+        upgrade_url: 'https://instanode.dev/pricing',
+      },
+      { status: 402 },
+    ))
+    try {
+      await listResources()
+      expect.unreachable('should have thrown')
+    } catch (e) {
+      expect(e).toBeInstanceOf(APIError)
+      const err = e as APIError
+      expect(err.status).toBe(402)
+      expect(err.agentAction).toContain('upgrade to Pro')
+      expect(err.upgradeUrl).toBe('https://instanode.dev/pricing')
+    }
+  })
+
+  it('parses a numeric Retry-After header on a 429', async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse(
+      { error: 'rate_limited', message: 'Too many requests' },
+      { status: 429, headers: { 'Retry-After': '30' } },
+    ))
+    try {
+      await listResources()
+      expect.unreachable('should have thrown')
+    } catch (e) {
+      const err = e as APIError
+      expect(err.status).toBe(429)
+      expect(err.retryAfter).toBe(30)
+    }
+  })
+
+  it('leaves the extras undefined on a plain error with no envelope', async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse({ error: 'db_error' }, { status: 500 }))
+    try {
+      await listResources()
+      expect.unreachable('should have thrown')
+    } catch (e) {
+      const err = e as APIError
+      expect(err.agentAction).toBeUndefined()
+      expect(err.upgradeUrl).toBeUndefined()
+      expect(err.retryAfter).toBeUndefined()
+    }
   })
 })

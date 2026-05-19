@@ -213,6 +213,25 @@ export function MarketingPage() {
             <a href={ROUTES.signin} className="btn btn-primary">
               Get a token <span aria-hidden="true">→</span>
             </a>
+            {/* P2-31: mobile disclosure menu. The .mkt-nav-links row is
+                display:none at ≤880px — without this <details> menu, phone
+                visitors had no path to /pricing, /docs, /blog, /changelog.
+                CSS-only (no JS) so it works in the SSG-prerendered HTML
+                before hydration. Hidden above 880px where the inline links
+                already render. */}
+            <details className="mkt-nav-menu">
+              <summary className="mkt-nav-menu-btn" aria-label="Open navigation menu">
+                <span aria-hidden="true">☰</span>
+              </summary>
+              <div className="mkt-nav-menu-panel">
+                <a href={ROUTES.pricing}>Pricing</a>
+                <a href={ROUTES.forAgents}>For agents</a>
+                <a href={ROUTES.docs}>Docs</a>
+                <a href={ROUTES.blog}>Blog</a>
+                <a href={ROUTES.changelog}>Changelog</a>
+                <a href={ROUTES.signin}>Sign in</a>
+              </div>
+            </details>
           </div>
         </div>
       </nav>
@@ -735,8 +754,51 @@ const MKT_CSS = `
 .mkt-nav-links a:hover { color: var(--text); background: rgba(255,255,255,0.04); }
 .mkt-nav-cta { display: flex; gap: 8px; align-items: center; }
 
+/* P2-31: mobile disclosure menu — hidden above 880px (the inline
+   .mkt-nav-links row carries nav there), shown at ≤880px. */
+.mkt-nav-menu { display: none; position: relative; }
+.mkt-nav-menu-btn {
+  list-style: none;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px; height: 36px;
+  font-size: 16px;
+  color: var(--text-dim);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: rgba(255,255,255,0.02);
+}
+.mkt-nav-menu-btn::-webkit-details-marker { display: none; }
+.mkt-nav-menu[open] .mkt-nav-menu-btn { color: var(--text); }
+.mkt-nav-menu-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  min-width: 180px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  background: rgba(8, 8, 10, 0.96);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 12px 32px rgba(0,0,0,0.4);
+}
+.mkt-nav-menu-panel a {
+  padding: 9px 12px;
+  font-size: 14px;
+  color: var(--text-dim);
+  border-radius: var(--radius-sm);
+}
+.mkt-nav-menu-panel a:hover { color: var(--text); background: rgba(255,255,255,0.04); }
+
 @media (max-width: 880px) {
   .mkt-nav-links { display: none; }
+  .mkt-nav-menu { display: block; }
 }
 @media (max-width: 560px) {
   .mkt-hide-mobile { display: none !important; }
