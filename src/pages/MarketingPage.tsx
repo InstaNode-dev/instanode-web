@@ -164,22 +164,28 @@ const PLANS: Plan[] = [
       '10 GB Postgres · 20 conn',
       '512 MB Redis · 5 GB Mongo · 20 conn',
       '50 GB object storage · 10 medium deployments · custom domain',
-      '200 vault entries · multi-env (dev/staging/prod + custom)',
+      // BugBash P3-08: kept in sync with PricingPage's "Vault envs" row
+      // and the multi-env FAQ — Pro's multi-env is dev/staging/prod. The
+      // earlier "+ custom" claim implied arbitrary named environments the
+      // tier does not actually grant; PricingPage never carried it.
+      '200 vault entries · multi-env (dev/staging/prod)',
     ],
     cta: { label: 'Start pro →', href: ROUTES.signin, variant: 'primary' },
   },
   {
     // Team tier — not launched yet. Per launch posture (2026-05-15), the
     // homepage card shows ONLY a "coming soon" placeholder. No price, no
-    // feature list, no CTA. The full Team launch will swap this card to
-    // a real tier once multi-seat / RBAC / SSO are shipped.
+    // feature list. BugBash P3-09: the CTA is rendered as a 'disabled'
+    // variant so the card shows a "Coming soon" pill instead of an empty
+    // <a href=""> dead button — and the pricing teaser's "talk to us"
+    // line links to a real contact address.
     id: 'team',
     name: 'Team',
     tagline: 'For the engineering org. Coming soon.',
     price: 'coming soon',
     freq: '',
     features: [],
-    cta: { label: '', href: '', variant: 'primary' },
+    cta: { label: 'Coming soon', href: '', variant: 'disabled' },
     comingSoon: true,
   },
 ]
@@ -486,7 +492,11 @@ export function MarketingPage() {
                   prod-only flow. */}
               Anonymous is the funnel. Hobby pays for the side project. Pro lets one
               product run in production + staging + development. Team is for the company
-              that ships every day — talk to us about your needs.
+              that ships every day —{' '}
+              {/* BugBash P3-09: the teaser said "talk to us" but had no
+                  contact path. Link to the real address used elsewhere
+                  (PublicShell footer Contact, support FAQ). */}
+              <a href="mailto:hello@instanode.dev">talk to us</a> about your needs.
             </p>
           </div>
 

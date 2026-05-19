@@ -1,7 +1,23 @@
-# GitHub Pages serves these files; this _headers is documentation only.
-# GitHub does not honor Netlify-style _headers files at runtime — kept here
-# so future readers (or a Netlify/Cloudflare Pages migration) have a record
-# of the intended Content-Type for plain-text assets the LLM crawlers fetch.
+# ─────────────────────────────────────────────────────────────────────
+# NON-OPERATIONAL FILE — this _headers does nothing on the live site.
+#
+# instanode.dev is hosted on GitHub Pages (see public/CNAME +
+# .github/workflows — actions/deploy-pages). GitHub Pages does NOT honor
+# Netlify/Cloudflare-style `_headers` files at runtime; it cannot be
+# configured to emit custom response headers at all.
+#
+# This is harmless in practice: GitHub Pages already serves `.txt`
+# assets with `Content-Type: text/plain; charset=utf-8` by default, so
+# the LLM crawlers that fetch /llms.txt and /llms-full.txt receive the
+# correct content type with or without this file.
+#
+# The file is kept ONLY as a migration artifact: if instanode.dev ever
+# moves to Netlify or Cloudflare Pages (both of which DO honor this
+# format), the intended header rules below are ready to take effect.
+# Until such a migration, treat this file as documentation, not config.
+# BugBash P3 (W5 T10): the previous comment under-stated this — a reader
+# could mistake the file for an active header config.
+# ─────────────────────────────────────────────────────────────────────
 /llms.txt
   Content-Type: text/plain; charset=utf-8
 /llms-full.txt

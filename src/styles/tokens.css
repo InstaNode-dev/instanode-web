@@ -56,6 +56,21 @@ body {
 
 a { color: inherit; text-decoration: none; }
 
+/* Global keyboard-focus ring. BugBash P3 (W3 T10): nothing in the app
+   declared a :focus-visible style, so keyboard / screen-reader users got
+   either an inconsistent browser default or — on elements that reset
+   `outline` — nothing at all. This single rule covers every interactive
+   element across marketing, docs, and the dashboard, since tokens.css is
+   the one global stylesheet (imported in main.tsx). :focus-visible (not
+   :focus) keeps the ring off mouse clicks; `outline-offset` lifts it
+   clear of the element edge so it reads on both buttons and inline
+   links. WCAG 2.4.7 (Focus Visible). */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-xs);
+}
+
 button {
   font-family: inherit;
   cursor: pointer;

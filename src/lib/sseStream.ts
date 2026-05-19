@@ -63,9 +63,17 @@ export function streamSSE(path: string, handlers: SSEHandlers, signal?: AbortSig
         while ((nl = buffer.indexOf('\n')) >= 0) {
           const raw = buffer.slice(0, nl).trimEnd()
           buffer = buffer.slice(nl + 1)
-          // SSE lines look like: `data: <payload>` (or empty between events).
-          if (raw.startsWith('data: ')) {
-            handlers.onLine(raw.slice(6))
+          // SSE lines look like `data: <payload>` (or empty between
+          // events). BugBash P3: the spec (WHATWG, EventSource §9.2.6)
+          // makes the single space after the colon OPTIONAL — a server
+          // emitting `data:<payload>` (no space) is conformant. The old
+          // `startsWith('data: ')` check silently dropped every
+          // no-space line. Match the `data:` prefix and strip at most
+          // one leading space from the value, per the spec.
+          if (raw.startsWith('data:')) {
+            let value = raw.slice(5)
+            if (value.startsWith(' ')) value = value.slice(1)
+            handlers.onLine(value)
           }
         }
       }

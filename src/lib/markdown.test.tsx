@@ -89,7 +89,27 @@ describe('inline — token rendering', () => {
   })
 
   it('renders [text](url) as <a>', () => {
-    expect(htmlInline('see [docs](/docs.md)')).toBe('see <a href="/docs.md">docs</a>')
+    expect(htmlInline('see [docs](/docs)')).toBe('see <a href="/docs">docs</a>')
+  })
+
+  // BugBash P3: content-repo cross-links are written two ways —
+  // `/use-cases/foo` and `/use-cases/foo.md`. The `.md` form would hit
+  // the SPA catch-all and dead-end on the homepage; normalizeInternalHref
+  // strips the trailing `.md` from internal links so both resolve.
+  it('strips a trailing .md from internal links', () => {
+    expect(htmlInline('see [docs](/docs.md)')).toBe('see <a href="/docs">docs</a>')
+    expect(htmlInline('[uc](/use-cases/foo-bar.md)'))
+      .toBe('<a href="/use-cases/foo-bar">uc</a>')
+  })
+
+  it('preserves a query/hash after a stripped .md suffix', () => {
+    expect(htmlInline('[x](/blog/post.md#section)'))
+      .toBe('<a href="/blog/post#section">x</a>')
+  })
+
+  it('does NOT strip .md from external links', () => {
+    expect(htmlInline('[raw](https://example.com/readme.md)'))
+      .toBe('<a href="https://example.com/readme.md">raw</a>')
   })
 
   it('renders [text](https://...) as external <a>', () => {

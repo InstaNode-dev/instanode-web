@@ -8,7 +8,7 @@
 // real error banner instead of lying with mock data.
 
 import type {
-  Resource, DashboardStack, StackStatus,
+  Resource, ResourceType, DashboardStack, StackStatus,
   DashboardDeployment, DeploymentStatus, DeploymentFailure,
   DashboardTeam, BillingDetails, Invoice,
   TeamMember, TeamInvitation, AuthMeResponse, VaultEntry, ActivityItem,
@@ -505,6 +505,21 @@ export async function inviteMember(_body: { email: string; role: string }): Prom
 type ResourceListResp = { ok: boolean; items: any[]; total: number }
 type ResourceGetResp = { ok: boolean; item: any }
 
+// CREDENTIALED_RESOURCE_TYPES — the resource types whose
+// GET /api/v1/resources/:id/credentials endpoint returns a usable
+// `connection_url`. BugBash P3-02: getResource() fired the credentials
+// fetch unconditionally, so webhook / storage / queue resources (which
+// do not expose a connection_url on that endpoint) returned a 400 on
+// every detail-page open — spurious 400s in the API logs and NR
+// telemetry. Gating the fetch to these three types removes the noise
+// without changing behaviour for db/redis/mongo (the catch below still
+// guards genuine permission-hidden cases).
+const CREDENTIALED_RESOURCE_TYPES: ReadonlySet<ResourceType> = new Set<ResourceType>([
+  'postgres',
+  'redis',
+  'mongodb',
+])
+
 function adaptResource(r: any): Resource {
   return {
     id: r.id,
@@ -537,13 +552,18 @@ export async function listResources(env?: string): Promise<{ ok: true; items: Re
 
 export async function getResource(id: string): Promise<{ ok: true; resource: Resource }> {
   const r = await call<ResourceGetResp>(`/api/v1/resources/${id}`)
-  // The agent API splits credentials into a separate endpoint.
+  // The agent API splits credentials into a separate endpoint, but only
+  // db/redis/mongo expose a connection_url there — webhook/storage/queue
+  // 400 on it (BugBash P3-02). Gate the fetch on resource_type so we
+  // don't generate a spurious 400 on every detail-page open.
   let connection_url: string | undefined
-  try {
-    const c = await call<{ connection_url: string }>(`/api/v1/resources/${id}/credentials`)
-    connection_url = c.connection_url
-  } catch {
-    /* credentials may be hidden for some resource types */
+  if (CREDENTIALED_RESOURCE_TYPES.has(r.item?.resource_type)) {
+    try {
+      const c = await call<{ connection_url: string }>(`/api/v1/resources/${id}/credentials`)
+      connection_url = c.connection_url
+    } catch {
+      /* credentials may still be hidden (permissions, paused, etc.) */
+    }
   }
   return { ok: true, resource: adaptResource({ ...r.item, connection_url }) }
 }
