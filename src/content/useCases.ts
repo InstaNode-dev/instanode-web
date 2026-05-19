@@ -19,7 +19,12 @@
  * Service is a closed union (platform-defined). Category is a plain
  * string (content-defined). See PR #13 for the category type history. */
 
-export type Service = 'pg' | 'redis' | 'mongo' | 'nats' | 'minio' | 'webhook' | 'deploy'
+/* SERVICES is the single source of truth for valid service identifiers.
+ * The Service type is derived from it so the runtime allow-list (used by
+ * parseServices to reject unknown frontmatter values) and the compile-time
+ * type can never drift. SERVICE_INFO in UseCaseDetailPage is keyed by this. */
+export const SERVICES = ['pg', 'redis', 'mongo', 'nats', 'minio', 'webhook', 'deploy'] as const
+export type Service = (typeof SERVICES)[number]
 export type Category = string
 
 export type UseCase = {
@@ -64,15 +69,26 @@ function buildCase(path: string, src: string): UseCase | null {
   }
 }
 
+/* isService — runtime guard against the SERVICES allow-list. The use-case
+ * .md files are fetched from the external `content` repo, so an unknown or
+ * misspelled identifier (e.g. "storage" instead of "minio") can appear in
+ * frontmatter. Such a value must NOT reach SERVICE_INFO[...] — that lookup
+ * returns undefined and crashes the prerender build. */
+function isService(s: unknown): s is Service {
+  return typeof s === 'string' && (SERVICES as readonly string[]).includes(s)
+}
+
 /* parseServices — accepts JSON-array syntax in frontmatter, e.g.
  *   services: ["pg", "redis"]
- * Anything that doesn't parse as an array of strings becomes []. */
-function parseServices(raw: string | undefined): Service[] {
+ * Anything that doesn't parse as an array becomes []; entries that are not
+ * a known Service (see isService) are dropped rather than cast through.
+ * Exported for regression testing — see useCases.test.ts. */
+export function parseServices(raw: string | undefined): Service[] {
   if (!raw) return []
   try {
     const parsed = JSON.parse(raw) as unknown
     if (!Array.isArray(parsed)) return []
-    return parsed.filter((s): s is Service => typeof s === 'string') as Service[]
+    return parsed.filter(isService)
   } catch {
     return []
   }
