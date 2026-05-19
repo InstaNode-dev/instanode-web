@@ -24,6 +24,7 @@ export const PAGE_META: Record<string, PageMeta> = {
   '/deployments':     m('Deployments',   'read'),
   '/deployments/:id': m('Deployment',    'read'),
   '/vault':           m('Vault',         'read'),
+  '/team':            m('Team',          'read'),
   '/billing':         m('Billing',       'write'),
   '/settings':        m('Settings',      'read'),
   '/contracts':       m('API contracts', 'read'),
@@ -70,6 +71,8 @@ function computeCrumb(routeKey: string, pathname: string, ctx: DashboardCtx): st
       return 'deployments / live'
     case '/vault':
       return `${ctx.env} · ${ctx.counts.vault} entries`
+    case '/team':
+      return 'members & invites'
     case '/billing':
       return ctx.me?.team?.tier ?? '—'
     case '/settings':
@@ -220,6 +223,14 @@ export function AppShell() {
 
             <div className="nav-section">platform</div>
             <NavRow to="/app/vault" icon={icons.vault} badge={String(ctx.counts.vault)}>Vault</NavRow>
+            {/* BugBash T15-P1-1 (2026-05-20): /app/team was a live route in
+                App.tsx but had no sidebar entry — the whole invite/remove-
+                teammates surface was reachable only by typing the URL. The
+                NavRow lives here under "platform" (between Vault and Billing)
+                so the discovery chain mirrors how Billing/Settings appear.
+                testId is pinned so the navigation Playwright sweep can
+                regression-guard this entry point. */}
+            <NavRow to="/app/team" icon={icons.team} testId="nav-team">Team</NavRow>
             <NavRow to="/app/billing" icon={icons.billing}>Billing</NavRow>
             <NavRow to="/app/settings" icon={icons.settings}>Settings</NavRow>
 
