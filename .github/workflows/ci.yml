@@ -21,7 +21,29 @@ jobs:
       - run: npm run build
       - run: npm test
 
+  # Playwright browser/UI gate — MANDATORY.
+  #
+  # This job drives a real browser through the user-facing flows a
+  # dashboard change must never silently break: auth guards, the claim
+  # flow, dashboard render, and — the headline — the payments/upgrade
+  # journey (checkout success / failure / already-on-plan, invoice
+  # rendering, the 429 retry hint). The API and Razorpay are
+  # page.route()-mocked (hermetic — VITE_NO_PROXY=1, playwright.config.ts
+  # MOCKED mode), so the suite is deterministic and creates nothing.
+  #
+  # HARD GATE: a UI regression fails this job. For it to BLOCK a PR, the
+  # `playwright (mandatory UI gate)` check must be listed as a required
+  # status check in the branch-protection rule for `main` (Settings →
+  # Branches → main → Require status checks to pass). Adding the job here
+  # makes the check available; the operator must tick it as required.
+  #
+  # `npm run test:e2e:ci` is the exact local equivalent of the run step —
+  # run it before pushing a dashboard change.
+  #
+  # If you add a dashboard route or change a user-facing flow, add the
+  # matching e2e/*.spec.ts coverage so this gate keeps protecting it.
   playwright:
+    name: playwright (mandatory UI gate)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -33,4 +55,17 @@ jobs:
 
       - run: npm ci
       - run: npx playwright install --with-deps chromium
-      - run: VITE_NO_PROXY=1 npx playwright test --project=chromium
+      # Hermetic mocked run — identical to `npm run test:e2e:ci` locally.
+      - run: npm run test:e2e:ci
+
+      # Upload the HTML report + traces so a red gate is debuggable
+      # without a local re-run. Runs even on failure.
+      - name: Upload Playwright report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 14

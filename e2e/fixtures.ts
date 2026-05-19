@@ -397,3 +397,222 @@ export async function signIn(page: Page, token = 'ink_FAKE_TEST_TOKEN') {
     localStorage.setItem('instanode.token', tok)
   }, token)
 }
+
+// ─── Billing / payments fixtures ────────────────────────────────────────
+//
+// These back the upgrade-journey + billing-page Playwright specs. The
+// dashboard never talks to Razorpay directly — it calls the agent API's
+// /api/v1/billing/* endpoints, which return a Razorpay-hosted `short_url`.
+// So a hermetic test mocks the agent API responses and asserts the
+// dashboard navigates to the mock short_url; it never loads Razorpay's
+// real page (that stays in the manual Chrome-MCP layer, S5).
+
+/** Razorpay-style hosted checkout URL the mocked /billing/checkout returns.
+ *  Tests assert the dashboard navigates here — they do NOT load it. */
+export const FAKE_RAZORPAY_SHORT_URL = 'https://rzp.io/i/FAKEcheckout123'
+
+/** GET /api/v1/billing payload — a hobby team with an active subscription
+ *  and a saved card. Shaped to api/internal/handlers/billing.go's
+ *  BillingStateResp wire contract. */
+export const FAKE_BILLING_STATE = {
+  ok: true,
+  tier: 'hobby',
+  subscription_status: 'active' as const,
+  next_renewal_at: '2026-06-19T00:00:00Z',
+  amount_inr: 90000,
+  payment_method: { type: 'card' as const, brand: 'visa', last4: '4242' },
+  billing_email: 'aanya@example.com',
+  razorpay_subscription_id: 'sub_FAKE123',
+  razorpay_customer_id: 'cust_FAKE123',
+  razorpay_configured: true,
+}
+
+/** GET /api/v1/billing/usage payload — server-side cached aggregate. */
+export const FAKE_BILLING_USAGE = {
+  ok: true,
+  freshness_seconds: 30,
+  as_of: new Date(Date.now() - 12_000).toISOString(),
+  usage: {
+    postgres: { bytes: 47_500_000, limit_bytes: 1_073_741_824 },
+    redis: { bytes: 1_200_000, limit_bytes: 52_428_800 },
+    mongodb: { bytes: 800_000, limit_bytes: 104_857_600 },
+    // Deployment count — the canonical source. The Overview tile reads
+    // GET /api/v1/deployments (a list); both must agree (S5-F4 regression).
+    deployments: { count: 1, limit: 1 },
+    webhooks: { count: 12, limit: 1000 },
+    vault: { count: 2, limit: 100 },
+    members: { count: 1, limit: 1 },
+  },
+}
+
+/** GET /api/v1/billing/invoices payload — exercises the null/pending
+ *  field paths that produced "Invalid Date" / "$NaN" before mapInvoice()
+ *  was hardened (S5-F3 regression). One paid row, one pending row with a
+ *  zero amount, one row with no pdf_url. */
+export const FAKE_INVOICES_WIRE = {
+  ok: true,
+  invoices: [
+    {
+      id: 'inv_PAID001',
+      amount: 4900, // cents — $49.00
+      currency: 'USD',
+      status: 'paid',
+      date: '2026-05-19T10:00:00Z',
+      pdf_url: 'https://rzp.io/invoice/inv_PAID001.pdf',
+    },
+    {
+      // Pending invoice: zero amount, no pdf — must NOT render "$NaN" or a
+      // dead "↓ pdf" link.
+      id: 'inv_PENDING002',
+      amount: 0,
+      currency: 'USD',
+      status: 'pending',
+      date: '2026-05-19T11:00:00Z',
+    },
+    {
+      // Unknown status from Razorpay ('issued') — collapses to 'pending'.
+      id: 'inv_ISSUED003',
+      amount: 900,
+      currency: 'USD',
+      status: 'issued',
+      date: '2026-05-19T12:00:00Z',
+    },
+  ],
+}
+
+/**
+ * installBillingAPIFake — layers the billing endpoints on top of
+ * installAPIFake(). Call AFTER installAPIFake() so the /auth/me tier here
+ * (hobby — has an active subscription, can upgrade) wins.
+ *
+ * Per-test overrides: register a more specific page.route() AFTER this for
+ * checkout success/failure/already-on-plan variants — Playwright matches
+ * routes most-recent-first.
+ */
+export async function installBillingAPIFake(page: Page) {
+  await page.route('**/api/v1/billing', (route: Route) => {
+    if (route.request().method() !== 'GET') return route.continue()
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(FAKE_BILLING_STATE),
+    })
+  })
+  await page.route('**/api/v1/billing/usage', (route: Route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(FAKE_BILLING_USAGE),
+    }),
+  )
+  await page.route('**/api/v1/billing/invoices', (route: Route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(FAKE_INVOICES_WIRE),
+    }),
+  )
+  // /auth/me — hobby tier so the upgrade CTAs render. installAPIFake()
+  // already routes this to hobby, but we re-assert here so a caller can
+  // installBillingAPIFake() standalone.
+  await page.route('**/auth/me', (route: Route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        ok: true,
+        user_id: FAKE_USER,
+        team_id: FAKE_TEAM,
+        email: 'aanya@example.com',
+        tier: 'hobby',
+        trial_ends_at: null,
+      }),
+    }),
+  )
+}
+
+/** mockCheckoutSuccess — POST /api/v1/billing/checkout returns a Razorpay
+ *  short_url. The dashboard navigates the browser to it. */
+export async function mockCheckoutSuccess(page: Page, shortUrl = FAKE_RAZORPAY_SHORT_URL) {
+  await page.route('**/api/v1/billing/checkout', (route: Route) => {
+    if (route.request().method() !== 'POST') return route.continue()
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ ok: true, short_url: shortUrl, subscription_id: 'sub_NEW999' }),
+    })
+  })
+}
+
+/** mockCheckoutFailure — POST /api/v1/billing/checkout fails. `kind`
+ *  selects which honest failure path the dashboard must render:
+ *   - 'billing_not_configured' → 503, CheckoutPage shows the fallback panel
+ *   - 'already_on_plan'        → 409, the user already holds this plan
+ *   - 'generic'                → 500, inline error banner */
+export async function mockCheckoutFailure(
+  page: Page,
+  kind: 'billing_not_configured' | 'already_on_plan' | 'generic' = 'generic',
+) {
+  const spec = {
+    billing_not_configured: {
+      status: 503,
+      body: { ok: false, error: 'billing_not_configured', message: 'Razorpay plan not configured for this tier.' },
+    },
+    already_on_plan: {
+      status: 409,
+      body: { ok: false, error: 'already_on_plan', message: 'Your team is already on this plan.' },
+    },
+    generic: {
+      status: 500,
+      body: { ok: false, error: 'internal', message: 'Checkout could not be created.' },
+    },
+  }[kind]
+  await page.route('**/api/v1/billing/checkout', (route: Route) => {
+    if (route.request().method() !== 'POST') return route.continue()
+    return route.fulfill({
+      status: spec.status,
+      contentType: 'application/json',
+      body: JSON.stringify(spec.body),
+    })
+  })
+}
+
+/** mockChangePlan — POST /api/v1/billing/change-plan. `mode`:
+ *   - 'immediate'      → ok with no short_url; modal shows "Plan changed ✓"
+ *   - 'short_url'      → ok with a short_url; dashboard redirects to Razorpay
+ *   - 'already_on_plan'→ 409; modal surfaces the error inline
+ *   - 'server_error'   → 500; modal shows error + Contact-support fallback */
+export async function mockChangePlan(
+  page: Page,
+  mode: 'immediate' | 'short_url' | 'already_on_plan' | 'server_error' = 'immediate',
+) {
+  await page.route('**/api/v1/billing/change-plan', (route: Route) => {
+    if (route.request().method() !== 'POST') return route.continue()
+    if (mode === 'immediate') {
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: true, new_plan: 'pro', effective_date: '2026-05-19T00:00:00Z' }),
+      })
+    }
+    if (mode === 'short_url') {
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: true, new_plan: 'pro', short_url: FAKE_RAZORPAY_SHORT_URL }),
+      })
+    }
+    if (mode === 'already_on_plan') {
+      return route.fulfill({
+        status: 409,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: false, error: 'already_on_plan', message: 'Your team is already on this plan.' }),
+      })
+    }
+    return route.fulfill({
+      status: 500,
+      contentType: 'application/json',
+      body: JSON.stringify({ ok: false, error: 'internal', message: 'Plan change failed upstream.' }),
+    })
+  })
+}
