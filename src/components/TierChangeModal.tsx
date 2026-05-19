@@ -15,6 +15,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import * as api from '../api'
+import { TIER_RANK } from '../api'
 import type { AdminSetTierInput, Tier } from '../api/types'
 
 export const ADMIN_TIER_CHOICES: Tier[] = [
@@ -26,20 +27,13 @@ export const ADMIN_TIER_CHOICES: Tier[] = [
   'growth',
 ]
 
-// Ranked low → high so we can compute "is this a promotion or demotion?"
-// and pick the correct confirmation word.
-const TIER_RANK: Record<Tier, number> = {
-  anonymous: 0,
-  free: 1,
-  hobby: 2,
-  hobby_plus: 3,
-  growth: 4,
-  pro: 5,
-  team: 6,
-}
-
+// Promotion/demotion math reads the single canonical TIER_RANK table from
+// src/api/index.ts (kept aligned with the backend's common/plans/rank.go).
+// growth ($99) ranks strictly ABOVE pro ($49) — a pro→growth change is a
+// PROMOTE. An earlier private copy here had the inverted order, which made
+// the admin console show "DEMOTE" for that upgrade.
 export function confirmationWord(currentTier: Tier, nextTier: Tier): 'PROMOTE' | 'DEMOTE' {
-  return TIER_RANK[nextTier] >= TIER_RANK[currentTier] ? 'PROMOTE' : 'DEMOTE'
+  return (TIER_RANK[nextTier] ?? -1) >= (TIER_RANK[currentTier] ?? -1) ? 'PROMOTE' : 'DEMOTE'
 }
 
 interface Props {

@@ -247,11 +247,31 @@ export interface BillingDetails {
   cancel_at_period_end?: boolean
 }
 
+// Invoice — a normalized subscription invoice row for the Billing page.
+//
+// The agent API's GET /api/v1/billing/invoices emits each Razorpay invoice
+// as { id, amount, currency, status, date, pdf_url } — a single charge with
+// one timestamp, an amount in the currency's smallest unit (paise/cents),
+// and NO billing period or plan tier. The dashboard previously expected a
+// Stripe-style { period_start, period_end, plan, amount_cents } shape, so
+// every row rendered "Invalid Date" / "$NaN" / blank tier.
+//
+// `listInvoices` in api/index.ts maps the wire shape into this type:
+//   amount → amount_cents   (already smallest-unit; a direct copy, no ×100)
+//   date   → issued_at      (the single charge timestamp)
+// `period_start` / `period_end` / `plan` are NOT on the wire — they stay
+// optional and the BillingPage renders only what is actually present
+// rather than fabricating a billing window.
 export interface Invoice {
   id: string
-  period_start: string
-  period_end: string
-  plan: Tier
+  /** Single charge timestamp from Razorpay (the wire `date` field). */
+  issued_at: string
+  /** Billing window — only present if a future API revision sends it. */
+  period_start?: string
+  period_end?: string
+  /** Plan tier — not emitted by the current invoices endpoint. */
+  plan?: Tier
+  /** Amount in the currency's smallest unit (paise for INR, cents for USD). */
   amount_cents: number
   currency: string
   status: 'paid' | 'pending' | 'failed'

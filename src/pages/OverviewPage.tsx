@@ -10,35 +10,18 @@ import * as api from '../api'
 import type { Resource, ActivityItem, DashboardDeployment } from '../api'
 import { useDashboardCtx } from '../hooks/useDashboardCtx'
 
-// Storage limit per tier in GB, used for the Overview usage chart.
-// Source of truth: api/plans.yaml storage_storage_mb / 1024. -1 in plans.yaml
-// (team / growth) means "unlimited"; we surface 50 GB here as the visual
-// ceiling so the bar fills sensibly instead of going divide-by-zero.
-//
-// FIX-U15 (W11): added hobby_plus (5 GB) and growth (10 GB), which were
-// missing — a hobby_plus or growth user previously hit the `?? 5` fallback,
-// which is the same as Pro's bar and made the upgrade math look wrong.
-// FIX-K (2026-05-16): pro was 5 GB (10x too low). Added anonymous/free/yearly
-// variants that were missing (fell through to ?? 5 fallback).
-// Values from plans.yaml storage_storage_mb / 1024 (binary MiB):
-//   anonymous/free: 10 MB = ~0.01 GB
-//   hobby / hobby_yearly: 512 MB = 0.5 GB
-//   hobby_plus / hobby_plus_yearly: 5120 MB = 5 GB
-//   pro / pro_yearly: 51200 MB = 50 GB
-//   growth / team: -1 unlimited, visual cap at 50 GB
-const TIER_LIMIT_GB: Record<string, number> = {
-  anonymous: 0.01,
-  free: 0.01,
-  hobby: 0.5,
-  hobby_yearly: 0.5,
-  hobby_plus: 5,
-  hobby_plus_yearly: 5,
-  pro: 50,
-  pro_yearly: 50,
-  growth: 50,
-  team: 50,
-  team_yearly: 50,
-}
+// D6 (2026-05-18): the hardcoded TIER_LIMIT_GB table was dropped. It drifted
+// from api/plans.yaml on every tier change (every paid tier was wrong at one
+// point) and there is a live server-supplied source — each Resource row
+// already carries `storage_limit_bytes`. The storage tile now sums those
+// real per-resource limits instead of guessing from a stale per-tier map.
+
+// Binary-unit constants. storage_bytes / storage_limit_bytes are byte
+// counts; plans.yaml expresses caps in MiB (storage_storage_mb). Keeping a
+// single binary base means the tile's numerator and denominator no longer
+// mix decimal MB with binary MiB (the ~4.8% overstatement D6 flagged).
+const BYTES_PER_MIB = 1024 * 1024
+const BYTES_PER_GIB = 1024 * 1024 * 1024
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000
 
 // stripHtmlTags — display helper, NOT a security control.
@@ -157,12 +140,26 @@ export function OverviewPage() {
     }
   }, [ctx.env])
 
-  // computed stats — no /overview endpoint exists, derived client-side
-  const totalStorageMB = Math.round(resources.reduce((s, r) => s + r.storage_bytes, 0) / 1_000_000)
-  const tierLimitGB = TIER_LIMIT_GB[tier] ?? 50
-  // FIX-K (2026-05-16): plans.yaml uses binary MiB; use *1024 (was *1000).
-  const tierLimitMB = tierLimitGB * 1024
-  const storagePct = tierLimitMB > 0 ? Math.round((totalStorageMB / tierLimitMB) * 100) : 0
+  // computed stats — no /overview endpoint exists, derived client-side.
+  //
+  // D6 (2026-05-18): storage now uses server-supplied per-resource limits.
+  // Both the used total and the limit total come from the same byte-count
+  // fields (`storage_bytes` / `storage_limit_bytes`) and are converted with
+  // the same binary base — so the numerator and denominator no longer mix
+  // decimal MB with binary MiB. A resource with `storage_limit_bytes < 0`
+  // is unlimited; if any resource is unlimited the tile drops the % bar.
+  const totalStorageBytes = resources.reduce((s, r) => s + r.storage_bytes, 0)
+  const storageUnlimited = resources.some((r) => (r.storage_limit_bytes ?? 0) < 0)
+  const totalStorageLimitBytes = resources.reduce(
+    (s, r) => s + ((r.storage_limit_bytes ?? 0) > 0 ? r.storage_limit_bytes : 0),
+    0,
+  )
+  const totalStorageGiB = totalStorageBytes / BYTES_PER_GIB
+  const totalStorageLimitGiB = totalStorageLimitBytes / BYTES_PER_GIB
+  const storagePct =
+    !storageUnlimited && totalStorageLimitBytes > 0
+      ? Math.round((totalStorageBytes / totalStorageLimitBytes) * 100)
+      : 0
   // Connections tile: the API never emits `connections_in_use`, so a numerator
   // sourced from it is always 0 — show the per-tier connection ceiling only.
   // `-1` (team/growth unlimited) is excluded from the sum so it can't corrupt
@@ -182,7 +179,12 @@ export function OverviewPage() {
   const deployHealthy = deployments.filter((d) => d.status === 'running').length
   const webhookCount = resources.filter((r) => r.resource_type === 'webhook').length
 
-  const storageSub = resources.length === 0 ? tier : `${storagePct}% of ${tier} tier`
+  const storageSub =
+    resources.length === 0
+      ? tier
+      : storageUnlimited
+        ? `unlimited · ${tier} tier`
+        : `${storagePct}% of ${tier} tier`
   const connSub = connUnlimited ? 'unlimited' : connLim === 0 ? '' : `${connLim} max`
   const deploySub = deployCount === 0 ? 'none yet' : `${deployHealthy}/${deployCount} healthy`
   const vaultSub = vaultCount === 0 ? '' : `scoped to ${env}`
@@ -205,7 +207,17 @@ export function OverviewPage() {
             Wire up real series in a follow-up (W7-G) once /api/v1/
             stats/series is live. */}
         <Stat k="resources" v={loading ? '—' : resources.length.toString()} d={newThisWeek === 0 ? '—' : `+${newThisWeek} this week`} series={undefined} />
-        <Stat k={`storage / ${tierLimitGB} GB`} v={loading ? '—' : (totalStorageMB / 1000).toFixed(1)} unit="GB" d={storageSub} dCls="dim" series={undefined} />
+        {/* Storage tile — used + limit both in binary GiB from the server's
+            per-resource byte counts. "∞" denominator when any resource is
+            unlimited (team/growth-tier headroom). */}
+        <Stat
+          k={`storage / ${storageUnlimited || totalStorageLimitGiB <= 0 ? '∞' : totalStorageLimitGiB.toFixed(1)} GiB`}
+          v={loading ? '—' : totalStorageGiB.toFixed(2)}
+          unit="GiB"
+          d={storageSub}
+          dCls="dim"
+          series={undefined}
+        />
         {/* Connections tile shows the aggregate per-tier connection ceiling.
             The API does not emit a live in-use count, so a numerator would
             always read 0 — show the ceiling honestly instead. */}
@@ -262,9 +274,11 @@ export function OverviewPage() {
                 </Link>
                 <TierPill tier={r.tier} />
                 <EnvPill env={r.env} />
+                {/* D6: used + limit both in binary MiB so the bar's ratio
+                    matches the storage tile's binary-GiB math above. */}
                 <UsageBar
-                  used={Math.round(r.storage_bytes / 1_000_000)}
-                  limit={r.storage_limit_bytes < 0 ? -1 : Math.round(r.storage_limit_bytes / 1_000_000)}
+                  used={Math.round(r.storage_bytes / BYTES_PER_MIB)}
+                  limit={r.storage_limit_bytes < 0 ? -1 : Math.round(r.storage_limit_bytes / BYTES_PER_MIB)}
                 />
                 <RelTime at={r.created_at} />
                 <button className="res-action" aria-label="actions">⋯</button>

@@ -27,22 +27,15 @@
 
 import { useEffect, useRef, useState } from 'react'
 import * as api from '../api'
+import { TIER_RANK } from '../api'
 import type { ChangePlanTier, PlanFrequency, Tier } from '../api'
 
-// Ranks for "is this an upgrade?" math. Source of truth: api/plans.yaml.
-// `hobby_plus` sits between hobby and pro at $19/mo (W11 mid-tier insertion,
-// 2026-05-13). The api enum on /billing/checkout + /billing/change-plan now
-// accepts it — see FIX-A6/R8/R9 — so the dashboard exposes it as a real
-// upgrade target alongside the legacy tiers.
-const TIER_RANK: Record<string, number> = {
-  anonymous: 0,
-  free: 1,
-  hobby: 2,
-  hobby_plus: 3,
-  growth: 4,
-  pro: 5,
-  team: 6,
-}
+// Ranks for "is this an upgrade?" math come from the single canonical
+// TIER_RANK table in src/api/index.ts (kept aligned with the backend's
+// common/plans/rank.go). `hobby_plus` sits between hobby and pro at $19/mo,
+// and growth ($99) sits strictly ABOVE pro ($49) — see the table's comment.
+// Importing the shared table keeps this modal from re-diverging into the
+// old inverted growth/pro ordering.
 
 // Human-readable label for the modal title + selector. Derived once so
 // translations / brand renames live in one place.

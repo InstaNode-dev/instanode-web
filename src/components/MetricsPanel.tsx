@@ -296,11 +296,15 @@ function StorageTile({ values }: { values: number[] }) {
   )
 }
 
+// formatBytes — renders a byte count with binary-prefix units. The divisors
+// are powers of 1024, so the suffixes must be the binary KiB/MiB/GiB, not
+// the decimal-SI KB/MB/GB (D6: the old labels said "MB" for a /1048576
+// conversion, which is a MiB).
 function formatBytes(n: number): string {
   if (n < 1024) return `${n.toFixed(0)} B`
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
-  if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`
-  return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GB`
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KiB`
+  if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MiB`
+  return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GiB`
 }
 
 function fmt(n: number): string {
