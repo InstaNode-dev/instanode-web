@@ -247,13 +247,28 @@ export interface BillingDetails {
   cancel_at_period_end?: boolean
 }
 
+// Invoice — one Razorpay invoice row rendered in the Billing page table.
+//
+// IMPORTANT: a checkout that was started but never completed (the user
+// abandoned the Razorpay hosted page, or payment failed) still produces a
+// real invoice object — but with NO billing period and NO amount. Razorpay
+// only stamps `period_start` / `period_end` / amount once the first charge
+// settles. Every field that the backend can legitimately omit on such a
+// pending/failed invoice is typed nullable/optional here so the renderer
+// is forced to handle it. The 2026-05-19 live-payments test surfaced an
+// `inv_Sr37ov8AV8Dayo` row that rendered "Invalid Date → Invalid Date"
+// and "$NaN" because the old non-nullable type let the renderer assume
+// these were always present.
 export interface Invoice {
   id: string
-  period_start: string
-  period_end: string
+  /** Absent/null on a pending or failed invoice — Razorpay only stamps the
+   *  billing period once the first charge settles. */
+  period_start?: string | null
+  period_end?: string | null
   plan: Tier
-  amount_cents: number
-  currency: string
+  /** USD cents. Absent/null/0 on a pending or failed invoice. */
+  amount_cents?: number | null
+  currency?: string
   status: 'paid' | 'pending' | 'failed'
   pdf_url?: string
 }

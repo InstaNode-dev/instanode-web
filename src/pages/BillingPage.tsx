@@ -149,6 +149,16 @@ export function BillingPage() {
   // cached 30s with singleflight) — not from /resources. The browser
   // no longer pulls every resource row to compute six aggregates.
   const [billingUsage, setBillingUsage] = useState<BillingUsage | null>(null)
+  // S5-F4 (2026-05-19): the Usage panel's "deployments" count is sourced
+  // from GET /api/v1/deployments — the SAME authoritative endpoint the
+  // /app Overview tile reads — NOT from billing/usage.deployments.count.
+  // The 2026-05-19 live test found the two surfaces disagreeing on the
+  // same account at the same moment (Overview "0", Billing "1 / 1") for a
+  // team that genuinely had 0 deployments: the billing/usage aggregate
+  // was returning a stale/wrong count. Until that backend aggregate is
+  // fixed (see BACKEND FINDING in the PR), the dashboard pins BOTH
+  // surfaces to the deployments list so they can never disagree.
+  const [deploymentCount, setDeploymentCount] = useState<number | null>(null)
   // §10.21: fetchBilling no longer falls back to fixture data on 503,
   // so we surface its error explicitly via this banner state.
   const [billingErr, setBillingErr] = useState<string | null>(null)
@@ -195,6 +205,14 @@ export function BillingPage() {
     api.fetchBillingUsage()
       .then((u) => { if (alive) setBillingUsage(u) })
       .catch(() => { /* usage panel reads 0 — non-fatal */ })
+    // S5-F4: deployment count for the Usage panel comes from the same
+    // GET /api/v1/deployments list the Overview tile reads, so the two
+    // surfaces can never drift. Fail-soft to 0 (matching the Overview's
+    // own .catch(() => [])) so a deployments outage doesn't blank the
+    // Usage panel.
+    api.listDeployments()
+      .then((d) => { if (alive) setDeploymentCount(d.items.length) })
+      .catch(() => { if (alive) setDeploymentCount(0) })
     return () => { alive = false }
   }, [refreshNonce])
 
@@ -210,7 +228,12 @@ export function BillingPage() {
     postgres_mb: bytesToMB(u?.postgres?.bytes),
     redis_mb: bytesToMB(u?.redis?.bytes),
     mongodb_mb: bytesToMB(u?.mongodb?.bytes),
-    deployments: u?.deployments?.count ?? 0,
+    // S5-F4: deployment count is the live GET /api/v1/deployments length —
+    // NOT billing/usage.deployments.count, which was returning a stale 1
+    // for teams with 0 deployments and disagreeing with the /app Overview
+    // tile. `deploymentCount` is null while the list is in flight; fall
+    // back to 0 so the row reads honestly during load.
+    deployments: deploymentCount ?? 0,
     webhooks: u?.webhooks?.count ?? 0,
     // Members count now comes from the same server-side aggregate —
     // previously the dashboard had no live source (§10.7 gap). Clamp to 1
@@ -557,8 +580,12 @@ export function BillingPage() {
           {invoices.map((i) => (
             <div key={i.id} className="invoice-row">
               <span className="id">{i.id}</span>
+              {/* S5-F3 (2026-05-19): a pending/failed Razorpay invoice has no
+                  billing period. `new Date(undefined)` / `new Date(null)`
+                  → "Invalid Date". formatInvoicePeriod renders a graceful
+                  dash instead. */}
               <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11.5, color: 'var(--text-dim)' }}>
-                {new Date(i.period_start).toLocaleDateString()} → {new Date(i.period_end).toLocaleDateString()}
+                {formatInvoicePeriod(i.period_start, i.period_end)}
               </span>
               <TierPill tier={i.plan} />
               {/* Show the real invoice status (paid/pending/failed), not a
@@ -568,7 +595,9 @@ export function BillingPage() {
                 {i.status}
               </span>
               <span className="amt">
-                ${(i.amount_cents / 100).toFixed(2)}
+                {/* S5-F3 (2026-05-19): amount_cents is null/absent on a
+                    pending/failed invoice — `null / 100` → "$NaN". */}
+                {formatInvoiceAmount(i.amount_cents)}
                 {/* Only render the pdf link when the API actually has one.
                     A live `href="#"` is a dead-end click. (§10.8.) */}
                 {i.pdf_url && (
@@ -628,6 +657,54 @@ function pctOf(used: number, limit: number): number {
 function isWarn(used: number, limit: number): boolean {
   if (!Number.isFinite(limit) || limit <= 0) return false
   return used / limit >= 0.8
+}
+
+// ─── Invoice formatters (S5-F3, 2026-05-19) ───────────────────────────────
+//
+// A Razorpay invoice for a checkout that never completed (abandoned or a
+// failed charge) is a real row in GET /api/v1/billing/invoices, but with
+// null / absent period bounds and a null / absent / zero amount. The
+// pre-fix renderer fed those straight into `new Date()` and arithmetic,
+// producing the user-visible "Invalid Date → Invalid Date" and "$NaN"
+// caught by the 2026-05-19 live-payments test (invoice inv_Sr37ov8AV8Dayo).
+//
+// These helpers degrade every bad input to a single em dash so a pending
+// invoice reads honestly instead of rendering garbage.
+
+/** Placeholder rendered for any invoice field that is missing/unparseable. */
+const INVOICE_FIELD_MISSING = '—'
+
+/** Format one invoice date. Returns `—` for null/absent/unparseable input
+ *  rather than the literal string "Invalid Date". */
+export function formatInvoiceDate(iso: string | null | undefined): string {
+  if (!iso) return INVOICE_FIELD_MISSING
+  const t = Date.parse(iso)
+  if (!Number.isFinite(t)) return INVOICE_FIELD_MISSING
+  return new Date(t).toLocaleDateString()
+}
+
+/** Format an invoice billing period. When BOTH bounds are missing the row
+ *  shows a single dash (no dangling "→"); when only one is present the
+ *  arrow still renders so the asymmetry is visible. */
+export function formatInvoicePeriod(
+  start: string | null | undefined,
+  end: string | null | undefined,
+): string {
+  const s = formatInvoiceDate(start)
+  const e = formatInvoiceDate(end)
+  if (s === INVOICE_FIELD_MISSING && e === INVOICE_FIELD_MISSING) {
+    return INVOICE_FIELD_MISSING
+  }
+  return `${s} → ${e}`
+}
+
+/** Format an invoice amount. `amount_cents` is USD cents (the agent API
+ *  returns `currency: "USD"` on these rows — this is NOT INR paise, so we
+ *  deliberately do not route through lib/currency's FX-converting helpers).
+ *  A missing / null / NaN amount renders `$0.00`, never "$NaN". */
+export function formatInvoiceAmount(cents: number | null | undefined): string {
+  if (cents == null || !Number.isFinite(cents)) return '$0.00'
+  return `$${(cents / 100).toFixed(2)}`
 }
 
 // UpdatePaymentButton — invokes POST /api/v1/billing/update-payment, which

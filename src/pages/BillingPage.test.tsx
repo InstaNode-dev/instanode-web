@@ -19,7 +19,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { render, screen, waitFor, fireEvent, cleanup } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { BillingPage } from './BillingPage'
+import { BillingPage, formatInvoiceDate, formatInvoicePeriod, formatInvoiceAmount } from './BillingPage'
 import type { BillingDetails, DashboardTeam, Invoice, User } from '../api'
 
 // §10.21: test-only data lives here, inlined and minimal.
@@ -72,6 +72,7 @@ vi.mock('../api', async () => {
     listInvoices: vi.fn(),
     listResources: vi.fn(),
     fetchBillingUsage: vi.fn(),
+    listDeployments: vi.fn(),
     createCheckout: vi.fn(),
     cancelSubscription: vi.fn(),
     validatePromotion: vi.fn(),
@@ -114,6 +115,10 @@ function mockHappyBilling() {
     total: 0,
   })
   ;(api.fetchBillingUsage as any).mockResolvedValue(makeUsageResp({}))
+  // S5-F4: the Usage panel's deployment count now reads GET /api/v1/deployments.
+  // Default to an empty list (0 deployments) so the happy-path fixture matches
+  // a freshly-created account.
+  ;(api.listDeployments as any).mockResolvedValue({ ok: true, items: [], total: 0 })
 }
 
 function makeUsageResp(over: Partial<{
@@ -208,6 +213,7 @@ describe('BillingPage — backend-down error state (§10.21)', () => {
     ;(api.fetchBilling as any).mockRejectedValue(Object.assign(new Error('Razorpay is not configured'), { status: 503 }))
     ;(api.listInvoices as any).mockResolvedValue({ ok: true, invoices: [] })
     ;(api.fetchBillingUsage as any).mockResolvedValue(makeUsageResp({}))
+    ;(api.listDeployments as any).mockResolvedValue({ ok: true, items: [], total: 0 })
     render(<BillingPage />)
     await waitFor(() => {
       expect(screen.getByTestId('billing-error')).toBeTruthy()
@@ -220,6 +226,7 @@ describe('BillingPage — backend-down error state (§10.21)', () => {
     ;(api.fetchBilling as any).mockRejectedValue(new Error('Razorpay is not configured'))
     ;(api.listInvoices as any).mockResolvedValue({ ok: true, invoices: [] })
     ;(api.fetchBillingUsage as any).mockResolvedValue(makeUsageResp({}))
+    ;(api.listDeployments as any).mockResolvedValue({ ok: true, items: [], total: 0 })
     const { container } = render(<BillingPage />)
     await waitFor(() => {
       expect(screen.getByTestId('billing-error')).toBeTruthy()
@@ -235,6 +242,7 @@ describe('BillingPage — initial render', () => {
     ;(api.listInvoices as any).mockReturnValue(new Promise(() => {}))
     ;(api.listResources as any).mockReturnValue(new Promise(() => {}))
     ;(api.fetchBillingUsage as any).mockReturnValue(new Promise(() => {}))
+    ;(api.listDeployments as any).mockReturnValue(new Promise(() => {}))
     const { container } = render(<BillingPage />)
     expect(container.querySelector('.skel')).toBeTruthy()
   })
@@ -1000,6 +1008,176 @@ describe('BillingPage — Change plan button', () => {
     fireEvent.click(screen.getByTestId('change-plan-confirm'))
     await waitFor(() => {
       expect((api.fetchBilling as any).mock.calls.length).toBeGreaterThan(initialFetchCount)
+    })
+  })
+})
+
+// ─── S5-F3: invoice row renders garbage on pending/failed invoices ──────
+//
+// The 2026-05-19 live-payments test caught a real Razorpay invoice
+// (inv_Sr37ov8AV8Dayo) — a checkout that was started but never completed —
+// rendering as "Invalid Date → Invalid Date" / "$NaN" because its period
+// bounds and amount were null. These cover the pure formatters plus a
+// component-level test that a null-field invoice renders dashes, not
+// "Invalid Date" / "$NaN".
+
+describe('invoice formatters — S5-F3 null-field defensiveness', () => {
+  it('formatInvoiceDate renders a real date for a valid ISO string', () => {
+    expect(formatInvoiceDate('2026-04-22')).toBe(new Date(Date.parse('2026-04-22')).toLocaleDateString())
+  })
+
+  it('formatInvoiceDate renders "—", never "Invalid Date", for null/undefined/garbage', () => {
+    for (const bad of [null, undefined, '', 'not-a-date', 'NaN']) {
+      const out = formatInvoiceDate(bad as any)
+      expect(out).toBe('—')
+      expect(out).not.toContain('Invalid Date')
+    }
+  })
+
+  it('formatInvoicePeriod collapses to a single "—" when BOTH bounds are missing', () => {
+    expect(formatInvoicePeriod(null, null)).toBe('—')
+    expect(formatInvoicePeriod(undefined, undefined)).toBe('—')
+    expect(formatInvoicePeriod(null, null)).not.toContain('Invalid Date')
+    expect(formatInvoicePeriod(null, null)).not.toContain('→')
+  })
+
+  it('formatInvoicePeriod keeps the arrow when only one bound is present', () => {
+    const out = formatInvoicePeriod('2026-04-22', null)
+    expect(out).toContain('→')
+    expect(out).toContain('—')
+    expect(out).not.toContain('Invalid Date')
+  })
+
+  it('formatInvoiceAmount renders "$0.00", never "$NaN", for null/undefined/NaN', () => {
+    for (const bad of [null, undefined, NaN]) {
+      const out = formatInvoiceAmount(bad as any)
+      expect(out).toBe('$0.00')
+      expect(out).not.toContain('NaN')
+    }
+  })
+
+  it('formatInvoiceAmount divides USD cents correctly for a real amount', () => {
+    expect(formatInvoiceAmount(4900)).toBe('$49.00')
+    expect(formatInvoiceAmount(900)).toBe('$9.00')
+    expect(formatInvoiceAmount(0)).toBe('$0.00')
+  })
+})
+
+describe('BillingPage — S5-F3 pending invoice renders dashes, not garbage', () => {
+  it('renders "—" amount + period for an invoice with null period bounds and null amount', async () => {
+    mockTier = 'pro'
+    mockHappyBilling()
+    // Mirror the actual inv_Sr37ov8AV8Dayo payload shape: a started-but-
+    // never-completed checkout with no period and no amount.
+    ;(api.listInvoices as any).mockResolvedValue({
+      ok: true,
+      invoices: [
+        {
+          id: 'inv_Sr37ov8AV8Dayo',
+          period_start: null,
+          period_end: null,
+          plan: 'pro',
+          amount_cents: null,
+          currency: 'USD',
+          status: 'pending',
+        } as any,
+      ],
+    })
+    const { container } = render(<BillingPage />)
+    await waitForLoaded()
+    await waitFor(() => {
+      expect(container.textContent).toContain('inv_Sr37ov8AV8Dayo')
+    })
+    const text = container.textContent ?? ''
+    // The bug: these literal strings appeared in the table.
+    expect(text).not.toContain('Invalid Date')
+    expect(text).not.toContain('$NaN')
+    expect(text).not.toContain('NaN')
+    // The fix: the invoice row for this pending invoice carries a dash.
+    const row = Array.from(container.querySelectorAll('.invoice-row')).find(
+      (r) => r.querySelector('.id')?.textContent === 'inv_Sr37ov8AV8Dayo',
+    )
+    expect(row, 'pending invoice row not found').toBeTruthy()
+    expect(row?.textContent).toContain('—')
+    expect(row?.querySelector('.amt')?.textContent).toContain('$0.00')
+  })
+
+  it('still renders valid invoices with real dates and amounts', async () => {
+    mockTier = 'pro'
+    mockHappyBilling()
+    const { container } = render(<BillingPage />)
+    await waitForLoaded()
+    await waitFor(() => {
+      expect(container.textContent).toContain('inv_QzN8bD')
+    })
+    const row = Array.from(container.querySelectorAll('.invoice-row')).find(
+      (r) => r.querySelector('.id')?.textContent === 'inv_QzN8bD',
+    )
+    // 4900 cents → $49.00, real dates — no regression on the happy path.
+    expect(row?.querySelector('.amt')?.textContent).toContain('$49.00')
+    expect(row?.textContent).not.toContain('Invalid Date')
+  })
+})
+
+// ─── S5-F4: deployment count drift between Overview and Billing ─────────
+//
+// The 2026-05-19 test found /app Overview showing "0" deployments while
+// /app/billing's Usage panel showed "1 / 1" for the same account at the
+// same moment — the team genuinely had 0 deployments. The Overview reads
+// GET /api/v1/deployments (correct); the Billing panel previously read
+// billing/usage.deployments.count (a stale aggregate). These pin the
+// Billing Usage panel's deployment row to GET /api/v1/deployments so the
+// two surfaces can never disagree.
+
+describe('BillingPage — S5-F4 deployment count sources from /api/v1/deployments', () => {
+  function deploymentsRowNum(container: HTMLElement): string {
+    const row = Array.from(container.querySelectorAll('.usage-row')).find(
+      (r) => r.querySelector('.k')?.textContent === 'deployments',
+    )
+    return (row?.querySelector('.num')?.textContent ?? '').trim()
+  }
+
+  it('reads the deployment count from listDeployments(), not billing/usage', async () => {
+    mockTier = 'hobby'
+    mockHappyBilling()
+    // The stale billing/usage aggregate claims 1 deployment...
+    ;(api.fetchBillingUsage as any).mockResolvedValue(makeUsageResp({ deployments: 1 }))
+    // ...but the authoritative deployments list says 0.
+    ;(api.listDeployments as any).mockResolvedValue({ ok: true, items: [], total: 0 })
+    const { container } = render(<BillingPage />)
+    await waitForLoaded()
+    await waitFor(() => {
+      // The panel must show the authoritative 0, never the stale 1.
+      expect(deploymentsRowNum(container).startsWith('0')).toBe(true)
+    })
+    expect(api.listDeployments).toHaveBeenCalled()
+  })
+
+  it('reflects a non-zero deployment count from the list when one genuinely exists', async () => {
+    mockTier = 'hobby'
+    mockHappyBilling()
+    ;(api.fetchBillingUsage as any).mockResolvedValue(makeUsageResp({ deployments: 0 }))
+    ;(api.listDeployments as any).mockResolvedValue({
+      ok: true,
+      items: [{ id: 'd1' }, { id: 'd2' }] as any[],
+      total: 2,
+    })
+    const { container } = render(<BillingPage />)
+    await waitForLoaded()
+    await waitFor(() => {
+      expect(deploymentsRowNum(container).startsWith('2')).toBe(true)
+    })
+  })
+
+  it('fails soft to 0 when listDeployments() rejects', async () => {
+    mockTier = 'hobby'
+    mockHappyBilling()
+    ;(api.fetchBillingUsage as any).mockResolvedValue(makeUsageResp({ deployments: 1 }))
+    ;(api.listDeployments as any).mockRejectedValue(new Error('deployments unavailable'))
+    const { container } = render(<BillingPage />)
+    await waitForLoaded()
+    await waitFor(() => {
+      expect(deploymentsRowNum(container).startsWith('0')).toBe(true)
     })
   })
 })
