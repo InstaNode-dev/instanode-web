@@ -7,7 +7,20 @@
 // Authorization), so cross-origin streams from GitHub Pages → api.instanode.dev
 // can't authenticate that way. Fetch + ReadableStream lets us send the bearer
 // token while keeping a tiny SSE-compatible parser inline.
-import { getAPIBaseURL, getToken } from '../api'
+import { getAPIBaseURL, getToken, handle401 } from '../api'
+
+// SSEStreamError — carries the HTTP status of a failed stream open so the
+// caller can distinguish an expired session (401) from a genuine
+// "stream not available" (404 / 5xx). A bare Error('HTTP 401') previously
+// made every failure render the same misleading "deploy too old" copy.
+export class SSEStreamError extends Error {
+  status: number
+  constructor(status: number) {
+    super(`HTTP ${status}`)
+    this.name = 'SSEStreamError'
+    this.status = status
+  }
+}
 
 export type SSEHandlers = {
   onLine: (line: string) => void
@@ -30,7 +43,12 @@ export function streamSSE(path: string, handlers: SSEHandlers, signal?: AbortSig
       if (tok) headers['Authorization'] = `Bearer ${tok}`
       const res = await fetch(url, { headers, signal: compoundSignal.signal })
       if (!res.ok) {
-        handlers.onError?.(new Error(`HTTP ${res.status}`))
+        // A 401 mid-stream means the bearer token expired. Run the same
+        // token-clear + (if inside /app) /login redirect that the central
+        // fetch interceptor does, so the user isn't stranded on a dead
+        // "stream unavailable" panel with an invalid session.
+        if (res.status === 401) handle401(res.status)
+        handlers.onError?.(new SSEStreamError(res.status))
         handlers.onClose?.()
         return
       }

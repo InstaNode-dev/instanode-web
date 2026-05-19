@@ -38,6 +38,17 @@ interface ChangelogEntry {
  * procurement reviewer or an on-call engineer checking what changed. */
 const ENTRIES: ChangelogEntry[] = [
   {
+    date: '2026-05-18',
+    title: 'Marketing + dashboard hardening pass',
+    bullets: [
+      'Pricing comparison grid corrected to four tier columns — a stale six-track layout left a dead empty column.',
+      'Marketing pages now have a mobile navigation menu below 880px (previously all nav links vanished on phones).',
+      'Every public page now ships its own <title>, meta description, and canonical URL — subpages no longer self-canonicalize to the homepage.',
+      'sitemap.xml is generated at build time and now covers every page including blog posts and use-case detail pages.',
+      'Billing checkout is no longer suppressed for freshly-claimed paid teams; tier-wall messages now carry the agent action and upgrade link.',
+    ],
+  },
+  {
     date: '2026-05-17',
     title: 'Bug-hunt remediation — P0/P1 fixes',
     bullets: [
@@ -45,6 +56,7 @@ const ENTRIES: ChangelogEntry[] = [
       'Large deploy tarballs are read in full (io.ReadAll) — fixed a truncation bug where big multipart uploads built on a partly-zero buffer.',
       'Redeploys now re-resolve vault:// env references, so vault-backed apps no longer break on redeploy.',
       'Customer-deploy NetworkPolicy egress now covers the production DOKS pod/service CIDRs (was hardcoded to the dev cluster ranges).',
+      'Continuous deployment: a push to the api, worker, or provisioner default branch now builds, pushes, and rolls out to production automatically, with an in-cluster build-SHA verification gate.',
     ],
   },
   {

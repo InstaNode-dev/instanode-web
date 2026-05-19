@@ -13,7 +13,7 @@ import { FailureAutopsyPanel } from '../components/FailureAutopsyPanel'
 import { useDashboardCtx } from '../hooks/useDashboardCtx'
 import * as api from '../api'
 import type { DashboardStack, DashboardDeployment, Tier, StackFamilyMember } from '../api'
-import { streamSSE } from '../lib/sseStream'
+import { streamSSE, SSEStreamError } from '../lib/sseStream'
 
 // Tiers that can edit a deployment's private state. Same set as on
 // DeploymentsPage's configurator — the API enforces this with a 402 +
@@ -65,7 +65,11 @@ const LOG_END_SENTINEL = '[end]'
 // older lines isn't interrupted.
 const AUTOSCROLL_NEAR_BOTTOM_PX = 40
 
-type StreamState = 'connecting' | 'open' | 'closed' | 'error'
+// 'auth' — the SSE open returned 401 (session expired mid-stream). Rendered
+// distinctly from 'error' so the user sees "session expired" instead of the
+// misleading "deploy too old" copy. sseStream's handle401 has already
+// cleared the token / redirected if inside /app.
+type StreamState = 'connecting' | 'open' | 'closed' | 'error' | 'auth'
 
 const TABS = ['Overview', 'Logs', 'Env vars', 'Resources', 'Metrics', 'Audit'] as const
 type Tab = (typeof TABS)[number]
@@ -937,9 +941,16 @@ function LiveBuild({ d, view }: { d: DashboardStack; view: DeployView }) {
       onError: (err) => {
         // eslint-disable-next-line no-console
         console.warn('logs stream error', err)
+        // A 401 mid-stream is a session expiry, not a missing build —
+        // surface it distinctly. sseStream has already cleared the token
+        // (and redirected if inside /app).
+        if (err instanceof SSEStreamError && err.status === 401) {
+          setStreamState('auth')
+          return
+        }
         setStreamState(everOpened ? 'closed' : 'error')
       },
-      onClose: () => setStreamState((s) => (s === 'error' ? 'error' : 'closed')),
+      onClose: () => setStreamState((s) => (s === 'error' || s === 'auth' ? s : 'closed')),
     })
     return cleanup
   }, [ssePath])
@@ -979,6 +990,9 @@ function LiveBuild({ d, view }: { d: DashboardStack; view: DeployView }) {
           {logs.length === 0 && streamState === 'error' && (
             <div className="row"><span className="msg" style={{ color: 'var(--text-faint)' }}>log stream not available — the deploy may be too old or the build may not be running.</span></div>
           )}
+          {logs.length === 0 && streamState === 'auth' && (
+            <div className="row"><span className="msg" style={{ color: 'var(--text-faint)' }}>session expired — sign in again to resume the log stream.</span></div>
+          )}
           {logs.length === 0 && streamState === 'closed' && (
             <div className="row"><span className="msg" style={{ color: 'var(--text-faint)' }}>no logs yet — waiting for the first build line.</span></div>
           )}
@@ -995,6 +1009,7 @@ function LiveBuild({ d, view }: { d: DashboardStack; view: DeployView }) {
             {streamState === 'connecting' && 'connecting…'}
             {streamState === 'closed' && `stream closed · ${logs.length} lines`}
             {streamState === 'error' && 'stream unavailable'}
+            {streamState === 'auth' && 'session expired'}
           </span>
           <span style={{ marginLeft: 'auto' }}>↓ jump to live</span>
         </div>
