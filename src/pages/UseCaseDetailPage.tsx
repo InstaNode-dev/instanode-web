@@ -134,6 +134,7 @@ function AutoDetail({ services }: { services: Service[] }) {
           <ol className="ucd-steps">
             {services.map((s, i) => {
               const info = SERVICE_INFO[s]
+              if (!info) return null
               return (
                 <li key={s} className="ucd-step">
                   <p className="ucd-step-title">
@@ -186,9 +187,12 @@ function AutoDetail({ services }: { services: Service[] }) {
   )
 }
 
+/* primaryCurl — the curl shown on the use-case CTA. Defensive on two axes:
+ * an empty services list, and a services[0] that is not a SERVICE_INFO key.
+ * parseServices already filters unknown values, but a missing lookup here
+ * crashes the prerender build, so the guard stays. Falls back to Postgres. */
 function primaryCurl(services: Service[]): string {
-  if (services.length === 0) return `curl -X POST https://api.instanode.dev/db/new -d '{"name":"prod-db"}'`
-  return SERVICE_INFO[services[0]].curl
+  return SERVICE_INFO[services[0]]?.curl ?? SERVICE_INFO.pg.curl
 }
 
 function DetailStyles() {

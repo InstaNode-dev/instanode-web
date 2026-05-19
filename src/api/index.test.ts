@@ -39,6 +39,7 @@ import {
   fetchStackStatus,
   registerLogoutHook,
   APIError,
+  TIER_RANK,
 } from './index'
 // §10.21: FIXTURE_BILLING / FIXTURE_INVOICES imports retired. The 503
 // fallback paths in fetchBilling() and listInvoices() were removed —
@@ -347,16 +348,36 @@ describe('fetchBilling()', () => {
 
 // ─── listInvoices() ──────────────────────────────────────────────────────
 describe('listInvoices()', () => {
-  it('returns the API invoices on a successful response', async () => {
+  // D4 (P1-W4-09): the agent API emits each invoice as the Razorpay wire
+  // shape { id, amount, currency, status, date, pdf_url } — `amount` is
+  // already in the smallest currency unit (paise/cents) and there is no
+  // billing period or plan tier. listInvoices() now maps that into the
+  // dashboard's normalized Invoice type instead of a blind cast.
+  it('maps the Razorpay wire shape into the normalized Invoice type', async () => {
     const m = installFetch()
-    const sample = [
-      { id: 'inv_a', period_start: '2026-04-01', period_end: '2026-05-01', plan: 'pro', amount_cents: 4900, currency: 'USD', status: 'paid' },
-      { id: 'inv_b', period_start: '2026-03-01', period_end: '2026-04-01', plan: 'pro', amount_cents: 4900, currency: 'USD', status: 'paid' },
+    const wire = [
+      { id: 'inv_a', amount: 4900, currency: 'USD', status: 'paid', date: '2026-05-01T00:00:00Z', pdf_url: 'https://x/a.pdf' },
+      { id: 'inv_b', amount: 4900, currency: 'USD', status: 'paid', date: '2026-04-01T00:00:00Z' },
     ]
-    m.mockResolvedValueOnce(jsonResponse({ ok: true, invoices: sample }))
+    m.mockResolvedValueOnce(jsonResponse({ ok: true, invoices: wire }))
     const r = await listInvoices()
     expect(r.ok).toBe(true)
-    expect(r.invoices).toEqual(sample)
+    // `amount` → `amount_cents` is a direct copy (NOT ×100); `date` →
+    // `issued_at`; period/plan are absent and stay undefined.
+    expect(r.invoices).toEqual([
+      { id: 'inv_a', issued_at: '2026-05-01T00:00:00Z', amount_cents: 4900, currency: 'USD', status: 'paid', pdf_url: 'https://x/a.pdf' },
+      { id: 'inv_b', issued_at: '2026-04-01T00:00:00Z', amount_cents: 4900, currency: 'USD', status: 'paid', pdf_url: undefined },
+    ])
+  })
+
+  it('collapses an unknown invoice status to "pending"', async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse({
+      ok: true,
+      invoices: [{ id: 'inv_c', amount: 900, currency: 'INR', status: 'issued', date: '2026-05-10T00:00:00Z' }],
+    }))
+    const r = await listInvoices()
+    expect(r.invoices[0].status).toBe('pending')
   })
 
   it('hits GET /api/v1/billing/invoices', async () => {
@@ -392,6 +413,38 @@ describe('listInvoices()', () => {
       { status: 500 },
     ))
     await expect(listInvoices()).rejects.toMatchObject({ status: 500 })
+  })
+})
+
+// ─── TIER_RANK ordering (D3 / P1-W4-10) ──────────────────────────────────
+// Pins the canonical tier ladder. The bug this guards against: an inverted
+// copy with growth:4, pro:5 lived independently in ChangePlanModal and
+// TierChangeModal, so the admin console showed "DEMOTE" for a pro→growth
+// upgrade. growth ($99) must rank strictly ABOVE pro ($49). This table is
+// the single source both modals import — kept aligned with the backend's
+// common/plans/rank.go.
+describe('TIER_RANK — canonical tier ladder (D3)', () => {
+  it('orders tiers low → high by price', () => {
+    expect(TIER_RANK).toEqual({
+      anonymous: 0,
+      free: 1,
+      hobby: 2,
+      hobby_plus: 3,
+      pro: 4,
+      growth: 5,
+      team: 6,
+    })
+  })
+
+  it('ranks growth strictly above pro (the inversion the bug had backwards)', () => {
+    expect(TIER_RANK.growth).toBeGreaterThan(TIER_RANK.pro)
+  })
+
+  it('is strictly monotonic across the full ladder', () => {
+    const ladder = ['anonymous', 'free', 'hobby', 'hobby_plus', 'pro', 'growth', 'team']
+    for (let i = 1; i < ladder.length; i++) {
+      expect(TIER_RANK[ladder[i]]).toBeGreaterThan(TIER_RANK[ladder[i - 1]])
+    }
   })
 })
 

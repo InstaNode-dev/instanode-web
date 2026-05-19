@@ -115,6 +115,19 @@ const LIMITS: Record<string, { label: string; limits: PlanLimits; nextTier?: Tie
     // FIX-K (2026-05-16): 2026-05-15 storage bump. Was: postgres_mb: 5120, redis_mb: 256, mongodb_mb: 2048.
     limits: { postgres_mb: 10240, redis_mb: 512, mongodb_mb: 5120, deployments: 10, webhooks: 10000, team_seats: 5 },
   },
+  // D5 (2026-05-18): growth row was missing — a growth-tier team fell
+  // through to `LIMITS.hobby`, painting red over-quota bars on a plan they
+  // were well within. Numbers mirror api/plans.yaml growth: postgres 20480
+  // MB, redis 1024 MB, mongodb / webhooks unlimited (-1 in plans.yaml →
+  // Infinity here), 5 deployments, 10 team_members.
+  growth: {
+    label: 'Growth',
+    nextTier: 'team',
+    limits: {
+      postgres_mb: 20480, redis_mb: 1024, mongodb_mb: Infinity,
+      deployments: 5, webhooks: Infinity, team_seats: 10,
+    },
+  },
   team: {
     label: 'Team',
     limits: {
@@ -549,7 +562,9 @@ export function BillingPage() {
         <div className="card" style={{ padding: 0 }}>
           <div className="invoice-row head">
             <span>id</span>
-            <span>period</span>
+            {/* "date" not "period": the Razorpay invoices endpoint emits a
+                single charge timestamp, not a billing window. */}
+            <span>date</span>
             <span>plan</span>
             <span>status</span>
             <span>amount</span>
@@ -558,9 +573,15 @@ export function BillingPage() {
             <div key={i.id} className="invoice-row">
               <span className="id">{i.id}</span>
               <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11.5, color: 'var(--text-dim)' }}>
-                {new Date(i.period_start).toLocaleDateString()} → {new Date(i.period_end).toLocaleDateString()}
+                {/* Prefer a real billing window if a future API revision
+                    sends one; otherwise show the single charge date. */}
+                {i.period_start && i.period_end
+                  ? `${new Date(i.period_start).toLocaleDateString()} → ${new Date(i.period_end).toLocaleDateString()}`
+                  : new Date(i.issued_at).toLocaleDateString()}
               </span>
-              <TierPill tier={i.plan} />
+              {/* The invoices endpoint doesn't carry a plan tier — render the
+                  pill only when one is actually present, never fabricate. */}
+              {i.plan ? <TierPill tier={i.plan} /> : <span className="dim">—</span>}
               {/* Show the real invoice status (paid/pending/failed), not a
                   hardcoded "running" pill. StatusPill doesn't style these
                   three, so render a plain mono span. (§10.8.) */}

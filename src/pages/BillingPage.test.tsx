@@ -57,10 +57,12 @@ const FIXTURE_BILLING: BillingDetails = {
   cancel_at_period_end: false,
 }
 
+// D4: post-mapper Invoice shape — `issued_at` is the single Razorpay charge
+// date; the invoices endpoint emits no billing period or plan tier.
 const FIXTURE_INVOICES: Invoice[] = [
-  { id: 'inv_QzN8bD', period_start: '2026-04-22', period_end: '2026-05-22', plan: 'pro',   amount_cents: 4900, currency: 'USD', status: 'paid' },
-  { id: 'inv_Pp7K2c', period_start: '2026-03-22', period_end: '2026-04-22', plan: 'pro',   amount_cents: 4900, currency: 'USD', status: 'paid' },
-  { id: 'inv_Lm4F9a', period_start: '2026-02-20', period_end: '2026-03-22', plan: 'hobby', amount_cents:  900, currency: 'USD', status: 'paid' },
+  { id: 'inv_QzN8bD', issued_at: '2026-05-22T00:00:00Z', amount_cents: 4900, currency: 'USD', status: 'paid' },
+  { id: 'inv_Pp7K2c', issued_at: '2026-04-22T00:00:00Z', amount_cents: 4900, currency: 'USD', status: 'paid' },
+  { id: 'inv_Lm4F9a', issued_at: '2026-03-22T00:00:00Z', amount_cents:  900, currency: 'USD', status: 'paid' },
 ]
 
 // ─── Module-level mocks ──────────────────────────────────────────────────

@@ -46,7 +46,7 @@ function PublicNav() {
           <a href="/login" className="public-nav-link public-nav-link--muted">
             Sign in
           </a>
-          <a href="/get-token" className="public-cta-pill">
+          <a href="/login" className="public-cta-pill">
             Get token <span aria-hidden="true">→</span>
           </a>
         </div>
@@ -79,7 +79,7 @@ function PublicFooter() {
             <div className="public-footer-h">Legal</div>
             <a href="/terms">Terms</a>
             <a href="/privacy">Privacy</a>
-            <a href="/security">Security</a>
+            <a href="/docs/public/security.md">Security</a>
             <a href="mailto:hello@instanode.dev">Contact</a>
           </div>
         </div>

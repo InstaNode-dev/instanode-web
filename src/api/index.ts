@@ -1673,14 +1673,52 @@ export async function fetchBilling(): Promise<{ ok: true; plan: string; billing:
   return { ok: true as const, plan: r.tier, billing: mapBillingState(r) }
 }
 
-type InvoicesResp = { ok: boolean; invoices?: Invoice[] }
+// Wire shape of one invoice row from GET /api/v1/billing/invoices. Mirrors
+// api/internal/handlers/billing.go::ListInvoicesAPI exactly: a Razorpay
+// invoice has a single `amount` (in the currency's smallest unit — paise
+// for INR) and a single `date`, with no billing period or plan tier.
+type InvoiceWire = {
+  id: string
+  amount: number
+  currency: string
+  status: string
+  date: string
+  pdf_url?: string
+}
+type InvoicesResp = { ok: boolean; invoices?: InvoiceWire[] }
+
+// VALID_INVOICE_STATUSES — the three states the dashboard's Invoice type
+// models. Razorpay can also emit 'issued' / 'expired' / 'cancelled'; any
+// status outside this set collapses to 'pending' so the UI renders a
+// neutral pill instead of an unstyled raw string.
+const VALID_INVOICE_STATUSES: ReadonlySet<string> = new Set(['paid', 'pending', 'failed'])
+
+// mapInvoice — converts the agent API's wire shape into the dashboard's
+// normalized Invoice type. The previous `r.invoices ?? []` blind cast let
+// the wire's {amount,date} reach a UI expecting {amount_cents,period_*},
+// rendering "Invalid Date" / "$NaN" on every row. `amount` is already in
+// the smallest currency unit (paise/cents) — it maps to `amount_cents`
+// directly, NO ×100. `period_start` / `period_end` / `plan` are not on
+// the wire and stay undefined; the BillingPage renders around them.
+function mapInvoice(w: InvoiceWire): Invoice {
+  return {
+    id: w.id,
+    issued_at: w.date,
+    amount_cents: w.amount,
+    currency: w.currency,
+    status: VALID_INVOICE_STATUSES.has(w.status)
+      ? (w.status as Invoice['status'])
+      : 'pending',
+    pdf_url: w.pdf_url,
+  }
+}
 
 export async function listInvoices(): Promise<{ ok: true; invoices: Invoice[] }> {
   // §10.21: errors propagate. The previous 503 fallback returned three
   // mock "paid" invoices that didn't correspond to any real payment;
   // BillingPage now surfaces the failure honestly.
   const r = await call<InvoicesResp>('/api/v1/billing/invoices')
-  return { ok: true, invoices: r.invoices ?? [] }
+  return { ok: true, invoices: (r.invoices ?? []).map(mapInvoice) }
 }
 
 // PlanFrequency selects between the monthly and yearly Razorpay plan_id at
@@ -1825,6 +1863,26 @@ export async function updatePaymentMethod(): Promise<{ ok: true; short_url: stri
 // dependency on src/components/TierCard.tsx (which restricts TierKey to
 // the grid's four columns for an unrelated UI reason).
 export type ChangePlanTier = 'hobby' | 'hobby_plus' | 'pro' | 'team' | 'growth'
+
+// TIER_RANK — the single canonical totally-ordered rank of plan tiers for
+// the dashboard. Higher rank = more capacity. Anchored to api/plans.yaml
+// pricing (hobby $9 < hobby_plus $19 < pro $49 < growth $99 < team $199)
+// and kept byte-for-byte aligned with the backend's common/plans/rank.go.
+//
+// IMPORTANT: pro sits strictly BELOW growth. An earlier inverted copy
+// (growth:4, pro:5) lived independently in ChangePlanModal and
+// TierChangeModal — the admin console then showed "DEMOTE" for a
+// pro→growth upgrade. Both modals now import this one table so they can't
+// re-diverge. If the tier ladder changes, edit here AND rank.go together.
+export const TIER_RANK: Record<string, number> = {
+  anonymous: 0,
+  free: 1,
+  hobby: 2,
+  hobby_plus: 3,
+  pro: 4,
+  growth: 5,
+  team: 6,
+}
 
 // changePlan — LIVE. POST /api/v1/billing/change-plan upgrades an *existing*
 // Razorpay subscription to a different plan tier in-place, rather than
