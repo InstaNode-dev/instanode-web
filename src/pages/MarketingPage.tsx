@@ -77,13 +77,20 @@ const HOMEPAGE_USECASE_SLUGS = [
 // Anchors and route paths used throughout the page. Centralized so we don't
 // scatter hardcoded string fragments — easy to update when /pricing or /docs
 // gets wired in.
+//
+// T18 P1-2 (2026-05-20): `forAgents` previously pointed at `#for-agents`,
+// a same-page anchor. Every other shell (PublicShell) linked to the
+// real `/for-agents` page. Same label, two destinations. Now both point
+// at the route — the homepage anchor `id="for-agents"` still scrolls for
+// users already on the page, but the nav link routes consistently so
+// the standalone page is no longer orphaned from the homepage nav.
 const ROUTES = {
   signin: '/login',
   pricing: '/pricing',
   docs: '/docs',
   blog: '/blog',
   changelog: '/changelog',
-  forAgents: '#for-agents',
+  forAgents: '/for-agents',
   playground: '#playground',
 } as const
 
@@ -104,7 +111,13 @@ const SERVICES: Service[] = [
   // Renamed to avoid the brand-tie-in confusion.
   { id: 'st', name: 'Storage (S3-compatible)', curl: 'POST /storage/new', liveIn: '0.8s' },
   { id: 'wh', name: 'Webhook',        curl: 'POST /webhook/new', liveIn: '0.3s' },
-  { id: 'dp', name: 'Deploy',         curl: 'POST /deploy/new',  liveIn: '<10s' },
+  // T18 P1-6 (2026-05-20): liveIn was '<10s', which contradicted both
+  // content/llms.txt ("~30–90s") and content/docs/deploy.md ("~30s build")
+  // by 3–9×. The actual kaniko build pipeline (Dockerfile → image layer
+  // cache → Service → Ingress → cert-manager) lands in the 30–90s range.
+  // '~60s' matches docs and llms.txt — a 3–9× shipping-window lie on the
+  // primary acquisition surface was the headline bug here.
+  { id: 'dp', name: 'Deploy',         curl: 'POST /deploy/new',  liveIn: '~60s' },
 ]
 
 type Plan = {
@@ -648,7 +661,12 @@ export function MarketingPage() {
                   {'\n  '}{'}'}
                   {'\n'}{'}'}
                 </div>
-                <p>Six tools registered: <code>postgres</code>, <code>redis</code>, <code>mongo</code>, <code>queue</code>, <code>storage</code>, <code>deploy</code>.</p>
+                {/* T18 P1-4 (2026-05-20): list the same seven tools as
+                    the "Seven services. One bundle." headline (and the
+                    SERVICES array). The earlier "Six tools" copy dropped
+                    webhook — a real MCP tool — and contradicted the same
+                    page. */}
+                <p>Seven tools registered: <code>postgres</code>, <code>redis</code>, <code>mongo</code>, <code>queue</code>, <code>storage</code>, <code>webhook</code>, <code>deploy</code>.</p>
               </div>
             </div>
 

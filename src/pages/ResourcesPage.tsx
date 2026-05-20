@@ -184,8 +184,14 @@ export function ResourcesPage() {
               </div>
             ))
           : filtered.map((r) => (
+              // T15 P2-2: link directly to the /app/ prefixed dashboard
+              // route. `/resources/:id` still resolves but only via the
+              // LegacyResourceRedirect → <Navigate replace> double-hop,
+              // which produces a render flash + a confusing browser-back
+              // entry. The legacy unprefixed path is for external/bookmarked
+              // links only; internal rows must skip the redirect.
               <Link
-                to={`/resources/${r.token}`}
+                to={`/app/resources/${r.token}`}
                 key={r.id}
                 className="table-row"
                 style={{ gridTemplateColumns: '1.6fr 70px 80px 1fr 80px 90px 80px', textDecoration: 'none', color: 'inherit' }}
