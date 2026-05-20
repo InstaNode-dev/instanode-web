@@ -1599,3 +1599,70 @@ input, textarea, select { font-family: inherit; }
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ----------------------------------------------------------------
+   CodeBlock — used by the shared markdown renderer (docs / blog /
+   use-cases) and any other surface that imports it. Provides:
+   - relative wrapper for the floating Copy button
+   - language tag (top-left)
+   - token colours that reuse existing accent / amber / blue / violet
+     so the highlighter doesn't introduce new palette values
+
+   BugBash B3-P2-1 (no syntax highlight) + B3-P2-2 (no copy button).
+   ---------------------------------------------------------------- */
+.code-block {
+  position: relative;
+}
+.code-block-copy {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  padding: 4px 10px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-dim);
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 120ms, background 120ms, color 120ms;
+}
+.code-block:hover .code-block-copy,
+.code-block:focus-within .code-block-copy,
+.code-block-copy:focus,
+.code-block-copy:focus-visible {
+  opacity: 1;
+}
+.code-block-copy:hover {
+  background: rgba(0,228,142,0.1);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.code-block-copy:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.code-block-lang {
+  position: absolute;
+  top: 8px;
+  left: 12px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  pointer-events: none;
+}
+.code-block[data-lang=""] .code-block-lang { display: none; }
+
+/* token colours — paired with token classes emitted by
+   src/components/CodeBlock.tsx::tokenize*. */
+.code-block .tok-comment { color: var(--text-faint); font-style: italic; }
+.code-block .tok-string  { color: var(--accent); }
+.code-block .tok-number  { color: var(--amber); }
+.code-block .tok-bool    { color: var(--violet); }
+.code-block .tok-keyword { color: var(--blue); font-weight: 600; }
+.code-block .tok-flag    { color: var(--violet); }
+.code-block .tok-key     { color: var(--blue); }
+

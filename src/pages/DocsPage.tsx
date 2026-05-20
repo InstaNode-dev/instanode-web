@@ -132,6 +132,10 @@ function DocsStyles() {
       .docs-section-body li { margin: 6px 0; }
       .docs-section-body code { background: var(--ink); border: 1px solid var(--border); color: var(--text); padding: 1px 6px; border-radius: 4px; font-size: 13.5px; font-family: var(--font-mono); }
       .docs-section-body pre { background: var(--code-bg); color: var(--text); border: 1px solid var(--border); padding: 16px 20px; border-radius: 8px; overflow-x: auto; font-size: 13px; line-height: 1.55; margin: 16px 0; }
+      /* Reserve top padding for the Copy button + language pill on
+         fenced code blocks (CodeBlock component). The .md-table fallback
+         doesn't need the headroom — it's a plain ASCII grid. */
+      .docs-section-body pre.code-block { padding-top: 32px; }
       .docs-section-body pre code { background: transparent; padding: 0; color: inherit; }
       .docs-section-body pre.md-table { background: transparent; color: inherit; padding: 0; font-size: 14px; }
       .docs-section-body strong { font-weight: 600; }

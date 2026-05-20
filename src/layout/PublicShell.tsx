@@ -20,8 +20,13 @@ export function PublicShell({ children }: { children: ReactNode }) {
   return (
     <div className="public-shell">
       <PublicShellStyles />
+      {/* a11y skip-link — first focusable element on every PublicShell-
+          wrapped page (Pricing/Docs/Blog/Changelog/etc). Hidden until
+          focused; jumps screen-reader / keyboard users straight to
+          <main>. WCAG 2.4.1 Bypass Blocks. */}
+      <a href="#main-content" className="public-skip-link">Skip to main content</a>
       <PublicNav />
-      <main className="public-main">{children}</main>
+      <main id="main-content" className="public-main">{children}</main>
       <PublicFooter />
     </div>
   )
@@ -104,6 +109,29 @@ function PublicFooter() {
 function PublicShellStyles() {
   return (
     <style>{`
+      /* skip-to-content — WCAG 2.4.1 Bypass Blocks. Hidden until
+         keyboard focus, then drops in over the sticky nav. */
+      .public-skip-link {
+        position: absolute;
+        top: -100px;
+        left: 8px;
+        z-index: 90;
+        padding: 10px 16px;
+        background: var(--accent);
+        color: var(--ink);
+        font-weight: 600;
+        font-size: 13px;
+        border-radius: 6px;
+        text-decoration: none;
+        transition: top 120ms ease-out;
+      }
+      .public-skip-link:focus,
+      .public-skip-link:focus-visible {
+        top: 8px;
+        outline: 2px solid var(--text);
+        outline-offset: 2px;
+      }
+
       .public-shell {
         min-height: 100vh;
         display: flex; flex-direction: column;

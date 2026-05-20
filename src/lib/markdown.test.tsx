@@ -44,12 +44,31 @@ describe('renderMarkdown — block constructs', () => {
       .toContain('<h6 ')
   })
 
-  it('renders fenced code blocks as <pre><code>', () => {
-    expect(html('```\nfoo\nbar\n```')).toBe('<pre><code>foo\nbar</code></pre>')
+  it('renders fenced code blocks via CodeBlock (includes Copy button)', () => {
+    const out = html('```\nfoo\nbar\n```')
+    // Wrapper carries the CodeBlock class hook, copy affordance, and
+    // the original code text. We don't snapshot the whole markup —
+    // the styling/affordances are CodeBlock's own concern.
+    expect(out).toContain('class="code-block"')
+    expect(out).toContain('>foo\nbar<')
+    expect(out).toContain('Copy code to clipboard')
   })
 
-  it('strips the language hint from the fence', () => {
-    expect(html('```bash\nls\n```')).toBe('<pre><code>ls</code></pre>')
+  it('strips the language hint from the fence and exposes it as a class', () => {
+    const out = html('```bash\nls\n```')
+    expect(out).toContain('language-bash')
+    expect(out).toContain('>ls<')
+  })
+
+  it('maps shell language aliases to the bash highlighter', () => {
+    const out = html('```sh\nls\n```')
+    expect(out).toContain('language-bash')
+  })
+
+  it('emits no language class when the fence has no language tag', () => {
+    const out = html('```\nplain text\n```')
+    expect(out).not.toContain('language-')
+    expect(out).toContain('>plain text<')
   })
 
   it('renders unordered lists with - bullets', () => {

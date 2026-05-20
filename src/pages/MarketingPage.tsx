@@ -199,6 +199,11 @@ export function MarketingPage() {
     <div className="mkt">
       <style>{MKT_CSS}</style>
 
+      {/* a11y skip-link — first focusable element. Hidden until focused;
+          jumps screen-reader / keyboard users directly to <main> below
+          (BugBash B1-P1-1 + WCAG 2.4.1 Bypass Blocks). */}
+      <a href="#main-content" className="mkt-skip-link">Skip to main content</a>
+
       {/* ---------- top nav (sticky, glassmorphic) ---------- */}
       <nav className="mkt-nav" aria-label="Primary">
         <div className="mkt-wrap mkt-nav-inner">
@@ -248,6 +253,12 @@ export function MarketingPage() {
           </div>
         </div>
       </nav>
+
+      {/* <main> wraps every content section between nav and footer.
+          Required by WCAG 1.3.1 / ARIA Landmark Roles — pre-fix, the
+          homepage was the only prerendered route missing this landmark
+          (BugBash B1-P1-1, Lighthouse "Agentic Browsing" rule). */}
+      <main id="main-content" className="mkt-main">
 
       {/* ---------- hero ---------- */}
       <header className="mkt-hero">
@@ -665,6 +676,8 @@ export function MarketingPage() {
         </div>
       </section>
 
+      </main>
+
       {/* ---------- footer ---------- */}
       <footer className="mkt-footer">
         <div className="mkt-wrap">
@@ -722,6 +735,35 @@ const MKT_CSS = `
   position: relative;
   overflow: hidden;
 }
+
+/* skip-to-content — visually hidden until focused, then drops in
+   from the top-left. WCAG 2.4.1 (Bypass Blocks). Kept high z so it
+   sits above the sticky glassmorphic nav when focused. */
+.mkt-skip-link {
+  position: absolute;
+  top: -100px;
+  left: 8px;
+  z-index: 100;
+  padding: 10px 16px;
+  background: var(--accent);
+  color: var(--ink);
+  font-weight: 600;
+  font-size: 13px;
+  border-radius: 6px;
+  text-decoration: none;
+  transition: top 120ms ease-out;
+}
+.mkt-skip-link:focus,
+.mkt-skip-link:focus-visible {
+  top: 8px;
+  outline: 2px solid var(--text);
+  outline-offset: 2px;
+}
+
+/* <main> wrapper — display:contents so it doesn't alter the existing
+   layout (children were direct grandchildren of .mkt before). The
+   landmark is still in the accessibility tree. */
+.mkt-main { display: contents; }
 
 /* ambient atmosphere — radial gradients + grid overlay */
 .mkt::before {
