@@ -39,10 +39,8 @@
 
 import React from 'react'
 import ReactDOM from 'react-dom/client'
-import { BrowserAgent } from '@newrelic/browser-agent/loaders/browser-agent'
 import { App } from './App'
 import { ErrorBoundary } from './components/ErrorBoundary'
-import { buildBrowserAgentOptions } from './lib/newrelic-config'
 import './styles/tokens.css'
 
 // initNewRelic — boot the browser agent when both keys are present. The
@@ -54,15 +52,28 @@ import './styles/tokens.css'
 // every JS error, AJAX failure, page action, and SPA route change collected
 // by the agent is automatically stamped with the dashboard's build SHA.
 //
-// Feature flags below are explicit (vs. relying on defaults) so the mode is
-// readable from this file alone. All of these default to `true` in the
-// upstream agent, but we set them anyway to lock the contract:
-//   - soft_navigations:  SPA route-change events (the "spa" in pro_plus_spa)
-//   - page_view_event:   classic full-page-load PageView event
-//   - page_view_timing:  LCP / FID / CLS / FCP / TTFB → transmitted as
-//                        PageViewTiming events; viewable on NR's Page Views UI
-//   - ajax:              fetch/XHR waterfalls (AjaxRequest events)
-//   - distributed_tracing: cross-origin trace propagation to the Go API
+// Lazy + idle deferral (perf/bugbash-bundle-split-2026-05-20):
+//
+// Both the `@newrelic/browser-agent` loader and our buildBrowserAgentOptions
+// helper live behind dynamic imports so they land in a separate Rollup chunk
+// (newrelic-vendor) instead of bloating the main entry. The chunk only
+// downloads + parses when initNewRelic() actually runs, which we kick off
+// from a `requestIdleCallback` (or a 1s setTimeout fallback) so the agent
+// boots after the first paint completes — never blocking LCP. Two stable
+// guarantees the prior implementation already provided are preserved here:
+//
+//   1. window.onerror/unhandledrejection coverage during the pre-init window.
+//      The early-error queue below buffers any errors that fire before the
+//      agent installs its own handlers and replays them via noticeError once
+//      it boots. A render-time crash during the first 50–500ms of paint
+//      still reaches NR.
+//   2. Fail-open. When VITE_NEWRELIC_LICENSE_KEY is empty (local dev, PR
+//      previews, anyone running their own fork) we skip the dynamic import
+//      entirely — the chunk is never fetched.
+//
+// Feature flags inside buildBrowserAgentOptions are explicit (vs. relying on
+// defaults) so the pro_plus_spa mode is readable from one file. See
+// src/lib/newrelic-config.ts for the full enumeration.
 function initNewRelic(): void {
   const licenseKey = import.meta.env.VITE_NEWRELIC_LICENSE_KEY
   const applicationID = import.meta.env.VITE_NEWRELIC_APP_ID
@@ -71,23 +82,61 @@ function initNewRelic(): void {
     // keep the dev console clean; the absence of NR is intentional here.
     return
   }
-  try {
-    // The actual options live in src/lib/newrelic-config.ts so a unit test
-    // can assert the pro_plus_spa shape (page_view_event, page_view_timing,
-    // soft_navigations, ajax, metrics all on) without instantiating the
-    // real agent (which hits the network + installs window listeners).
-    new BrowserAgent(buildBrowserAgentOptions({ licenseKey, applicationID }))
-    // Stamp every event with the build SHA. The agent exposes setCustomAttribute
-    // on window.newrelic once it finishes booting; do it best-effort.
-    const nr = (window as Window & { newrelic?: { setCustomAttribute?: (k: string, v: string) => void } }).newrelic
-    if (nr && typeof nr.setCustomAttribute === 'function') {
-      nr.setCustomAttribute('commit_id', import.meta.env.VITE_COMMIT_ID || 'dev')
+
+  // Pre-init error queue. Browsers fire `error` + `unhandledrejection`
+  // synchronously the moment a crash happens; since we're deferring the
+  // agent's own install, capture into a buffer and replay below.
+  type QueuedErr = { kind: 'error' | 'rejection'; value: unknown }
+  const queue: QueuedErr[] = []
+  const onErr = (e: ErrorEvent) => queue.push({ kind: 'error', value: e.error ?? e.message })
+  const onRej = (e: PromiseRejectionEvent) => queue.push({ kind: 'rejection', value: e.reason })
+  window.addEventListener('error', onErr)
+  window.addEventListener('unhandledrejection', onRej)
+
+  const boot = async () => {
+    try {
+      // Two dynamic imports. Rollup bundles both into the same
+      // newrelic-vendor chunk (configured in vite.config.ts manualChunks),
+      // so this resolves with one network round-trip post-paint.
+      const [{ BrowserAgent }, { buildBrowserAgentOptions }] = await Promise.all([
+        import('@newrelic/browser-agent/loaders/browser-agent'),
+        import('./lib/newrelic-config'),
+      ])
+      new BrowserAgent(buildBrowserAgentOptions({ licenseKey, applicationID }))
+      // Stamp every event with the build SHA. The agent exposes setCustomAttribute
+      // on window.newrelic once it finishes booting; do it best-effort.
+      const nr = (window as Window & { newrelic?: { setCustomAttribute?: (k: string, v: string) => void; noticeError?: (e: unknown) => void } }).newrelic
+      if (nr && typeof nr.setCustomAttribute === 'function') {
+        nr.setCustomAttribute('commit_id', import.meta.env.VITE_COMMIT_ID || 'dev')
+      }
+      // Replay any errors that fired before the agent installed its own
+      // handlers, then drop the temp listeners. The agent's listeners now
+      // own the surface.
+      if (nr && typeof nr.noticeError === 'function') {
+        for (const q of queue) nr.noticeError(q.value)
+      }
+      queue.length = 0
+      window.removeEventListener('error', onErr)
+      window.removeEventListener('unhandledrejection', onRej)
+    } catch {
+      // Telemetry init must never break the app. If the agent throws on
+      // construct (network blocked, malformed key, ad-blocker), swallow and
+      // continue rendering — the ErrorBoundary still catches render errors,
+      // it just won't be able to ship them.
+      window.removeEventListener('error', onErr)
+      window.removeEventListener('unhandledrejection', onRej)
     }
-  } catch {
-    // Telemetry init must never break the app. If the agent throws on
-    // construct (network blocked, malformed key, ad-blocker), swallow and
-    // continue rendering — the ErrorBoundary still catches render errors,
-    // it just won't be able to ship them.
+  }
+
+  // Defer boot until the browser is idle. Falls back to a 1s setTimeout in
+  // browsers without requestIdleCallback (Safari ≤16.3 etc.) so we still
+  // get the post-paint deferral even when the idle API is missing.
+  type Win = Window & { requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number }
+  const win = window as Win
+  if (typeof win.requestIdleCallback === 'function') {
+    win.requestIdleCallback(boot, { timeout: 2000 })
+  } else {
+    setTimeout(boot, 1000)
   }
 }
 

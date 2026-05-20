@@ -42,6 +42,54 @@ export default defineConfig({
     'import.meta.env.VITE_NEWRELIC_LICENSE_KEY': JSON.stringify(process.env.VITE_NEWRELIC_LICENSE_KEY || ''),
     'import.meta.env.VITE_NEWRELIC_APP_ID': JSON.stringify(process.env.VITE_NEWRELIC_APP_ID || ''),
   },
+  // Bundle splitting strategy (perf/bugbash-bundle-split-2026-05-20):
+  //
+  // Without manualChunks, Rollup buckets everything reachable from main.tsx
+  // into a single index-*.js. As of 2026-05-20 that's ~664 KB raw / 180 KB
+  // gzip — dominated by React + React Router + the New Relic browser agent.
+  // Every cold visitor pays for all of it, and a release that only touches
+  // app code invalidates the React vendor bytes too (no long-term cache
+  // segregation).
+  //
+  // Three manual chunks isolate the high-stability third-party code paths
+  // from the volatile app code:
+  //
+  //   react-vendor          — react, react-dom, react-router-dom (~140 KB raw,
+  //                            ~45 KB gzip). Stable across most releases.
+  //   newrelic-vendor       — @newrelic/browser-agent (~120 KB raw, ~40 KB
+  //                            gzip). Loaded dynamically from main.tsx after
+  //                            paint, so this chunk fetches off the critical
+  //                            path.
+  //   index (app entry)     — what's left: App.tsx, MarketingPage, eager
+  //                            components, shared utilities. The lazy route
+  //                            chunks (BillingPage, AdminCustomersPage, etc.)
+  //                            stay in their own per-page chunks via React.lazy.
+  //
+  // Result: cold homepage paint downloads index + react-vendor only; the
+  // New Relic agent is fetched after paint and a future React patch bump
+  // doesn't bust the app code chunk.
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('node_modules')) {
+            if (id.includes('@newrelic/browser-agent')) {
+              return 'newrelic-vendor'
+            }
+            if (
+              id.includes('/react/') ||
+              id.includes('/react-dom/') ||
+              id.includes('/react-router/') ||
+              id.includes('/react-router-dom/') ||
+              id.includes('/scheduler/')
+            ) {
+              return 'react-vendor'
+            }
+          }
+        },
+      },
+    },
+  },
   server: {
     port: 5173,
     proxy,

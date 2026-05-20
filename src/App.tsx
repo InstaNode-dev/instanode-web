@@ -12,11 +12,14 @@ import { RouteTracker } from './components/RouteTracker'
 // public surface, so it stays in the main entry chunk.
 import { MarketingPage } from './pages/MarketingPage'
 
-// Auth surfaces — eagerly imported. A marketing visitor can land on /login
-// directly (deep link, "Sign in" button), and the login form is small.
-import { LoginPage } from './pages/LoginPage'
-import { LoginCallbackPage } from './pages/LoginCallbackPage'
-import { ClaimPage } from './pages/ClaimPage'
+// Auth surfaces — lazy-loaded since 2026-05-20 (perf/bugbash-bundle-split).
+// Previously eager, but they pulled the full `api/index.ts` request layer and
+// the resources/claim mock-data fixtures into the main chunk, and a marketing
+// visitor on / never executes any of that code. Lazy-loading drops ~30 KB
+// gzip from the entry bundle. Login/claim are still served from prerendered
+// HTML shells (scripts/prerender.mjs's Step 4.6) so SEO copy stays in the
+// initial HTML — only the React hydration code is deferred. The PublicLoading-
+// Fallback below masks the ~50ms chunk fetch.
 
 // Secondary public marketing surfaces — lazy-loaded on the client so Rollup
 // splits each one into its own chunk and a homepage visitor never pays for
@@ -28,6 +31,15 @@ import { ClaimPage } from './pages/ClaimPage'
 // components and the pre-rendered HTML contains every word of content.
 // React.lazy() during renderToString would otherwise resolve to the
 // Suspense fallback and ship empty HTML to crawlers, killing SEO.
+const LoginPage = lazy(() =>
+  import('./pages/LoginPage').then((m) => ({ default: m.LoginPage })),
+)
+const LoginCallbackPage = lazy(() =>
+  import('./pages/LoginCallbackPage').then((m) => ({ default: m.LoginCallbackPage })),
+)
+const ClaimPage = lazy(() =>
+  import('./pages/ClaimPage').then((m) => ({ default: m.ClaimPage })),
+)
 const PricingPage = lazy(() =>
   import('./pages/PricingPage').then((m) => ({ default: m.PricingPage })),
 )
