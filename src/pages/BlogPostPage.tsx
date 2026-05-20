@@ -65,6 +65,8 @@ function BlogPostStyles() {
       .post-body li { margin: 6px 0; }
       .post-body code { background: var(--ink); border: 1px solid var(--border); color: var(--text); padding: 1px 6px; border-radius: 4px; font-size: 14px; font-family: var(--font-mono); }
       .post-body pre { background: var(--code-bg); color: var(--text); border: 1px solid var(--border); padding: 16px 20px; border-radius: 8px; overflow-x: auto; font-size: 14px; line-height: 1.5; margin: 18px 0; }
+      /* Reserve top padding for the floating Copy button (CodeBlock). */
+      .post-body pre.code-block { padding-top: 36px; }
       .post-body pre code { background: transparent; padding: 0; color: inherit; }
       .post-body strong { font-weight: 600; }
       .post-foot { margin-top: 56px; padding-top: 24px; border-top: 1px solid var(--border-hi); display: flex; justify-content: space-between; }

@@ -232,7 +232,13 @@ export function ResourcesPage() {
                   format={(a, b) => `${a} / ${b} MB`}
                 />
                 <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-dim)' }}>
-                  {r.connections_in_use ?? '—'} / {r.connections_limit == null ? '—' : r.connections_limit === -1 ? '∞' : r.connections_limit}
+                  {/* `-1` is the API sentinel for "unlimited" (team / growth
+                      tiers, plus tiers where the resource has no
+                      meaningful connection cap). Render the word so it's
+                      screen-reader-legible — `∞` reads as "infinity sign"
+                      to most ATs, "Unlimited" is unambiguous. BugBash
+                      B6-P2-11. */}
+                  {r.connections_in_use ?? '—'} / {r.connections_limit == null ? '—' : r.connections_limit === -1 ? 'Unlimited' : r.connections_limit}
                 </span>
                 <RelTime at={r.created_at} />
                 <span onClick={(e) => e.preventDefault()}>

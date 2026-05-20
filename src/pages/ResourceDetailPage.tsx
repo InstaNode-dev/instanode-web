@@ -224,7 +224,10 @@ export function ResourceDetailPage() {
                   : '—'
                 return `${usedMB} / ${limitMB} MB · ${pct}`
               })()} />
-              <Kv k="connections" v={`${r.connections_in_use ?? '—'} / ${r.connections_limit == null ? '—' : r.connections_limit === -1 ? '∞' : r.connections_limit}`} />
+              {/* `-1` connection limit → "Unlimited" (screen-reader
+                  friendly, matches the storage row's `(unlimited)` text).
+                  BugBash B6-P2-11. */}
+              <Kv k="connections" v={`${r.connections_in_use ?? '—'} / ${r.connections_limit == null ? '—' : r.connections_limit === -1 ? 'Unlimited' : r.connections_limit}`} />
               <Kv k="cloud_vendor" v={`${r.cloud_vendor ?? '—'} · ${r.country_code ?? '—'}`} />
               <Kv k="expires_at" v={r.expires_at ?? 'never · claimed'} />
               <Kv k="created_at" v={r.created_at} />

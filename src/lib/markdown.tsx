@@ -29,6 +29,7 @@
  * public repo. */
 
 import type { ReactNode } from 'react'
+import { CodeBlock } from '../components/CodeBlock'
 
 type Heading = 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6'
 
@@ -57,8 +58,13 @@ export function renderMarkdown(md: string, opts: RenderOptions = {}): ReactNode 
     if (block.startsWith('#### ')) return headingTag(baseLevel + 2, key, block.slice(5))
 
     if (block.startsWith('```')) {
+      // Capture the optional language fence (e.g. ```bash → 'bash').
+      // The CodeBlock component handles syntax highlighting + the
+      // "Copy" affordance (BugBash B3-P2-1, B3-P2-2).
+      const langMatch = block.match(/^```(\w+)?/)
+      const lang = langMatch?.[1] ?? null
       const inner = block.replace(/^```\w*\r?\n?/, '').replace(/\r?\n?```$/, '')
-      return <pre key={key}><code>{inner}</code></pre>
+      return <CodeBlock key={key} lang={lang} code={inner} />
     }
 
     if (block.startsWith('> ')) {
