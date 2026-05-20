@@ -23,6 +23,13 @@ export function LoginPage() {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [showTokenForm, setShowTokenForm] = useState(false)
+  // B8-E2 (2026-05-20): session-expired banner. Set when the AuthGate
+  // (or call() wrapper handle401) redirects an authenticated user
+  // whose JWT was rejected mid-session. Surfaced via the URL search
+  // param so the prior session is gone — no in-memory state to lean on.
+  const sessionExpired =
+    typeof window !== 'undefined' &&
+    new URLSearchParams(window.location.search).get('session_expired') === '1'
 
   const [email, setEmail] = useState('')
   const [emailBusy, setEmailBusy] = useState(false)
@@ -94,6 +101,25 @@ export function LoginPage() {
           Continue with GitHub or your email. Anonymous resources are claimed via the
           link in your agent's response — not from this page.
         </p>
+
+        {sessionExpired && (
+          <div
+            role="status"
+            data-testid="session-expired-banner"
+            style={{
+              marginBottom: 18,
+              padding: '10px 12px',
+              borderLeft: '2px solid var(--amber)',
+              background: 'rgba(255,193,7,0.06)',
+              fontSize: 12.5,
+              fontFamily: 'var(--font-mono)',
+              color: 'var(--text)',
+            }}
+          >
+            Your session expired — please sign in to continue. You'll land
+            back where you left off.
+          </div>
+        )}
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 18 }}>
           <button

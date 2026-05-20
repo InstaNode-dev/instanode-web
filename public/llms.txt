@@ -35,11 +35,16 @@ Pick a descriptive name per resource (e.g. `"prod-db"`, `"sessions-cache"`, `"ev
 - **`POST /queue/new`** — NATS JetStream. Requires `name`. Returns `connection_url` (`nats://host:4222`) plus a `credentials` object with per-tenant NATS account creds: `credentials.nats_jwt`, `credentials.nats_nkey`, and a pre-rendered `credentials.creds_file` blob. Pass `(nats_jwt, nats_nkey)` to `nats.UserJWTAndSeed()` or write `creds_file` to disk and use `nats.UserCredentials(path)`. Each tenant gets its own NATS account — JetStream streams, subjects, and pub/sub are isolated at the server. `subject_prefix` in the response names the subject namespace this resource is scoped to. The response also includes `auth_mode` ("isolated" or "legacy_open" for grandfathered pre-cutover rows). Durable streams, request/reply, pub/sub.
 - **`POST /storage/new`** — S3-compatible bucket prefix backed by DigitalOcean Spaces (`nyc3`). Requires `name`. Returns `connection_url` (`https://s3.instanode.dev/instant-shared/<prefix>/`) plus `endpoint`, `access_key_id`, `secret_access_key`, `prefix`, and a `mode` field that names the isolation level the tenant landed on: `shared-master-key` (DO Spaces today — every tenant holds the master key, prefix-by-convention), `prefix-scoped` (backend IAM enforces `s3:prefix` against `<prefix>/*` — R2/S3/MinIO), `prefix-scoped-temporary` (same but credentials expire — STS), or `broker` (no long-lived credential — call `POST /storage/:token/presign` for short-lived signed URLs, max 1h TTL). Configure an S3 client with `endpoint`, `access_key_id`, `secret_access_key`, bucket=`instant-shared`, and constrain object keys to start with `prefix`. Anonymous-tier objects are auto-deleted at 24h by a bucket lifecycle rule enforced at the storage layer. See [/use-cases/screenshot-evidence-archive.md](https://instanode.dev/use-cases/screenshot-evidence-archive.md) for a worked example.
 - **`POST /webhook/new`** — Public receive URL that captures any HTTP method. Requires `name`. Returns `receive_url`. Inspect received payloads at `GET https://api.instanode.dev/api/v1/webhooks/{token}/requests`.
+- **`POST /storage/{token}/presign`** — Mint a short-lived (≤1h) signed S3 URL for a storage resource that landed in `mode="broker"` (no long-lived credential issued by `/storage/new` — DO Spaces today for new tenants). Body: `{"operation": "PUT"|"GET", "key": "<object-key-relative-to-prefix>", "expires_in": <seconds, 1..3600>}`. Returns `{ok, url, expires_at}`. Signed by the platform master key but constrained to the resource's own `prefix/*`, so a leaked URL cannot escape the tenant boundary. Rate-limited per token. Don't use this when the `/storage/new` response carried `(access_key_id, secret_access_key)` — go direct to S3 in that case.
 - **`POST /webhooks/brevo/:secret`** — Brevo delivery webhook receiver (internal — Brevo's transactional pipeline POSTs here for every delivery event). Authentication is by URL token: the `{secret}` path segment is constant-time-compared against the platform's `BREVO_WEBHOOK_SECRET`. Handled events: `delivered`, `soft_bounce`, `hard_bounce`, `blocked`, `complaint`, `deferred`, `unsubscribed`, `error`. The handler overwrites the matching `forwarder_sent` row's `classification` with the real Brevo outcome and stamps `delivered_at` on `delivered` only. Unknown messageIds return `200 {"matched":false}` (Brevo retries on 5xx — orphan events must not amplify retries). Unhandled event types (`click`, `open`, `request`) return `200 {"skipped":true}`. This is the truth surface for "did the user receive the email" — the worker's 201 from Brevo's API only means the relay queued the message; `forwarder_sent.classification` (set by this webhook) is the actual delivery outcome.
 - **`GET /healthz`** — Shallow liveness probe. Returns 200 with `{ok, commit_id, build_time, version}` if the binary is up and can ping its primary platform DB. Wired to the Kubernetes `livenessProbe`. Use `/readyz` for deep upstream checks.
 - **`GET /readyz`** — Deep readiness probe. Multi-component upstream reachability matrix (platform_db, customer_db, redis, provisioner_grpc, NATS, DO Spaces, Brevo, Razorpay, GeoIP). Per-check criticality: `platform_db` + `provisioner_grpc` are CRITICAL (failure → 503); everything else degrades to `200 + overall=degraded`. Each check runs in parallel behind a 10-15s cache to avoid self-DoS via the k8s `readinessProbe` cycle. Response envelope: `{ok, overall, commit_id, checks: {name: {status, latency_ms, last_checked, message?}}}`. Same shape served by api, worker, and provisioner.
 - **`POST /deploy/new`** — Container deploy. Multipart form: `tarball=@app.tar.gz` (required, gzipped tar containing Dockerfile + source, ≤50 MB) and `name=my-app` (**required** — same 1–64 char `^[A-Za-z0-9][A-Za-z0-9 _-]*$` rule), plus optional `port=8080`, `env=production` (scope), and `env_vars={"KEY":"VAL"}` (JSON string of env vars injected into the pod). Build runs in-cluster via kaniko (~30–90s); call returns `202` with `status=building`, then `status=healthy` once the URL on `*.deployment.instanode.dev` is live with a Let's Encrypt cert. **Requires a JWT** — `Authorization: Bearer <upgrade_jwt from /db/new or /claim>`.
 - **`POST /stacks/new`** — Multi-service deploy. Multipart form: an `instant.yaml` manifest plus one tarball per service, and `name=my-stack` (**required** — same 1–64 char `^[A-Za-z0-9][A-Za-z0-9 _-]*$` rule). **Requires a JWT.**
+- **`PATCH /stacks/{slug}/env`** — Merge env-vars into an existing stack. Body: `{"env_vars": {"KEY": "value"}}`. Setting a key to the empty string deletes it. Keys must match `[A-Z_][A-Z0-9_]*`. Total payload after merge capped at 64KiB. Persisted to `stacks.env_vars` JSONB; the next `POST /stacks/{slug}/redeploy` applies them. Anonymous stacks cannot be mutated post-creation. (Replaced a previously silent-no-op handler on 2026-05-20; do not assume any pre-2026-05-20 PATCH actually persisted.)
+- **`POST /auth/cli`** — Mint a CLI device-flow auth session. Returns `{session_id, auth_url, expires_at}` where `auth_url` is a dashboard URL the user opens in a browser to approve. **Note:** older builds returned an `instant.dev` host that was incorrect — current builds return the real dashboard host. CLI polls `GET /auth/cli/{id}` until approved or expired (5min).
+- **`GET /auth/cli/{id}`** — Poll the CLI device-flow session. Response includes `status` (`pending` / `approved` / `expired`) and, once approved, an `api_token` the CLI persists. Non-UUID ids return 404 `session_not_found`.
+- **`POST /api/v1/billing/promotion/validate`** — Validate a promo code without applying it. Body: `{"code": "EARLYBIRD"}`. Returns `{ok, discount_percent, discount_amount_inr, message}` for valid codes. Promo codes only DISCOUNT at checkout once a corresponding Razorpay Offer exists in the dashboard — validate-result `ok=true` is necessary but not sufficient until then.
 
 ## Anonymous tier limits (free, 24-hour TTL)
 
@@ -59,28 +64,31 @@ After 24 hours the resource expires unless claimed. Claim flow: see `/claim` bel
 RESP=$(curl -X POST https://api.instanode.dev/db/new \
   -H "Content-Type: application/json" \
   -d '{"name":"prod-db"}')
-JWT=$(echo "$RESP" | jq -r .upgrade_jwt)
+TOKEN=$(echo "$RESP" | jq -r .upgrade_jwt)
 
-curl "https://api.instanode.dev/claim/preview?t=$JWT"   # GET, dry-run, no side effects
+curl "https://api.instanode.dev/claim/preview?t=$TOKEN"   # GET, dry-run, no side effects
 
 curl -X POST https://api.instanode.dev/claim \
   -H "Content-Type: application/json" \
-  -d "{\"jwt\":\"$JWT\", \"email\":\"you@example.com\"}"
+  -d "{\"token\":\"$TOKEN\", \"email\":\"you@example.com\"}"
 ```
 
-A magic link arrives by email. Clicking it sets a session cookie that owns every resource attached to your network fingerprint. Tier starts at Free (24h TTL, same limits as anonymous) — claiming gives you an account, not durability. Resources still expire at 24h until the team upgrades to a paid tier (Hobby $9/mo or above) in the dashboard.
+**`token` is the canonical request field (since 2026-05-20).** The legacy `jwt` field is still accepted as a deprecated alias for backward compatibility with the dashboard, sdk-go, mcp, and existing curl recipes — when both are present, `token` wins. The OpenAPI spec marks `jwt` as `deprecated: true`.
+
+The `email` field must parse as a valid RFC 5322 address (validated via Go `mail.ParseAddress` + 254-char RFC 5321 §4.5.3.1.3 cap + dotted-domain + no-inner-whitespace gates, since 2026-05-20). A non-email string returns `400 {"error":"invalid_email_format"}` — the claim no longer mints users with unreachable addresses. A magic link arrives by email. Clicking it sets a session cookie that owns every resource attached to your network fingerprint. Tier starts at Free (24h TTL, same limits as anonymous) — claiming gives you an account, not durability. Resources still expire at 24h until the team upgrades to a paid tier (Hobby $9/mo or above) in the dashboard.
 
 ## Tiers
 
-The public, self-serve tiers visible at `/pricing` are: Anonymous, Hobby, Pro, and Team
-(coming soon). Hobby Plus and Growth exist in `plans.yaml` as upsell-only intermediate
-tiers (reachable via dashboard prompts when a Hobby user hits a wall) and are deliberately
-omitted from the public tier ladder to keep the customer-facing comparison simple.
+The public, self-serve tiers visible at `/pricing` are: Anonymous, Hobby, Pro, and Team.
+Hobby Plus and Growth exist in `plans.yaml` as upsell-only intermediate tiers (reachable
+via dashboard prompts when a Hobby user hits a wall) and are deliberately omitted from
+the public tier ladder to keep the customer-facing comparison simple. Both still surface
+on `/api/v1/capabilities` for agent introspection.
 
 - **Anonymous**: free, 24h TTL, the limits above.
 - **Hobby**: $9/mo. 1 GB Postgres, 50 MB Redis, 100 MB Mongo, 512 MB storage, 1 app deploy. No TTL.
-- **Pro**: $49/mo. 10 GB Postgres, 512 MB Redis, 5 GB Mongo, 50 GB storage, 10 medium apps.
-- **Team**: coming soon.
+- **Pro**: $49/mo. 10 GB Postgres, 512 MB Redis, 5 GB Mongo, 50 GB storage, 10 apps.
+- **Team**: $199/mo. Unlimited everything (Postgres / Redis / Mongo / queues / storage / deployments / vault entries), 50 custom domains, 90-day backups with self-serve restore, RBAC + audit log, SSO/SAML, 99.9% SLA. Self-serve assisted-Razorpay path is rolling out — for now contact support@instanode.dev for onboarding.
 
 ## Conventions an LLM should follow when scripting against the platform
 

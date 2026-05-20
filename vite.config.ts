@@ -1,10 +1,21 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
-// AGENT_API_URL — the agent-facing instanode.dev API (defaults to the live
-// cluster; override locally with AGENT_API_URL=http://localhost:30080).
-// All dashboard fetches go through this single upstream.
-const agentApiURL = process.env.AGENT_API_URL || 'http://api.instanode.dev';
+// AGENT_API_URL — the agent-facing instanode.dev API.
+//
+// B8-E1 (2026-05-20): in dev (NODE_ENV !== 'production') we default to
+// http://localhost:8080 so the new-contributor flow of `npm run dev`
+// against a port-forwarded local cluster (per CLAUDE.md) just works
+// without env-var setup. The previous default was the live prod host —
+// `npm run dev` without `AGENT_API_URL=...` silently proxied
+// authenticated browser calls to api.instanode.dev and the dashboard
+// drowned in CORS errors. Production builds explicitly set
+// NODE_ENV=production via `vite build`, so the deploy artifact still
+// points at api.instanode.dev unchanged.
+const isDevMode = process.env.NODE_ENV !== 'production';
+const agentApiURL =
+  process.env.AGENT_API_URL ||
+  (isDevMode ? 'http://localhost:8080' : 'http://api.instanode.dev');
 
 // GIT_SHA — injected at build time so frontend errors are stamped with the
 // dashboard's build SHA (mirrors what the Go services do via -ldflags). The

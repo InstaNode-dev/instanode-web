@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   EnvPill, StatusPill, ResourceIcon, RelTime, PromptCard, displayName, isUnnamed
@@ -11,6 +11,24 @@ import * as api from '../api'
 import type { DashboardDeployment, Tier } from '../api'
 import { useDashboardCtx } from '../hooks/useDashboardCtx'
 
+// B7-P2 (2026-05-20): status filter + sort chips. The sidebar env switch
+// already filters by env on the API side, but a Pro user with 10 deploys
+// across {staging,prod} × {building,running,failed} couldn't quickly scan
+// "show me only the failing ones in prod" without these client-side
+// filters. Keep the surface light: no pagination needed at <=10 rows.
+type StatusFilter = 'all' | 'running' | 'building' | 'failed' | 'expired'
+const STATUS_FILTERS: StatusFilter[] = ['all', 'running', 'building', 'failed', 'expired']
+type SortKey = 'recent' | 'name' | 'status'
+
+// healthy/running collapse to the same "live" bucket. expired = TTL hit.
+function statusBucket(s: DashboardDeployment['status']): StatusFilter {
+  if (s === 'healthy' || s === 'running' || s === 'deploying') return 'running'
+  if (s === 'building') return 'building'
+  if (s === 'failed') return 'failed'
+  if (s === 'expired' || s === 'stopped') return 'expired'
+  return 'running'
+}
+
 // Tiers that can ship a private deploy (Track B). The agent API enforces
 // the same gate via 402 + agent_action on POST /deploy/new — keeping the
 // allowlist in lockstep keeps the UI from offering a feature the backend
@@ -21,8 +39,36 @@ export function DeploymentsPage() {
   const ctx = useDashboardCtx()
   const [items, setItems] = useState<DashboardDeployment[]>([])
   const [loading, setLoading] = useState(true)
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
+  const [sort, setSort] = useState<SortKey>('recent')
   const tier = (ctx.me?.user.tier ?? 'anonymous') as Tier
   const canUsePrivateDeploy = PRIVATE_DEPLOY_TIERS.has(tier)
+
+  // Derived view: env is server-filtered (?env= query, see useEffect dep);
+  // status + sort are client-side. statusBucket() collapses
+  // healthy/running/deploying → 'running' so the user picks "live" without
+  // worrying about which underlying status string is in flight.
+  const visible = useMemo(() => {
+    const filtered = statusFilter === 'all'
+      ? items
+      : items.filter((d) => statusBucket(d.status) === statusFilter)
+    const sorted = [...filtered]
+    if (sort === 'name') {
+      sorted.sort((a, b) =>
+        (a.name ?? a.app_id).localeCompare(b.name ?? b.app_id),
+      )
+    } else if (sort === 'status') {
+      sorted.sort((a, b) => a.status.localeCompare(b.status))
+    } else {
+      // 'recent' — most recent last_deploy_at first; nulls last.
+      sorted.sort((a, b) => {
+        const ta = a.last_deploy_at ? Date.parse(a.last_deploy_at) : 0
+        const tb = b.last_deploy_at ? Date.parse(b.last_deploy_at) : 0
+        return tb - ta
+      })
+    }
+    return sorted
+  }, [items, statusFilter, sort])
 
   // Source of truth: GET /api/v1/deployments (single-container apps via
   // POST /deploy/new). The env switcher in the sidebar drives the ?env=
@@ -60,11 +106,54 @@ export function DeploymentsPage() {
           stays read-only everywhere else, but POST /stacks/new is
           multipart-only — agents can't tar up source either, so this
           form is the one place we drive a write ourselves. */}
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          marginBottom: 12,
+          flexWrap: 'wrap',
+        }}
+      >
+        {/* B7-P2 (2026-05-20): status filter chips. Mirrors the type-filter
+            UX on ResourcesPage. */}
+        <div className="filters" data-testid="deployments-status-filter">
+          {STATUS_FILTERS.map((s) => (
+            <button
+              key={s}
+              className={`chip ${statusFilter === s ? 'on' : ''}`}
+              onClick={() => setStatusFilter(s)}
+              data-testid={`status-filter-${s}`}
+              type="button"
+            >
+              {s}
+            </button>
+          ))}
+        </div>
+        <select
+          value={sort}
+          onChange={(e) => setSort(e.target.value as SortKey)}
+          data-testid="deployments-sort"
+          title="Sort deployments"
+          style={{
+            padding: '4px 8px',
+            fontSize: 11.5,
+            fontFamily: 'var(--font-mono)',
+            background: 'var(--ink)',
+            border: '1px solid var(--border)',
+            color: 'var(--text)',
+            borderRadius: 4,
+          }}
+        >
+          <option value="recent">sort · recent</option>
+          <option value="name">sort · name</option>
+          <option value="status">sort · status</option>
+        </select>
         <Link
           to="/app/stacks/new"
           data-testid="create-stack-link"
           style={{
+            marginLeft: 'auto',
             padding: '8px 14px',
             fontSize: 12,
             fontWeight: 500,
@@ -122,7 +211,28 @@ export function DeploymentsPage() {
             </div>
           </div>
         )}
-        {items.map((d) => (
+        {/* B7-P2 (2026-05-20): explicit empty state for the
+            "filter matches nothing" case. Distinguished from the
+            no-deployments-yet message so the user knows the filter
+            is the cause, not their account. */}
+        {!loading && items.length > 0 && visible.length === 0 && (
+          <div
+            className="table-row"
+            data-testid="deployments-no-match"
+            style={{
+              gridTemplateColumns: '1fr',
+              textAlign: 'center',
+              padding: '32px 24px',
+              color: 'var(--text-dim)',
+              fontSize: 12,
+            }}
+          >
+            <div>
+              No deployments match the current filter. Try “all” or change the env.
+            </div>
+          </div>
+        )}
+        {visible.map((d) => (
           // We link by app_id (not the UUID `id`) because the agent API's
           // GET /api/v1/deployments/:id route resolves `:id` against the
           // app_id column. Routing by UUID would 404. app_id is also the

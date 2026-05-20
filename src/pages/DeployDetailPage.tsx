@@ -549,11 +549,14 @@ function PrivacyPanel({
       setSubmitOk(true)
       setEditing(false)
     } catch (e: any) {
-      // 404 here means Track A hasn't shipped PATCH yet — surface the
-      // friendly "edits pending backend" copy rather than a raw error.
+      // PATCH /api/v1/deployments/:id was shipped in api master-0c7991c
+      // (2026-05-?). A 404 from here now means the deployment id is
+      // stale/wrong/cross-team — not "backend not implemented". The
+      // earlier copy ("still rolling out") was correct in early May 2026
+      // but is now misleading. B7-P1-2 (2026-05-20).
       if (e?.status === 404) {
         setSubmitErr(
-          'Editing access settings requires the backend PATCH endpoint, which is still rolling out. Ask your agent to redeploy with the updated allow-list for now.',
+          'Deployment not found. It may have been deleted or you may not have access. Refresh the page to reload the latest state.',
         )
       } else if (e?.status === 402) {
         setSubmitErr('Your plan does not include private deploys. Upgrade to Pro.')
