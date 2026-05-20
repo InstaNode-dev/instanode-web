@@ -16,6 +16,10 @@
 import { useState } from 'react'
 import { Brand, copyToClipboard } from '../components/Common'
 import { USE_CASES } from '../content/useCases'
+// B1-P0-1: the desktop + mobile nav both read from PUBLIC_NAV_LINKS so
+// the homepage and every PublicShell-rendered page agree on which links
+// to show + their order. See src/components/MarketingNav.tsx.
+import { PUBLIC_NAV_LINKS } from '../components/MarketingNav'
 
 // HERO_PROMPT — the copy-pasteable demo prompt shown at the top of the
 // homepage. The instanode pitch is "tell your coding agent to use us";
@@ -201,12 +205,18 @@ export function MarketingPage() {
           <a href="/" className="mkt-brand-link" aria-label="instanode home">
             <Brand />
           </a>
+          {/* B1-P0-1 (2026-05-20): nav links read from the shared
+              PUBLIC_NAV_LINKS module so the homepage and every
+              PublicShell-rendered page (pricing, docs, blog, etc.) all
+              render the exact same nav. Adding/removing a route here is
+              a one-line edit in src/components/MarketingNav.tsx and
+              propagates to every public surface on the next build. */}
           <div className="mkt-nav-links" aria-label="Sections">
-            <a href={ROUTES.pricing}>Pricing</a>
-            <a href={ROUTES.forAgents}>For agents</a>
-            <a href={ROUTES.docs}>Docs</a>
-            <a href={ROUTES.blog}>Blog</a>
-            <a href={ROUTES.changelog}>Changelog</a>
+            {PUBLIC_NAV_LINKS.map((l) => (
+              <a key={l.href} href={l.href}>
+                {l.label}
+              </a>
+            ))}
           </div>
           <div className="mkt-nav-cta">
             <a href={ROUTES.signin} className="btn btn-secondary mkt-hide-mobile">Sign in</a>
@@ -224,11 +234,14 @@ export function MarketingPage() {
                 <span aria-hidden="true">☰</span>
               </summary>
               <div className="mkt-nav-menu-panel">
-                <a href={ROUTES.pricing}>Pricing</a>
-                <a href={ROUTES.forAgents}>For agents</a>
-                <a href={ROUTES.docs}>Docs</a>
-                <a href={ROUTES.blog}>Blog</a>
-                <a href={ROUTES.changelog}>Changelog</a>
+                {/* Mobile menu mirrors the desktop nav from
+                    PUBLIC_NAV_LINKS (B1-P0-1). Sign-in stays appended
+                    because it lives in the desktop nav-cta region. */}
+                {PUBLIC_NAV_LINKS.map((l) => (
+                  <a key={l.href} href={l.href}>
+                    {l.label}
+                  </a>
+                ))}
                 <a href={ROUTES.signin}>Sign in</a>
               </div>
             </details>
@@ -415,7 +428,27 @@ export function MarketingPage() {
                   <span className="title">Provisioned <strong>postgres</strong></span>
                   <span className="countdown">23h 58m</span>
                 </div>
-                <div className="url">postgres://u_xY9...@pg.instanode.dev:5432/d_...</div>
+                {/* B1-P1 (2026-05-20): Cloudflare's "Email Address
+                    Obfuscation" feature scans every served HTML response
+                    and replaces any string that looks like name@domain.tld
+                    with a "[email protected]" placeholder + JS-decode shim.
+                    The sample URL below has `u_xY9...@pg.instanode.dev`,
+                    which matches CF's regex (the `u_xY9` part is a valid
+                    email local-part), so the live homepage rendered
+                    "postgres://[email protected]:5432/d_..." — confusing
+                    for visitors and broken for the hero claim card.
+                    Cloudflare's documented opt-out is wrapping the
+                    affected content in <!--email_off--> ... <!--/email_off-->
+                    HTML comments, which React JSX can only emit via
+                    dangerouslySetInnerHTML. The text is a literal string
+                    constant — no user input — so there's no XSS surface. */}
+                <div
+                  className="url"
+                  dangerouslySetInnerHTML={{
+                    __html:
+                      '<!--email_off-->postgres://u_xY9...@pg.instanode.dev:5432/d_...<!--/email_off-->',
+                  }}
+                />
                 <div className="claim-btn">Claim these resources →</div>
               </div>
             </article>

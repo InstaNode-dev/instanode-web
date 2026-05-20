@@ -77,6 +77,11 @@ async function loadRoutes() {
     // the marketing footer links don't 404 for crawlers or direct hits.
     '/privacy',
     '/terms',
+    // B1-P1 (2026-05-20): /security replaces the footer's previous link
+    // to the raw /docs/public/security.md file (which GH Pages served as
+    // text/markdown — visitors saw unrendered source). Pre-rendered so
+    // a procurement reviewer pasting the URL sees real content on byte 1.
+    '/security',
     ...blogSlugs.map((s) => `/blog/${s}`),
     ...useCaseSlugs.map((s) => `/use-cases/${s}`),
   ]
@@ -141,6 +146,44 @@ const ROUTE_META = {
   '/terms': {
     title: 'Terms · instanode',
     description: 'The instanode terms of service.',
+  },
+  '/security': {
+    title: 'Security · instanode',
+    description:
+      'How to report a security vulnerability to instanode.dev, our PGP key, and our response SLA.',
+  },
+  // B1-P1 (2026-05-20): /404.html meta. Used by Step 4.7 below to set
+  // the <title> + description on the 404 fallback file so a bogus URL
+  // no longer ships the homepage <title>. The "/404" key isn't a real
+  // SPA route — it's only consumed by metaForRoute() when the 404 emit
+  // calls rewriteHead(template, '/404', metaForRoute('/404')).
+  '/404': {
+    title: 'Not found · instanode',
+    description:
+      'The page you requested does not exist on instanode.dev. Try /pricing, /docs, or the homepage.',
+  },
+  // B1-P1 (2026-05-20): /login meta. Without this the prerendered
+  // dist/login/index.html shipped with the homepage <title>; a visitor
+  // pasted the /login URL into a tab and saw the homepage title.
+  '/login': {
+    title: 'Sign in · instanode',
+    description: 'Sign in to your instanode dashboard.',
+  },
+  '/login/callback': {
+    title: 'Signing in… · instanode',
+    description: 'Completing authentication for instanode.dev.',
+  },
+  '/claim': {
+    title: 'Claim resources · instanode',
+    description:
+      'Claim the anonymous resources your agent provisioned and convert them to a permanent team account.',
+  },
+  // /app is the dashboard SPA entry. Visitors who type instanode.dev/app
+  // hit this shell before AuthGate runs; a meaningful title is friendlier
+  // than the homepage title bleeding through.
+  '/app': {
+    title: 'Dashboard · instanode',
+    description: 'instanode dashboard — manage resources, deployments, and billing.',
   },
 }
 
@@ -333,9 +376,12 @@ async function main() {
   //
   // The dist/index.html template variable above still has the unrendered
   // SPA shell because we read it BEFORE the homepage was overwritten.
+  // B1-P1 (2026-05-20): the /app shell now also gets per-route head
+  // rewriting so the <title> tag says "Dashboard · instanode" rather
+  // than the homepage title that the raw template carries.
   const appShellPath = resolve(DIST, 'app', 'index.html')
   await mkdir(dirname(appShellPath), { recursive: true })
-  await writeFile(appShellPath, template, 'utf-8')
+  await writeFile(appShellPath, rewriteHead(template, '/app', metaForRoute('/app')), 'utf-8')
   console.log('prerender: wrote dist/app/index.html SPA shell (P3 fix)')
 
   // Step 4.6: emit SPA shells for the OAuth + magic-link entry paths.
@@ -352,27 +398,63 @@ async function main() {
   // (so they can't be SSR'd through render(route)) but they MUST return
   // 200 with the SPA shell so the client takes over and reads the query
   // string. Write the unrendered template to each.
+  // B1-P1 (2026-05-20): the auth shells now also get per-route head
+  // rewriting. The /login prerender used to ship the homepage <title>
+  // ("instanode · Real infrastructure for AI agents") because we wrote
+  // the raw template without invoking rewriteHead. A visitor opening
+  // /login in a new tab saw the wrong title, breaking WCAG 2.4.2 and
+  // confusing tab-strip navigation. metaForRoute() returns sensible
+  // titles for /login, /login/callback, and /claim from ROUTE_META.
   const authShellRoutes = ['/login', '/login/callback', '/claim']
   for (const route of authShellRoutes) {
     const p = resolve(DIST, route.replace(/^\//, ''), 'index.html')
     await mkdir(dirname(p), { recursive: true })
-    await writeFile(p, template, 'utf-8')
+    await writeFile(p, rewriteHead(template, route, metaForRoute(route)), 'utf-8')
   }
   console.log(`prerender: wrote ${authShellRoutes.length} auth SPA shells`)
 
-  // Step 4.7: emit dist/404.html as the SPA shell so any unknown route
-  // (bookmarks, shared links, search-engine deep links into auth-gated
-  // pages, magic-link recipients clicking into a path we haven't enumerated)
-  // boots the React app instead of seeing GH Pages's stock 404 page.
+  // Step 4.7: emit dist/404.html.
   //
-  // GH Pages returns HTTP 404 with the body content of 404.html for any
-  // unmatched path. Status code is suboptimal for crawlers, but the
-  // browser renders the body anyway and the SPA hydrates against the
-  // requested URL via window.location — so /login/callback?t=... works
-  // even from a cold magic-link click.
-  const notFoundPath = resolve(DIST, '404.html')
-  await writeFile(notFoundPath, template, 'utf-8')
-  console.log('prerender: wrote dist/404.html SPA fallback')
+  // GH Pages serves this file (with HTTP 404 status) for every URL that
+  // doesn't match a real file under dist/. There are two distinct
+  // categories of "404" we have to satisfy with one file:
+  //
+  //   (a) Real unknown URLs — bogus paths, typos, retired routes.
+  //       We want the visible body to actually say "not found" and
+  //       point back to the homepage. The previous behaviour shipped
+  //       the raw SPA template (empty <div id="root"></div>) so the
+  //       browser hydrated and the catch-all React Route ran
+  //       <Navigate to="/" replace />, silently dumping the visitor on
+  //       the homepage with the original URL still in the bar.
+  //
+  //   (b) Authenticated /app/* deep links (bookmarks, magic-link
+  //       redirects to /login/callback?t=..., shared links into a
+  //       resource detail page). The SPA must still boot here so it
+  //       can hydrate, read window.location, store the token, and
+  //       navigate to the right place. The body content of 404.html
+  //       doesn't block that — React Router will mount over whatever
+  //       HTML is in <div id="root"> on hydration.
+  //
+  // Both categories are satisfied by pre-rendering the NotFoundPage
+  // into 404.html via the SSR render() pipeline:
+  //   - For (a), the visitor sees the 404 message before hydration and
+  //     the same page after; the catch-all React route now also
+  //     renders NotFoundPage (App.tsx), so SSR + CSR agree.
+  //   - For (b), the SPA still boots — React Router sees the real URL,
+  //     matches /login/callback or /app/foo, and renders the right
+  //     component over whatever 404 HTML was in the root div.
+  //
+  // We render through the SSR pipeline with a path that's guaranteed
+  // not to match any real route (`/__404__`) so StaticRouter falls
+  // through to the catch-all <Route path="*"> → <NotFoundPage />.
+  const notFoundHtml = render('/__404__')
+  const notFoundHead = rewriteHead(template, '/404', metaForRoute('/404'))
+  const notFoundBody = notFoundHead.replace(
+    '<div id="root"></div>',
+    `<div id="root">${notFoundHtml}</div>`,
+  )
+  await writeFile(resolve(DIST, '404.html'), notFoundBody, 'utf-8')
+  console.log('prerender: wrote dist/404.html with rendered NotFoundPage')
 
   // Step 5: copy /llms.txt from the content repo to dist root. The
   // llms.txt convention (https://llmstxt.org) expects the file at the

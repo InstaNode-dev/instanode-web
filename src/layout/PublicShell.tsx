@@ -5,15 +5,16 @@
 
 import type { ReactNode } from 'react'
 import { Brand } from '../components/Common'
+import { PUBLIC_NAV_LINKS } from '../components/MarketingNav'
 
-const NAV_LINKS = [
-  { href: '/pricing', label: 'Pricing' },
-  { href: '/use-cases', label: 'Use cases' },
-  { href: '/for-agents', label: 'For agents' },
-  { href: '/docs', label: 'Docs' },
-  { href: '/blog', label: 'Blog' },
-  { href: '/status', label: 'Status' }
-]
+// B1-P0-1 (2026-05-20): NAV_LINKS used to be a 6-item array defined here
+// — Pricing/Use cases/For agents/Docs/Blog/Status — while MarketingPage
+// rendered its own inline list — Pricing/For agents/Docs/Blog/Changelog.
+// A visitor navigating between surfaces saw the nav reorder underneath
+// them (the SSR'd homepage said "Changelog", every other public page said
+// "Use cases" + "Status"). Both surfaces now import PUBLIC_NAV_LINKS from
+// the shared MarketingNav module so adding/removing a route = one edit.
+const NAV_LINKS = PUBLIC_NAV_LINKS
 
 export function PublicShell({ children }: { children: ReactNode }) {
   return (
@@ -79,7 +80,12 @@ function PublicFooter() {
             <div className="public-footer-h">Legal</div>
             <a href="/terms">Terms</a>
             <a href="/privacy">Privacy</a>
-            <a href="/docs/public/security.md">Security</a>
+            {/* B1-P1 (2026-05-20): /security renders security.md
+                through the shared markdown pipeline. The previous
+                link pointed at the raw .md file, which GH Pages
+                served as text/markdown — a visitor saw unrendered
+                "## Reporting a vulnerability" source. */}
+            <a href="/security">Security</a>
             <a href="mailto:hello@instanode.dev">Contact</a>
           </div>
         </div>
