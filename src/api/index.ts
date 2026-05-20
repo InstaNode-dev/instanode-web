@@ -448,11 +448,38 @@ export async function fetchTeam(): Promise<{ ok: true; team: DashboardTeam }> {
   return { ok: true, team: me.team }
 }
 
-export async function updateTeam(_patch: { name?: string; display_name?: string }): Promise<{ ok: true; team: DashboardTeam }> {
-  // PATCH /api/v1/team isn't implemented. Return current team unchanged
-  // and let the caller surface "this isn't editable yet" to the user.
+export async function updateTeam(patch: { name?: string; display_name?: string }): Promise<{ ok: true; team: DashboardTeam }> {
+  // B8-P1 F1 (BUGBASH 2026-05-20): PATCH /api/v1/team is live (api/openapi.json
+  // confirms: required `name`, 1-200 chars, whitespace trimmed). The previous
+  // implementation was a no-op stub that silently returned the cached team
+  // unchanged — every rename "succeeded" from the UI's POV but never reached
+  // the server. We now PATCH with the new name (prefer `name`, fall back to
+  // `display_name` for callers that still pass that key) and rebuild the
+  // DashboardTeam from the server response so the UI reflects the persisted
+  // value, not the optimistic input. On error we surface to the caller so the
+  // form can show a real banner.
+  const name = (patch.name ?? patch.display_name ?? '').trim()
+  if (!name) {
+    // Don't waste a round-trip on an empty patch — the api would 400.
+    const me = await fetchMe()
+    return { ok: true, team: me.team }
+  }
+  type PatchResp = { ok: boolean; team: { id: string; name: string; plan_tier: string; has_active_subscription: boolean; created_at: string } }
+  const r = await call<PatchResp>('/api/v1/team', {
+    method: 'PATCH',
+    body: JSON.stringify({ name }),
+  })
+  // The PATCH response is the slim TeamSelf shape (no slug / owner_id /
+  // member_count). Merge with /auth/me-derived team so consumers that read
+  // those fields keep working.
   const me = await fetchMe()
-  return { ok: true, team: me.team }
+  const team: DashboardTeam = {
+    ...me.team,
+    name: r.team?.name ?? name,
+    tier: (r.team?.plan_tier as any) ?? me.team.tier,
+    created_at: r.team?.created_at ?? me.team.created_at,
+  }
+  return { ok: true, team }
 }
 
 export async function listMembers(): Promise<{ ok: true; members: TeamMember[]; member_limit: number }> {
@@ -493,18 +520,93 @@ export async function listMembers(): Promise<{ ok: true; members: TeamMember[]; 
 }
 
 export async function listInvitations(): Promise<{ ok: true; invitations: TeamInvitation[] }> {
-  // GET /api/v1/teams/:id/invitations exists on the agent API but the
-  // dashboard adapter isn't wired yet. Return empty until then — better
-  // than fabricating pending invites that don't exist.
-  return { ok: true, invitations: [] }
+  // B8-P1 F2 (BUGBASH 2026-05-20): GET /api/v1/team/invitations is live
+  // (owner-only, see openapi.json — 200/401/403). The previous stub returned
+  // [] so TeamPage's "Pending · 0" was a lie when the team had real invites.
+  // We now call the live endpoint and adapt. On 401 (not logged in) and 403
+  // (caller isn't owner) we fail open to []: the team page renders the
+  // empty-invite section either way, and a banner would be noise for the
+  // common case of non-owners viewing the page.
+  type InviteRow = {
+    id: string
+    email: string
+    role: string
+    status?: string
+    invited_by_user_id?: string
+    invited_by?: string
+    invited_by_name?: string
+    created_at: string
+    expires_at: string
+  }
+  type Resp = { ok: boolean; invitations: InviteRow[] }
+  try {
+    const r = await call<Resp>('/api/v1/team/invitations')
+    const invitations: TeamInvitation[] = (r.invitations ?? []).map((i) => ({
+      id: i.id,
+      email: i.email,
+      role: i.role as TeamInvitation['role'],
+      status: (i.status as TeamInvitation['status']) ?? 'pending',
+      invited_by: i.invited_by ?? i.invited_by_user_id ?? '',
+      invited_by_name: i.invited_by_name,
+      created_at: i.created_at,
+      expires_at: i.expires_at,
+    }))
+    return { ok: true, invitations }
+  } catch (e: any) {
+    if (e?.status === 401 || e?.status === 403) {
+      // Not owner / not logged in — render zero pending invites rather
+      // than blowing up the team page.
+      return { ok: true, invitations: [] }
+    }
+    throw e
+  }
 }
 
-export async function inviteMember(_body: { email: string; role: string }): Promise<{ ok: true }> {
-  // The team-invite flow is agent-driven in this product (see TeamPage
-  // PromptCard). The dashboard never POSTs invitations directly. Return
-  // ok so any legacy callers don't break; the actual invite is sent by
-  // the agent running the user's prompt.
-  return { ok: true }
+export async function inviteMember(body: { email: string; role: string }): Promise<{ ok: true; invitation?: TeamInvitation }> {
+  // B8-P1 F3 (BUGBASH 2026-05-20): POST /api/v1/team/members/invite is live
+  // (owner/admin only, see openapi.json — 201/400/401/403/409/429). The
+  // previous stub returned `{ ok: true }` without contacting the server, so
+  // the agent-driven flow that the prompt-card describes ran on top of a
+  // broken direct-call path: any code calling inviteMember thought the
+  // invite was sent when nothing happened.
+  //
+  // We now POST and surface the created invitation (or a structured error)
+  // to the caller. The role enum on the server is {admin, developer, viewer,
+  // member}; we pass through whatever the caller sent and let the api do the
+  // validation (returns 400 for an unknown value).
+  type CreateResp = {
+    ok: boolean
+    invitation?: {
+      id: string
+      email: string
+      role: string
+      status?: string
+      invited_by_user_id?: string
+      invited_by?: string
+      invited_by_name?: string
+      created_at: string
+      expires_at: string
+    }
+  }
+  const r = await call<CreateResp>('/api/v1/team/members/invite', {
+    method: 'POST',
+    body: JSON.stringify({ email: body.email, role: body.role }),
+  })
+  if (!r.invitation) {
+    return { ok: true }
+  }
+  const i = r.invitation
+  const invitation: TeamInvitation = {
+    id: i.id,
+    email: i.email,
+    role: i.role as TeamInvitation['role'],
+    status: (i.status as TeamInvitation['status']) ?? 'pending',
+    invited_by: i.invited_by ?? i.invited_by_user_id ?? '',
+    invited_by_name: i.invited_by_name,
+    created_at: i.created_at,
+    expires_at: i.expires_at,
+  }
+  return { ok: true, invitation }
 }
 
 // ─── Resources (LIVE) ───────────────────────────────────────────────────

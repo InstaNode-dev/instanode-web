@@ -34,6 +34,8 @@
 import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import * as api from '../api'
+import { isEmailVerifiedError, VerifyEmailBanner } from '../components/VerifyEmailBanner'
+import { useDashboardCtx } from '../hooks/useDashboardCtx'
 
 // Razorpay-not-configured fallback target. The marketing pricing page still
 // renders the tiers honestly even when Razorpay isn't wired, so sending
@@ -57,6 +59,11 @@ type Status =
   | { kind: 'fallback' } // 503 billing_not_configured
   | { kind: 'invalid'; reason: string }
   | { kind: 'error'; message: string }
+  // B6-P0 008 (BUGBASH 2026-05-20): api returns 403 with an
+  // email_not_verified envelope when the claimed-but-unverified user tries
+  // to upgrade. Surface a recoverable banner with a resend-magic-link
+  // button instead of dropping the user on a generic "Checkout failed".
+  | { kind: 'email_not_verified' }
 
 function isAllowedPlan(p: string | null): p is AllowedPlan {
   return p !== null && (ALLOWED_PLANS as readonly string[]).includes(p)
@@ -71,6 +78,7 @@ export function CheckoutPage() {
   const frequencyRaw = params.get('frequency') ?? 'monthly'
 
   const [status, setStatus] = useState<Status>({ kind: 'loading' })
+  const ctx = useDashboardCtx()
 
   useEffect(() => {
     let cancelled = false
@@ -118,6 +126,12 @@ export function CheckoutPage() {
         // Render the friendly fallback instead of a raw error banner.
         if (e?.status === 503 && e?.code === 'billing_not_configured') {
           setStatus({ kind: 'fallback' })
+          return
+        }
+        // B6-P0 008: api emits 403 email_not_verified when the team's
+        // primary email isn't verified yet. Surface the recovery banner.
+        if (isEmailVerifiedError(e)) {
+          setStatus({ kind: 'email_not_verified' })
           return
         }
         setStatus({
@@ -184,6 +198,18 @@ export function CheckoutPage() {
             Return to pricing
           </a>
           .
+        </div>
+      )}
+      {status.kind === 'email_not_verified' && (
+        <div
+          data-testid="checkout-email-not-verified"
+          className="card"
+          style={{ padding: 18, lineHeight: 1.6, fontSize: 14 }}
+        >
+          <strong style={{ color: 'var(--text)', fontWeight: 500 }}>
+            Verify your email before upgrading.
+          </strong>{' '}
+          <VerifyEmailBanner email={ctx.me?.user?.email} />
         </div>
       )}
       {status.kind === 'error' && (

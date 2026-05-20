@@ -4,7 +4,11 @@
 // ------------------------------------------------------------------
 
 export type Tier = 'anonymous' | 'free' | 'hobby' | 'hobby_plus' | 'pro' | 'team' | 'growth'
-export type Role = 'owner' | 'admin' | 'developer' | 'viewer'
+// Role: the server-side enum is {owner, admin, developer, viewer, member}.
+// 'member' is the default role on POST /api/v1/team/members/invite (see
+// api/openapi.json) and was missing from the dashboard type, which made
+// `listInvitations()` lose row-level type safety after wiring B8-P1 F2.
+export type Role = 'owner' | 'admin' | 'developer' | 'viewer' | 'member'
 export type Env = 'production' | 'staging' | 'development' | string
 
 export type ResourceType =
