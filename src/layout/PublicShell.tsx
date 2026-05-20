@@ -1,9 +1,25 @@
 /* PublicShell — chrome for public marketing pages (pricing, for-agents, etc.).
    Distinct from AppShell (authenticated app). Renders a glassmorphic sticky
    top nav and a minimal footer. Wraps page content via the `children` prop;
-   App.tsx will eventually wire routes to PublicShell-wrapped pages. */
+   App.tsx will eventually wire routes to PublicShell-wrapped pages.
 
-import type { ReactNode } from 'react'
+   Wave 3 (2026-05-21):
+   - Mobile hamburger nav: below 760px the nav-links collapse into a
+     hamburger button that toggles a dropdown panel. Was previously
+     `display: none` outright — leaving mobile visitors with no
+     navigation at all on /pricing, /docs, /for-agents, etc.
+   - Dark-mode toggle (B3-P2-4): the design IS dark by default, and the
+     CSS already has a `prefers-color-scheme: dark` aware base — but
+     readers who deliberately want light mode (printing, low-light
+     hostility to dark UIs, accessibility preferences) had no way to
+     override. The toggle persists to localStorage and applies a
+     `data-theme="light"` attribute on <html> that flips token variables
+     in tokens.css. Default = system preference, override = persisted.
+     SSR-safe: the toggle button mounts only after hydration so the
+     prerendered HTML matches the SSR output exactly.
+*/
+
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Brand } from '../components/Common'
 
 const NAV_LINKS = [
@@ -15,18 +31,41 @@ const NAV_LINKS = [
   { href: '/status', label: 'Status' }
 ]
 
+const THEME_STORAGE_KEY = 'instant.theme'
+type ThemePref = 'light' | 'dark' | 'system'
+
 export function PublicShell({ children }: { children: ReactNode }) {
   return (
     <div className="public-shell">
       <PublicShellStyles />
       <PublicNav />
-      <main className="public-main">{children}</main>
+      <main id="main-content" className="public-main">{children}</main>
       <PublicFooter />
     </div>
   )
 }
 
 function PublicNav() {
+  const [mobileOpen, setMobileOpen] = useState(false)
+  const closeMobile = useCallback(() => setMobileOpen(false), [])
+
+  // Close mobile menu on Esc, and reset state if viewport widens past mobile.
+  useEffect(() => {
+    if (!mobileOpen) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') closeMobile()
+    }
+    const onResize = () => {
+      if (typeof window !== 'undefined' && window.innerWidth > 760) closeMobile()
+    }
+    window.addEventListener('keydown', onKey)
+    window.addEventListener('resize', onResize)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('resize', onResize)
+    }
+  }, [mobileOpen, closeMobile])
+
   return (
     <header className="public-nav" role="banner">
       <div className="public-nav-inner">
@@ -43,15 +82,148 @@ function PublicNav() {
         </nav>
 
         <div className="public-nav-cta">
-          <a href="/login" className="public-nav-link public-nav-link--muted">
+          <ThemeToggle />
+          <a href="/login" className="public-nav-link public-nav-link--muted public-nav-link--desktop">
             Sign in
           </a>
-          <a href="/login" className="public-cta-pill">
+          <a href="/login" className="public-cta-pill public-cta-pill--desktop">
             Get token <span aria-hidden="true">→</span>
           </a>
+          <button
+            type="button"
+            className="public-nav-hamburger"
+            aria-label={mobileOpen ? 'Close menu' : 'Open menu'}
+            aria-expanded={mobileOpen}
+            aria-controls="public-mobile-menu"
+            onClick={() => setMobileOpen((v) => !v)}
+          >
+            <span className="hamburger-bar" />
+            <span className="hamburger-bar" />
+            <span className="hamburger-bar" />
+          </button>
         </div>
       </div>
+
+      {/* Mobile menu panel. Always rendered (SSR-stable); display flips via
+          .open class so transition timing is preserved. */}
+      <div
+        id="public-mobile-menu"
+        className={`public-nav-mobile ${mobileOpen ? 'open' : ''}`}
+        aria-hidden={!mobileOpen}
+      >
+        <nav aria-label="Mobile primary">
+          {NAV_LINKS.map((l) => (
+            <a key={l.href} href={l.href} className="public-nav-mobile-link" onClick={closeMobile}>
+              {l.label}
+            </a>
+          ))}
+          <a href="/login" className="public-nav-mobile-link public-nav-mobile-link--muted" onClick={closeMobile}>
+            Sign in
+          </a>
+          <a href="/login" className="public-nav-mobile-cta" onClick={closeMobile}>
+            Get token <span aria-hidden="true">→</span>
+          </a>
+        </nav>
+      </div>
     </header>
+  )
+}
+
+/* ThemeToggle — manual override for prefers-color-scheme.
+ * SSR-safe: renders an empty placeholder on the server (mounted=false),
+ * then flips to the real button on first client render. Avoids
+ * hydration mismatch and prevents the prerendered HTML from baking in
+ * a stale theme. */
+function ThemeToggle() {
+  const [mounted, setMounted] = useState(false)
+  const [pref, setPref] = useState<ThemePref>('system')
+
+  useEffect(() => {
+    setMounted(true)
+    try {
+      const stored = typeof window !== 'undefined'
+        ? window.localStorage.getItem(THEME_STORAGE_KEY)
+        : null
+      if (stored === 'light' || stored === 'dark') setPref(stored)
+    } catch { /* private mode — keep system default */ }
+  }, [])
+
+  const apply = useCallback((next: ThemePref) => {
+    setPref(next)
+    try {
+      if (next === 'system') {
+        window.localStorage.removeItem(THEME_STORAGE_KEY)
+        document.documentElement.removeAttribute('data-theme')
+      } else {
+        window.localStorage.setItem(THEME_STORAGE_KEY, next)
+        document.documentElement.setAttribute('data-theme', next)
+      }
+    } catch { /* non-fatal */ }
+  }, [])
+
+  // On mount, sync DOM with whatever was stored.
+  useEffect(() => {
+    if (!mounted) return
+    if (pref === 'light' || pref === 'dark') {
+      document.documentElement.setAttribute('data-theme', pref)
+    } else {
+      document.documentElement.removeAttribute('data-theme')
+    }
+  }, [mounted, pref])
+
+  // Skip rendering on SSR / first paint to avoid hydration mismatch.
+  // The placeholder reserves the same width as the rendered button so
+  // there is no layout shift when it appears.
+  if (!mounted) return <span className="theme-toggle-placeholder" aria-hidden="true" />
+
+  // Three-state cycle: system → light → dark → system.
+  const next: ThemePref = pref === 'system' ? 'light' : pref === 'light' ? 'dark' : 'system'
+  const label = pref === 'system' ? 'System theme (click to switch to light)'
+    : pref === 'light' ? 'Light theme (click to switch to dark)'
+    : 'Dark theme (click to switch to system)'
+
+  return (
+    <button
+      type="button"
+      className="theme-toggle"
+      onClick={() => apply(next)}
+      aria-label={label}
+      title={label}
+    >
+      {pref === 'light' ? (
+        <SunIcon />
+      ) : pref === 'dark' ? (
+        <MoonIcon />
+      ) : (
+        <SystemIcon />
+      )}
+    </button>
+  )
+}
+
+function SunIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true">
+      <circle cx="8" cy="8" r="3" />
+      <path d="M8 1.5v1.5M8 13v1.5M1.5 8h1.5M13 8h1.5M3.2 3.2l1 1M11.8 11.8l1 1M3.2 12.8l1-1M11.8 4.2l1-1" />
+    </svg>
+  )
+}
+
+function MoonIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M13.5 9.5A5.5 5.5 0 1 1 6.5 2.5a4.5 4.5 0 0 0 7 7Z" />
+    </svg>
+  )
+}
+
+function SystemIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="1.5" y="3" width="13" height="9" rx="1.5" />
+      <path d="M6 14h4M8 12v2" />
+    </svg>
   )
 }
 
@@ -149,9 +321,79 @@ function PublicShellStyles() {
         transition: background 150ms, transform 150ms;
       }
       .public-cta-pill:hover { background: #28edA0; transform: translateY(-1px); }
+
+      /* hamburger button — hidden on desktop */
+      .public-nav-hamburger {
+        display: none;
+        width: 36px; height: 36px;
+        flex-direction: column; align-items: center; justify-content: center;
+        gap: 4px;
+        border: 1px solid var(--border-hi);
+        border-radius: 6px;
+        background: var(--ink);
+        cursor: pointer;
+        padding: 0;
+        transition: border-color 120ms, background 120ms;
+      }
+      .public-nav-hamburger:hover { border-color: var(--accent); }
+      .hamburger-bar {
+        display: block;
+        width: 16px; height: 1.5px;
+        background: var(--text);
+        border-radius: 2px;
+      }
+
+      /* theme toggle */
+      .theme-toggle, .theme-toggle-placeholder {
+        width: 32px; height: 32px;
+        display: inline-flex; align-items: center; justify-content: center;
+        border: 1px solid var(--border-hi);
+        background: var(--ink);
+        color: var(--text-dim);
+        border-radius: 6px;
+        transition: color 120ms, border-color 120ms;
+        flex-shrink: 0;
+      }
+      .theme-toggle:hover { color: var(--text); border-color: var(--accent); }
+
+      /* mobile menu panel — display:none unless .open */
+      .public-nav-mobile {
+        display: none;
+        background: rgba(8,8,10,0.95);
+        backdrop-filter: blur(24px) saturate(180%);
+        -webkit-backdrop-filter: blur(24px) saturate(180%);
+        border-bottom: 1px solid var(--border-soft);
+        padding: 12px 18px 18px;
+      }
+      .public-nav-mobile.open { display: block; }
+      .public-nav-mobile nav { display: flex; flex-direction: column; gap: 2px; }
+      .public-nav-mobile-link {
+        padding: 11px 4px;
+        font-size: 15px;
+        color: var(--text);
+        border-bottom: 1px solid var(--border-soft);
+        letter-spacing: -0.005em;
+      }
+      .public-nav-mobile-link--muted { color: var(--text-dim); }
+      .public-nav-mobile-cta {
+        margin-top: 12px;
+        display: inline-flex; align-items: center; gap: 6px;
+        padding: 10px 16px;
+        background: var(--accent);
+        color: var(--ink);
+        font-weight: 600;
+        font-size: 14px;
+        border-radius: 6px;
+        align-self: flex-start;
+        box-shadow: 0 0 0 1px var(--accent-deep) inset;
+      }
+
       @media (max-width: 760px) {
         .public-nav-links { display: none; }
         .public-nav-inner { gap: 12px; padding: 12px 18px; }
+        .public-nav-link--desktop { display: none; }
+        .public-cta-pill--desktop { display: none; }
+        .public-nav-hamburger { display: inline-flex; }
       }
 
       /* main content area */

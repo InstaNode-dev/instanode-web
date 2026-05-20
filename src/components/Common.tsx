@@ -35,6 +35,11 @@ export function isUnnamed(name: string | null | undefined): boolean {
 // ------------- branding -------------
 // The mark uses the canonical instanode.dev favicon (cube + braces). Loaded
 // from /public so it's part of the app bundle, not an external request.
+//
+// Wave 3 perf polish: `decoding="async"` lets the browser decode the PNG
+// off the main thread so the brand mark doesn't compete with the rest of
+// the nav for paint budget. width/height are explicit so the layout
+// reserves space and CLS stays 0.
 export function BrandMark({ size = 24 }: { size?: number }) {
   return (
     <img
@@ -43,6 +48,7 @@ export function BrandMark({ size = 24 }: { size?: number }) {
       height={size}
       alt=""
       aria-hidden="true"
+      decoding="async"
       className="brand-mark"
     />
   )

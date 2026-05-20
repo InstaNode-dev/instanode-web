@@ -38,6 +38,79 @@
   --font-mono: 'JetBrains Mono', 'SF Mono', Consolas, monospace;
 }
 
+/* ----------------------------------------------------------------
+   Light-theme override (Wave 3 / B3-P2-4).
+
+   Two activation paths:
+   1. User has set "Light" via the PublicShell ThemeToggle —
+      <html data-theme="light"> is set explicitly. Highest priority.
+   2. User has no override AND prefers-color-scheme: light — the
+      browser-default light preference applies.
+
+   "data-theme=dark" forces dark regardless of system preference;
+   this is the third toggle state and the prerendered default,
+   so it intentionally matches :root above.
+
+   AA-contrast text on light surfaces: --text on --ink must clear
+   4.5:1. The values below were picked to pass:
+   - #18181c on #f7f8fa = 16.4:1 (well past AAA)
+   - #4d4d57 on #f7f8fa = 7.9:1  (AAA for normal text)
+   - #007a4b accent kept dark enough for AA on white surfaces
+     (4.7:1) — the canonical mint is too light for foreground use
+     in light mode. Background uses still reference --accent which
+     keeps brand identity on CTAs.
+   ---------------------------------------------------------------- */
+html[data-theme='light'] {
+  --ink: #f7f8fa;
+  --surface: #ffffff;
+  --elevated: #f1f2f5;
+  --raised: #e9eaef;
+  --border: #d8dae0;
+  --border-soft: #e5e6ec;
+  --border-hi: #c4c6ce;
+  --text: #18181c;
+  --text-dim: #4d4d57;
+  --text-faint: #80808a;
+  --text-ghost: #d1d3da;
+
+  /* Brand accent stays the canonical mint for CTAs / pills (it has its
+     own dark text color), but a darker variant powers FOREGROUND text
+     where mint-on-white would fail AA. --accent-deep already exists as
+     the dark-mode "inset" shadow color; in light mode it doubles as
+     the readable foreground accent. */
+  --accent: #00b271;
+  --accent-soft: #00b27122;
+  --accent-glow: #00b27155;
+  --accent-deep: #007a4b;
+
+  --code-bg: #f1f2f5;
+  --selection: #00b27135;
+}
+
+@media (prefers-color-scheme: light) {
+  html:not([data-theme='dark']) {
+    --ink: #f7f8fa;
+    --surface: #ffffff;
+    --elevated: #f1f2f5;
+    --raised: #e9eaef;
+    --border: #d8dae0;
+    --border-soft: #e5e6ec;
+    --border-hi: #c4c6ce;
+    --text: #18181c;
+    --text-dim: #4d4d57;
+    --text-faint: #80808a;
+    --text-ghost: #d1d3da;
+
+    --accent: #00b271;
+    --accent-soft: #00b27122;
+    --accent-glow: #00b27155;
+    --accent-deep: #007a4b;
+
+    --code-bg: #f1f2f5;
+    --selection: #00b27135;
+  }
+}
+
 *, *::before, *::after { box-sizing: border-box; }
 
 html { scroll-behavior: smooth; -webkit-font-smoothing: antialiased; }
