@@ -103,8 +103,12 @@ export const DEFAULT_UPGRADE_CTA = 'Upgrade to Pro →'
 
 export const UPGRADE_COPY: Record<UpgradeFeature, UpgradeCopy> = {
   vault_prod: {
-    title: 'Vault for production env requires Pro Annual',
-    body: 'Keeps prod secrets isolated from staging and dev. AES-256-GCM at rest, scoped per-env at runtime.',
+    // B8-P2 F24 (2026-05-20): mention Pro/Team/Growth — the api's
+    // VAULT_MULTI_ENV_TIERS allowlist includes growth, but the upsell
+    // text used to say "Pro only" which left growth-tier users
+    // confused when they hit the wall on staging.
+    title: 'Vault for non-production envs requires Pro, Team, or Growth',
+    body: 'Keeps prod secrets isolated from staging and dev. AES-256-GCM at rest, scoped per-env at runtime. Multi-env vault is unlocked on Pro ($49/mo), Growth ($99/mo), and Team ($199/mo).',
     priceLine: '$40.83/mo billed yearly · 2 months free',
     primaryCtaLabel: PRIMARY_CTA_LABEL_PRO_ANNUAL,
     primaryCtaFrequency: 'yearly',

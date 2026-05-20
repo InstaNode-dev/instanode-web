@@ -624,7 +624,10 @@ describe('DeployDetailPage — privacy panel', () => {
     ])
   })
 
-  it('surfaces a friendly "edits pending backend" hint on 404 from updateDeploymentAccess', async () => {
+  it('surfaces a "deployment not found" hint on 404 from updateDeploymentAccess (B7-P1-2)', async () => {
+    // B7-P1-2 (2026-05-20): PATCH /api/v1/deployments/:id is now live,
+    // so a 404 means the deployment row is gone or cross-team, not
+    // "backend not implemented". Copy was updated accordingly.
     mockGetDeployment.mockResolvedValueOnce({
       ok: true,
       deployment: deployment({ private: false, allowed_ips: [] }),
@@ -642,7 +645,7 @@ describe('DeployDetailPage — privacy panel', () => {
     fireEvent.click(screen.getByTestId('privacy-edit-save'))
     await waitFor(() => expect(mockUpdateAccess).toHaveBeenCalled())
     const errBanner = await waitFor(() => screen.getByTestId('privacy-edit-error'))
-    expect(errBanner.textContent ?? '').toMatch(/PATCH endpoint|still rolling out/i)
+    expect(errBanner.textContent ?? '').toMatch(/deployment not found|may have been deleted/i)
   })
 
   it('save button is disabled when Private is on but allowed_ips is empty', async () => {

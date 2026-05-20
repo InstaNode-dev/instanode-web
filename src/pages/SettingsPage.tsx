@@ -133,10 +133,17 @@ export function SettingsPage() {
                   ) : null}
                 </div>
                 <div>
+                  {/* B8-P2 F4 (2026-05-20): replaced "revoke via agent ↓"
+                      text with a clickable Revoke button that hits
+                      DELETE /api/v1/auth/api-keys/:id with type-to-confirm.
+                      Revoking the PAT you're currently signed in with via
+                      an agent that depends on it is a footgun — the agent
+                      can't revoke the credential it's using. PAT revoke is
+                      the one exception to the dashboard's read-only creed
+                      because the user has unambiguous authority and a
+                      clear safety case. */}
                   {k.revoked ? null : (
-                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10.5, color: 'var(--text-faint)' }}>
-                      revoke via agent ↓
-                    </span>
+                    <RevokePATButton id={k.id} name={k.name} onRevoked={refresh} />
                   )}
                 </div>
               </div>
@@ -179,6 +186,11 @@ function CreatePATForm({ onClose, onCreated }: { onClose: () => void; onCreated:
   const [scopes, setScopes] = useState<string[]>(['read', 'write'])
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
+  // B8-P2 F20 (2026-05-20): hide the `admin` scope checkbox behind a
+  // click-to-reveal toggle so it can't be selected accidentally. admin
+  // scope can change tiers / delete teams / manage members — pasting
+  // an admin PAT into a CI workflow without thinking is a real risk.
+  const [showAdvanced, setShowAdvanced] = useState(false)
 
   function toggle(s: string) {
     setScopes((prev) => (prev.includes(s) ? prev.filter((x) => x !== s) : [...prev, s]))
@@ -201,26 +213,161 @@ function CreatePATForm({ onClose, onCreated }: { onClose: () => void; onCreated:
 
   return (
     <form onSubmit={submit} style={{ padding: 14, borderBottom: '1px solid var(--border)', background: 'var(--surface)' }} data-testid="create-form">
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10 }}>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10, flexWrap: 'wrap' }}>
         <input
           placeholder="laptop · github-actions"
           value={name}
           onChange={(e) => setName(e.target.value)}
           autoFocus
           data-testid="pat-name"
-          style={{ background: 'var(--ink)', border: '1px solid var(--border)', color: 'var(--text)', padding: '6px 10px', fontFamily: 'var(--font-mono)', fontSize: 12.5, borderRadius: 4, flex: 1 }}
+          style={{ background: 'var(--ink)', border: '1px solid var(--border)', color: 'var(--text)', padding: '6px 10px', fontFamily: 'var(--font-mono)', fontSize: 12.5, borderRadius: 4, flex: 1, minWidth: 200 }}
         />
-        {['read', 'write', 'admin'].map((s) => (
+        {['read', 'write'].map((s) => (
           <label key={s} style={{ fontFamily: 'var(--font-mono)', fontSize: 11.5, color: 'var(--text-dim)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
             <input type="checkbox" checked={scopes.includes(s)} onChange={() => toggle(s)} data-testid={`scope-${s}`} />
             {s}
           </label>
         ))}
+        {showAdvanced ? (
+          <label style={{ fontFamily: 'var(--font-mono)', fontSize: 11.5, color: 'var(--amber)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+            <input
+              type="checkbox"
+              checked={scopes.includes('admin')}
+              onChange={() => toggle('admin')}
+              data-testid="scope-admin"
+            />
+            admin
+          </label>
+        ) : (
+          <button
+            type="button"
+            className="btn btn-sm btn-ghost"
+            onClick={() => setShowAdvanced(true)}
+            data-testid="show-advanced-scopes"
+            style={{ fontFamily: 'var(--font-mono)', fontSize: 11 }}
+            title="Show advanced scopes (admin)"
+          >
+            advanced…
+          </button>
+        )}
         <button type="submit" className="btn btn-sm btn-primary" disabled={busy}>{busy ? 'creating…' : 'create token'}</button>
         <button type="button" className="btn btn-sm btn-ghost" onClick={onClose}>cancel</button>
       </div>
-      {err && <div role="alert" style={{ color: 'var(--rose)', fontFamily: 'var(--font-mono)', fontSize: 11 }}>{err}</div>}
+      {showAdvanced && scopes.includes('admin') && (
+        <div
+          data-testid="admin-scope-warning"
+          style={{
+            fontFamily: 'var(--font-mono)',
+            fontSize: 11,
+            color: 'var(--amber)',
+            marginTop: 6,
+            padding: '6px 10px',
+            background: 'rgba(255,193,7,0.06)',
+            border: '1px solid rgba(255,193,7,0.25)',
+            borderRadius: 4,
+          }}
+        >
+          ⚠ admin scope can change tiers, delete the team, and manage members.
+          Use it only for ops-control tokens; never paste into shared CI.
+        </div>
+      )}
+      {err && <div role="alert" style={{ color: 'var(--rose)', fontFamily: 'var(--font-mono)', fontSize: 11, marginTop: 6 }}>{err}</div>}
     </form>
+  )
+}
+
+// B8-P2 F4 (2026-05-20): one-click Revoke with type-to-confirm. PAT
+// revocation is the rare in-dashboard mutation we permit because the
+// alternative — driving it through the agent — has a chicken-and-egg
+// problem (you can't revoke the PAT the agent is using with that same
+// PAT). The button expands inline to a confirm input; typing the
+// token's name (case-sensitive) enables the destructive Confirm action.
+function RevokePATButton({ id, name, onRevoked }: { id: string; name: string; onRevoked: () => void }) {
+  const [expanded, setExpanded] = useState(false)
+  const [confirm, setConfirm] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+
+  if (!expanded) {
+    return (
+      <button
+        type="button"
+        className="btn btn-sm btn-ghost"
+        onClick={() => setExpanded(true)}
+        data-testid={`pat-revoke-${id.slice(0, 8)}`}
+        style={{ fontFamily: 'var(--font-mono)', fontSize: 10.5, color: 'var(--rose)' }}
+        title="Revoke this token"
+      >
+        revoke
+      </button>
+    )
+  }
+
+  const matched = confirm === name
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <input
+        autoFocus
+        value={confirm}
+        onChange={(e) => setConfirm(e.target.value)}
+        placeholder={`type "${name}"`}
+        data-testid={`pat-revoke-confirm-${id.slice(0, 8)}`}
+        style={{
+          background: 'var(--ink)',
+          border: '1px solid var(--rose)',
+          color: 'var(--text)',
+          padding: '4px 6px',
+          fontFamily: 'var(--font-mono)',
+          fontSize: 10.5,
+          borderRadius: 3,
+          width: 110,
+        }}
+      />
+      <div style={{ display: 'flex', gap: 4 }}>
+        <button
+          type="button"
+          className="btn btn-sm btn-primary"
+          disabled={!matched || busy}
+          onClick={async () => {
+            setBusy(true)
+            setErr(null)
+            try {
+              await api.revokeAPIKey(id)
+              onRevoked()
+            } catch (e: any) {
+              setErr(e?.message ?? 'revoke failed')
+            } finally {
+              setBusy(false)
+            }
+          }}
+          style={{
+            fontFamily: 'var(--font-mono)',
+            fontSize: 10,
+            padding: '2px 6px',
+            background: matched ? 'var(--rose)' : 'var(--text-faint)',
+            color: 'var(--ink)',
+            border: 0,
+            cursor: matched && !busy ? 'pointer' : 'not-allowed',
+          }}
+          data-testid={`pat-revoke-submit-${id.slice(0, 8)}`}
+        >
+          {busy ? '…' : 'confirm'}
+        </button>
+        <button
+          type="button"
+          className="btn btn-sm btn-ghost"
+          onClick={() => { setExpanded(false); setConfirm(''); setErr(null) }}
+          style={{ fontFamily: 'var(--font-mono)', fontSize: 10, padding: '2px 6px' }}
+        >
+          cancel
+        </button>
+      </div>
+      {err && (
+        <div role="alert" style={{ fontSize: 10, color: 'var(--rose)' }}>
+          {err}
+        </div>
+      )}
+    </div>
   )
 }
 

@@ -16,6 +16,12 @@ export function TeamPage() {
   const ctx = useDashboardCtx()
   const [members, setMembers] = useState<TeamMember[]>([])
   const [invites, setInvites] = useState<TeamInvitation[]>([])
+  // B8-P2 F22/F23 (2026-05-20): server-driven member_limit. Was previously
+  // a hardcoded tier→string map that silently went stale when plans.yaml
+  // bumped pro/growth/team_members. The api returns the live integer
+  // alongside /team/members; we render it directly so the dashboard can't
+  // drift from the source of truth.
+  const [memberLimit, setMemberLimit] = useState<number | null>(null)
   const [err, setErr] = useState<LoadError | null>(null)
 
   useEffect(() => {
@@ -33,6 +39,7 @@ export function TeamPage() {
         if (!alive) return
         setMembers(m.members)
         setInvites(i.invitations)
+        setMemberLimit(m.member_limit)
       })
       .catch((e) => {
         if (!alive) return
@@ -51,19 +58,20 @@ export function TeamPage() {
   const userDomain = ctx.me?.user?.email?.split('@')[1] ?? 'example.com'
   const exampleEmail = `kavya@${userDomain}`
 
-  // Tier-aware seat limit text. Values mirror api/plans.yaml team_members.
-  // The dashboard never writes — this is just human-facing copy.
+  // Tier-aware seat limit text — driven by the server's `member_limit` so
+  // adding a tier or bumping a cap in plans.yaml propagates automatically.
+  // -1 means unlimited; null means the call hasn't resolved yet (we render
+  // a non-specific fallback so the prompt doesn't claim a wrong number).
   const tier = ctx.me?.team?.tier
-  const seatLimitByTier: Record<string, string> = {
-    anonymous: '1 team seat',
-    free: '1 team seat',
-    hobby: '1 team seat',
-    pro: '5 team seats',
-    team: 'unlimited team seats',
-    growth: '10 team seats',
-  }
   const tierLabel = tier ? `${tier} tier` : 'Your tier'
-  const seatLabel = tier ? seatLimitByTier[tier] ?? 'seat limits per plan' : 'seat limits per plan'
+  const seatLabel =
+    memberLimit == null
+      ? 'seat limits per plan'
+      : memberLimit < 0
+        ? 'unlimited team seats'
+        : memberLimit === 1
+          ? '1 team seat'
+          : `${memberLimit} team seats`
 
   return (
     <>

@@ -190,7 +190,13 @@ export function handle401(status: number): void {
       /* localStorage / location unavailable — best-effort only */
     }
     if (typeof window !== 'undefined') {
-      window.location.replace('/login')
+      // B8-E2 (2026-05-20): pass session_expired=1 so /login can render a
+      // visible banner explaining why the user landed here. The earlier
+      // behaviour silently redirected with no UX hint, so the user
+      // saw a generic login page and assumed their click vanished. Combined
+      // with the return-to localStorage stash, this gives a complete
+      // "session expired — please sign in to continue" story.
+      window.location.replace('/login?session_expired=1')
     }
   }
 }
