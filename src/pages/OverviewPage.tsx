@@ -172,7 +172,16 @@ export function OverviewPage() {
   const recent = [...resources].sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at)).slice(0, 4)
 
   const now = Date.now()
-  const newThisWeek = resources.filter((r) => now - +new Date(r.created_at) <= SEVEN_DAYS_MS).length
+  // Env-scoped count, MUST match useDashboardCtx.refreshCounts() and the
+  // AppShell sidebar badge. The backend does NOT (yet) honor an `env`
+  // filter on /api/v1/resources — the response carries every env — so
+  // both surfaces have to do the env filter client-side. Source of truth
+  // for "how many resources are in this env": this expression and the
+  // sidebar's. Re-derived on every render so envSwitcher changes update
+  // the tile instantly.
+  const envScopedResources = resources.filter((r) => (r.env ?? 'production') === ctx.env)
+  const envScopedCount = envScopedResources.length
+  const newThisWeek = envScopedResources.filter((r) => now - +new Date(r.created_at) <= SEVEN_DAYS_MS).length
   // Deployments are a separate table (GET /api/v1/deployments) — never rows in
   // `resources`. Source the count + health from the dedicated fetch.
   const deployCount = deployments.length
@@ -206,7 +215,7 @@ export function OverviewPage() {
             renders the number tile honestly without a fake trend.
             Wire up real series in a follow-up (W7-G) once /api/v1/
             stats/series is live. */}
-        <Stat k="resources" v={loading ? '—' : resources.length.toString()} d={newThisWeek === 0 ? '—' : `+${newThisWeek} this week`} series={undefined} />
+        <Stat k="resources" v={loading ? '—' : envScopedCount.toString()} d={newThisWeek === 0 ? '—' : `+${newThisWeek} this week`} series={undefined} />
         {/* Storage tile — used + limit both in binary GiB from the server's
             per-resource byte counts. "∞" denominator when any resource is
             unlimited (team/growth-tier headroom). */}
@@ -233,7 +242,7 @@ export function OverviewPage() {
           <div className="section-h">
             <h2>Recently active</h2>
             <Link to="/app/resources" className="sub" style={{ textDecoration: 'underline', textUnderlineOffset: 3, textDecorationColor: 'var(--text-ghost)' }}>
-              View all {resources.length} →
+              View all {envScopedCount} →
             </Link>
           </div>
           <div className="table" data-testid="recently-active">

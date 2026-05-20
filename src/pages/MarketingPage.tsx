@@ -16,6 +16,7 @@
 import { useState } from 'react'
 import { Brand, copyToClipboard } from '../components/Common'
 import { USE_CASES } from '../content/useCases'
+import { PUBLIC_NAV_LINKS } from '../layout/publicNav'
 
 // HERO_PROMPT — the copy-pasteable demo prompt shown at the top of the
 // homepage. The instanode pitch is "tell your coding agent to use us";
@@ -73,13 +74,20 @@ const HOMEPAGE_USECASE_SLUGS = [
 // Anchors and route paths used throughout the page. Centralized so we don't
 // scatter hardcoded string fragments — easy to update when /pricing or /docs
 // gets wired in.
+//
+// T18 P1-2 (2026-05-20): `forAgents` previously pointed at `#for-agents`,
+// a same-page anchor. Every other shell (PublicShell) linked to the
+// real `/for-agents` page. Same label, two destinations. Now both point
+// at the route — the homepage anchor `id="for-agents"` still scrolls for
+// users already on the page, but the nav link routes consistently so
+// the standalone page is no longer orphaned from the homepage nav.
 const ROUTES = {
   signin: '/login',
   pricing: '/pricing',
   docs: '/docs',
   blog: '/blog',
   changelog: '/changelog',
-  forAgents: '#for-agents',
+  forAgents: '/for-agents',
   playground: '#playground',
 } as const
 
@@ -90,6 +98,13 @@ type Service = {
   liveIn: string
 }
 
+// T18 P1-6 (2026-05-20): Deploy `liveIn` was '<10s', which contradicted
+// both content/llms.txt ("~30–90s") and content/docs/deploy.md
+// ("~30s build"). The actual kaniko build pipeline (Dockerfile → image
+// layer cache → Service → Ingress → cert-manager) lands in the 30–90s
+// range. Switched to '~60s' so the homepage promise matches the docs
+// promise — a 3–9× shipping-window lie on the primary acquisition
+// surface was the headline bug here.
 const SERVICES: Service[] = [
   { id: 'pg', name: 'Postgres',       curl: 'POST /db/new',      liveIn: '1.4s' },
   { id: 'rd', name: 'Redis',          curl: 'POST /cache/new',   liveIn: '0.9s' },
@@ -97,7 +112,7 @@ const SERVICES: Service[] = [
   { id: 'qu', name: 'Queue (NATS)',   curl: 'POST /queue/new',   liveIn: '0.7s' },
   { id: 'st', name: 'Storage (S3)',   curl: 'POST /storage/new', liveIn: '0.8s' },
   { id: 'wh', name: 'Webhook',        curl: 'POST /webhook/new', liveIn: '0.3s' },
-  { id: 'dp', name: 'Deploy',         curl: 'POST /deploy/new',  liveIn: '<10s' },
+  { id: 'dp', name: 'Deploy',         curl: 'POST /deploy/new',  liveIn: '~60s' },
 ]
 
 type Plan = {
@@ -202,11 +217,18 @@ export function MarketingPage() {
             <Brand />
           </a>
           <div className="mkt-nav-links" aria-label="Sections">
-            <a href={ROUTES.pricing}>Pricing</a>
-            <a href={ROUTES.forAgents}>For agents</a>
-            <a href={ROUTES.docs}>Docs</a>
-            <a href={ROUTES.blog}>Blog</a>
-            <a href={ROUTES.changelog}>Changelog</a>
+            {/* T18 P1-1: consume the shared PUBLIC_NAV_LINKS so the
+                homepage nav matches every sub-page's PublicShell nav.
+                Previously this list inlined Pricing/For agents/Docs/Blog/
+                Changelog while PublicShell had Pricing/Use cases/For
+                agents/Docs/Blog/Status — visitors navigating between
+                shells saw nav items reshuffle and lose Status or
+                Changelog. */}
+            {PUBLIC_NAV_LINKS.map((l) => (
+              <a key={l.href} href={l.href}>
+                {l.label}
+              </a>
+            ))}
           </div>
           <div className="mkt-nav-cta">
             <a href={ROUTES.signin} className="btn btn-secondary mkt-hide-mobile">Sign in</a>
@@ -224,11 +246,13 @@ export function MarketingPage() {
                 <span aria-hidden="true">☰</span>
               </summary>
               <div className="mkt-nav-menu-panel">
-                <a href={ROUTES.pricing}>Pricing</a>
-                <a href={ROUTES.forAgents}>For agents</a>
-                <a href={ROUTES.docs}>Docs</a>
-                <a href={ROUTES.blog}>Blog</a>
-                <a href={ROUTES.changelog}>Changelog</a>
+                {/* Mobile disclosure menu — same shared link set as the
+                    desktop nav above, plus the Sign-in CTA. */}
+                {PUBLIC_NAV_LINKS.map((l) => (
+                  <a key={l.href} href={l.href}>
+                    {l.label}
+                  </a>
+                ))}
                 <a href={ROUTES.signin}>Sign in</a>
               </div>
             </details>
@@ -601,7 +625,12 @@ export function MarketingPage() {
                   {'\n  '}{'}'}
                   {'\n'}{'}'}
                 </div>
-                <p>Six tools registered: <code>postgres</code>, <code>redis</code>, <code>mongo</code>, <code>queue</code>, <code>storage</code>, <code>deploy</code>.</p>
+                {/* T18 P1-4: list the same seven tools as the "Seven
+                    services. One bundle." headline (and the SERVICES
+                    array). The earlier "Six tools" copy dropped
+                    webhook — a real MCP tool — and contradicted the
+                    same page. */}
+                <p>Seven tools registered: <code>postgres</code>, <code>redis</code>, <code>mongo</code>, <code>queue</code>, <code>storage</code>, <code>webhook</code>, <code>deploy</code>.</p>
               </div>
             </div>
 

@@ -10,6 +10,7 @@ import { TtlBadge } from '../components/TtlBadge'
 import * as api from '../api'
 import type { DashboardDeployment, Tier } from '../api'
 import { useDashboardCtx } from '../hooks/useDashboardCtx'
+import { isRateLimited, retryAfterSeconds, formatRetryHint } from '../lib/retryHint'
 
 // Tiers that can ship a private deploy (Track B). The agent API enforces
 // the same gate via 402 + agent_action on POST /deploy/new — keeping the
@@ -17,11 +18,25 @@ import { useDashboardCtx } from '../hooks/useDashboardCtx'
 // will reject.
 const PRIVATE_DEPLOY_TIERS: ReadonlySet<Tier> = new Set(['pro', 'team', 'growth'])
 
+// LoadError mirrors TeamPage's shape — the 429 retry-hint pattern is
+// shared. A rate-limited or 5xx fetch must NOT collapse to "No deployments
+// yet" (which mis-reports the platform state and erodes trust); we surface
+// a real error banner instead and honor any Retry-After hint.
+type LoadError = { message: string; rateLimited: boolean; retrySeconds: number | null }
+
 export function DeploymentsPage() {
   const ctx = useDashboardCtx()
   const [items, setItems] = useState<DashboardDeployment[]>([])
   const [loading, setLoading] = useState(true)
-  const tier = (ctx.me?.user.tier ?? 'anonymous') as Tier
+  const [err, setErr] = useState<LoadError | null>(null)
+  // Tier is a TEAM attribute (billing entity is the team, not the
+  // individual user). All other pages — BillingPage, ResourcesPage,
+  // VaultPage, OverviewPage, TeamPage, AppShell — read ctx.me?.team.tier.
+  // Reading ctx.me?.user.tier here was a latent divergence: today
+  // fetchMe() populates both fields from the same `me.tier`, so they
+  // agree, but the moment the API splits per-user vs per-team tier the
+  // private-deploy gate on this one page silently drifts.
+  const tier = (ctx.me?.team?.tier ?? 'anonymous') as Tier
   const canUsePrivateDeploy = PRIVATE_DEPLOY_TIERS.has(tier)
 
   // Source of truth: GET /api/v1/deployments (single-container apps via
@@ -29,6 +44,8 @@ export function DeploymentsPage() {
   // query param; switching envs triggers a refetch via the dep array.
   useEffect(() => {
     let cancelled = false
+    setErr(null)
+    setLoading(true)
     api
       .listDeployments(ctx.env)
       .then((r) => {
@@ -36,13 +53,18 @@ export function DeploymentsPage() {
         setItems(r.items)
         setLoading(false)
       })
-      .catch(() => {
-        // Honest empty state on failure — the page renders the no-
-        // deployments hint rather than fabricating placeholder rows.
-        if (!cancelled) {
-          setItems([])
-          setLoading(false)
-        }
+      .catch((e) => {
+        if (cancelled) return
+        // A 429 or 5xx must NOT silently collapse the list to "No
+        // deployments yet" — that lies about platform state. Surface
+        // the error banner instead (rate-limit aware via retryHint).
+        setItems([])
+        setErr({
+          message: e?.message ?? 'Could not load deployments',
+          rateLimited: isRateLimited(e),
+          retrySeconds: retryAfterSeconds(e),
+        })
+        setLoading(false)
       })
     return () => {
       cancelled = true
@@ -55,6 +77,35 @@ export function DeploymentsPage() {
           axes (provisions), and deploys are a frequent landing spot
           for paid-tier consideration. */}
       <QuotaWallBanner teamId={ctx.me?.team?.id} />
+
+      {/* Rate-limit / load-error banner. Sits ABOVE the empty-state row
+          so a 429 or 5xx is impossible to mistake for "you have no
+          deployments". Matches the TeamPage error-banner pattern so the
+          dashboard handles the API's structured error envelope the same
+          way across pages. */}
+      {err && (
+        <div
+          role="alert"
+          data-testid="deployments-error"
+          className="card"
+          style={{
+            padding: '10px 14px',
+            marginBottom: 16,
+            borderColor: err.rateLimited ? 'var(--amber)' : 'var(--rose)',
+            color: err.rateLimited ? 'var(--amber)' : 'var(--rose)',
+            fontSize: 12.5,
+          }}
+        >
+          {err.rateLimited ? (
+            <>
+              Too many requests — the deployments list is rate-limited.{' '}
+              {formatRetryHint(err.retrySeconds)}
+            </>
+          ) : (
+            <>Could not load deployments — {err.message}. Reload the page to try again.</>
+          )}
+        </div>
+      )}
 
       {/* W9: human-driven "Create stack" entry-point. The dashboard
           stays read-only everywhere else, but POST /stacks/new is
@@ -128,8 +179,15 @@ export function DeploymentsPage() {
           // app_id column. Routing by UUID would 404. app_id is also the
           // segment used by /deploy/:id/logs, so the same param threads
           // through to the SSE log stream on DeployDetailPage.
+          //
+          // Link directly to /app/deployments/:id — the prefixed dashboard
+          // route. The unprefixed /deployments/:id path also resolves but
+          // through LegacyDeploymentRedirect (App.tsx) which does a
+          // render → <Navigate replace> → render double-hop. The legacy
+          // route is for external/bookmarked links only; internal nav
+          // should go straight to the canonical /app/* path.
           <Link
-            to={`/deployments/${d.app_id}`}
+            to={`/app/deployments/${d.app_id}`}
             key={d.id}
             className="table-row"
             style={{ gridTemplateColumns: '1.5fr 1fr 100px 80px 100px 110px 80px 28px', textDecoration: 'none', color: 'inherit' }}

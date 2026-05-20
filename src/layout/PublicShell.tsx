@@ -5,15 +5,14 @@
 
 import type { ReactNode } from 'react'
 import { Brand } from '../components/Common'
+import { PUBLIC_NAV_LINKS } from './publicNav'
 
-const NAV_LINKS = [
-  { href: '/pricing', label: 'Pricing' },
-  { href: '/use-cases', label: 'Use cases' },
-  { href: '/for-agents', label: 'For agents' },
-  { href: '/docs', label: 'Docs' },
-  { href: '/blog', label: 'Blog' },
-  { href: '/status', label: 'Status' }
-]
+// T18 P1-1: PublicShell consumes the shared PUBLIC_NAV_LINKS constant
+// from ./publicNav. The MarketingPage homepage's inlined nav reads the
+// same constant. Keep both shells in lockstep — a regression here would
+// surface the "homepage has Changelog but no Status; sub-pages have
+// Status but no Changelog" drift this constant exists to prevent.
+const NAV_LINKS = PUBLIC_NAV_LINKS
 
 export function PublicShell({ children }: { children: ReactNode }) {
   return (
