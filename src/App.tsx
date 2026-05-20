@@ -162,6 +162,27 @@ const ConfirmDeletionPage = lazy(() =>
 const AdminCustomersPage = lazy(() =>
   import('./pages/AdminCustomersPage').then((m) => ({ default: m.AdminCustomersPage })),
 )
+// NotFoundPage (B1-P1, 2026-05-20) — the catch-all route used to
+// <Navigate to="/" replace />, silently swallowing every unknown URL
+// and dumping the visitor on the homepage. Now we render a real 404
+// page; SSG also pre-renders it into dist/404.html so a bogus URL
+// returns HTTP 404 with a body that actually says "not found". Lazy-
+// loaded because the homepage cold-load path never needs it.
+const NotFoundPage = lazy(() =>
+  import('./pages/NotFoundPage').then((m) => ({ default: m.NotFoundPage })),
+)
+// SecurityPage / LegalDocPage (B1-P1, 2026-05-20) — the footer
+// "Security" link used to point to /docs/public/security.md, which GH
+// Pages served as raw `text/markdown`. A visitor saw the unrendered
+// `## Reporting a vulnerability` source. /security and /legal/:slug
+// render the same markdown through the shared minimal pipeline so the
+// footer link reaches a real HTML page.
+const SecurityPage = lazy(() =>
+  import('./pages/SecurityPage').then((m) => ({ default: m.SecurityPage })),
+)
+const LegalDocPage = lazy(() =>
+  import('./pages/SecurityPage').then((m) => ({ default: m.LegalDocPage })),
+)
 
 import { getToken } from './api'
 
@@ -254,6 +275,12 @@ export function AppRoutes() {
             email until binding language ships. */}
         <Route path="/privacy" element={<PrivacyPage />} />
         <Route path="/terms" element={<TermsPage />} />
+        {/* B1-P1 (2026-05-20): /security replaces the footer link to
+            /docs/public/security.md (raw markdown). /legal/:slug
+            exposes the DPA, subprocessor list, trust-residency and
+            breach-notification pages through the same renderer. */}
+        <Route path="/security" element={<SecurityPage />} />
+        <Route path="/legal/:slug" element={<LegalDocPage />} />
 
         {/* ─── auth surfaces (no chrome, dedicated layout) ───────── */}
         <Route path="/login" element={<LoginPage />} />
@@ -323,7 +350,12 @@ export function AppRoutes() {
         <Route path="/billing" element={<Navigate to="/app/billing" replace />} />
         <Route path="/settings" element={<Navigate to="/app/settings" replace />} />
 
-        <Route path="*" element={<Navigate to="/" replace />} />
+        {/* B1-P1 (2026-05-20): real 404 page replaces the silent
+            redirect-to-homepage. The same NotFoundPage is also
+            pre-rendered into dist/404.html by scripts/prerender.mjs so
+            GitHub Pages returns HTTP 404 with a body that actually says
+            "not found" instead of the homepage HTML. */}
+        <Route path="*" element={<NotFoundPage />} />
       </Routes>
     </Suspense>
   )

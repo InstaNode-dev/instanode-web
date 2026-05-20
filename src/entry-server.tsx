@@ -27,7 +27,7 @@
  * subtree is omitted because auth-gated pages are never pre-rendered. */
 
 import { StrictMode } from 'react'
-import { Navigate, Route, Routes } from 'react-router-dom'
+import { Route, Routes } from 'react-router-dom'
 import { renderToString } from 'react-dom/server'
 import { StaticRouter } from 'react-router-dom/server'
 
@@ -46,6 +46,16 @@ import { UseCaseDetailPage } from './pages/UseCaseDetailPage'
 import { ChangelogPage } from './pages/ChangelogPage'
 import { PrivacyPage } from './pages/PrivacyPage'
 import { TermsPage } from './pages/TermsPage'
+// NotFoundPage (B1-P1, 2026-05-20) — pre-rendered into dist/404.html
+// so GitHub Pages's 404 fallback ships a body that actually says "not
+// found" instead of the SPA shell that booted and Navigate'd silently
+// to /. Imported synchronously like every other SSR'd page.
+import { NotFoundPage } from './pages/NotFoundPage'
+// SecurityPage + LegalDocPage (B1-P1, 2026-05-20) — replace the
+// footer's raw-markdown link with a real HTML route. SSR'd so a
+// procurement reviewer pasting /security into a browser sees the real
+// content on first byte instead of waiting for hydration.
+import { SecurityPage, LegalDocPage } from './pages/SecurityPage'
 
 // SSRRoutes — the SSG-only route tree. Mirrors the public surface of the
 // client AppRoutes (everything reachable without auth). The /app/* subtree
@@ -70,7 +80,14 @@ function SSRRoutes() {
           for crawlers and direct visitors alike. */}
       <Route path="/privacy" element={<PrivacyPage />} />
       <Route path="/terms" element={<TermsPage />} />
-      <Route path="*" element={<Navigate to="/" replace />} />
+      <Route path="/security" element={<SecurityPage />} />
+      <Route path="/legal/:slug" element={<LegalDocPage />} />
+      {/* B1-P1 (2026-05-20): the SSG path renders NotFoundPage for
+          every unmatched URL — both the explicit /404 route used by
+          prerender.mjs and any URL StaticRouter doesn't know about.
+          Was: <Navigate to="/" replace />, which silently dumped the
+          visitor on the homepage with the wrong URL in the bar. */}
+      <Route path="*" element={<NotFoundPage />} />
     </Routes>
   )
 }
