@@ -150,3 +150,61 @@ describe('PricingPage — four public tier cards present (M11 regression guard)'
     }
   })
 })
+
+// ─── 4. B2-P1-1 / B2-P1-2: URL params + anchors (BugBash 2026-05-20) ──────
+
+describe('PricingPage — URL params + hash anchors (BugBash B2-P1-1 / B2-P1-2)', () => {
+  it('?frequency=yearly URL param hydrates the toggle to yearly', () => {
+    render(
+      <MemoryRouter initialEntries={['/pricing?frequency=yearly']}>
+        <PricingPage />
+      </MemoryRouter>,
+    )
+    // The yearly toggle is aria-checked=true once the URL param is applied.
+    const yearlyBtn = screen.getByTestId('pricing-frequency-yearly')
+    expect(yearlyBtn.getAttribute('aria-checked')).toBe('true')
+  })
+
+  it('?frequency=monthly URL param overrides stale localStorage=yearly', () => {
+    window.localStorage.setItem('instant.billing.plan_frequency', 'yearly')
+    render(
+      <MemoryRouter initialEntries={['/pricing?frequency=monthly']}>
+        <PricingPage />
+      </MemoryRouter>,
+    )
+    const monthlyBtn = screen.getByTestId('pricing-frequency-monthly')
+    expect(monthlyBtn.getAttribute('aria-checked')).toBe('true')
+  })
+
+  it('per-tier id is rendered for shareable #anchor links (B2-P1-2)', () => {
+    renderPage()
+    // /pricing#pro and /pricing?tier=pro both rely on an element with
+    // id="pricing-tier-pro" existing on the page so the browser can
+    // scroll into view. Hash-without-id was a no-op.
+    for (const tier of ['anonymous', 'hobby', 'pro', 'team']) {
+      const el = document.getElementById(`pricing-tier-${tier}`)
+      expect(el).toBeTruthy()
+    }
+  })
+})
+
+// ─── 5. B2-P1-3 / B2-P1-4: FAQ disambiguation (BugBash 2026-05-20) ────────
+
+describe('PricingPage — FAQ disambiguation (BugBash B2-P1-3 / B2-P1-4)', () => {
+  it('explicitly says no trial — pay from day one on Hobby/Pro/Team', () => {
+    renderPage()
+    const body = document.body.textContent ?? ''
+    // The new FAQ entry says "you pay from day one" + "free trial" in
+    // the question. Pin both halves so a copy edit can't accidentally
+    // drop the no-trial half.
+    expect(body).toContain('pay from day one')
+    expect(body.toLowerCase()).toContain('free trial')
+  })
+
+  it('discloses Hobby Plus + Growth exist as API-only tiers', () => {
+    renderPage()
+    const body = document.body.textContent ?? ''
+    expect(body).toContain('Hobby Plus')
+    expect(body).toContain('Growth')
+  })
+})

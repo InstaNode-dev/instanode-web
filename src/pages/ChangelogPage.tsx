@@ -18,6 +18,7 @@
  * visitor moving between /status, /incidents, /changelog feels the
  * pages are the same surface. */
 
+import { useEffect } from 'react'
 import { PublicShell } from '../layout/PublicShell'
 
 // ─── types ────────────────────────────────────────────────────────────────
@@ -118,6 +119,23 @@ const ENTRIES: ChangelogEntry[] = [
 
 export function ChangelogPage() {
   const sorted = [...ENTRIES].sort((a, b) => b.date.localeCompare(a.date))
+
+  // B3-P1-8 (BugBash 2026-05-20): static prerender writes the right
+  // <title> ("Changelog · instanode") into dist/changelog/index.html, but
+  // SPA navigation from /pricing → /changelog never re-applies it — the
+  // tab title stays as whatever was last set, typically the homepage
+  // default. Mirror the prerender meta into the live document on mount
+  // and restore the previous title on unmount so the next SPA hop
+  // doesn't inherit changelog meta.
+  useEffect(() => {
+    if (typeof document === 'undefined') return
+    const prevTitle = document.title
+    document.title = 'Changelog · instanode'
+    return () => {
+      document.title = prevTitle
+    }
+  }, [])
+
   return (
     <PublicShell>
       <ChangelogStyles />
@@ -163,6 +181,15 @@ export function ChangelogPage() {
         <span className="changelog-link-sep">·</span>
         <a href="/docs/public/trust-residency.md" className="changelog-link">
           Trust + residency
+        </a>
+        <span className="changelog-link-sep">·</span>
+        {/* B3-P1-7 (BugBash 2026-05-20): "Subscribe" used to be a single
+            mailto link only — no feed for procurement reviewers /
+            on-call engineers who want a programmatic update channel.
+            Add the Atom feed alongside the mailto so both paths work.
+            Feed is emitted by scripts/prerender.mjs writeChangelogAtomFeed. */}
+        <a href="/changelog/rss.xml" className="changelog-link">
+          Subscribe (Atom feed)
         </a>
         <span className="changelog-link-sep">·</span>
         <a

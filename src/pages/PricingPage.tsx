@@ -3,6 +3,7 @@
    Wrapped in PublicShell for the glassmorphic top nav + footer. */
 
 import { useEffect, useState } from 'react'
+import { useLocation, useSearchParams } from 'react-router-dom'
 import { PublicShell } from '../layout/PublicShell'
 import { copyToClipboard } from '../components/Common'
 
@@ -151,6 +152,26 @@ const FAQ: { q: string; a: string }[] = [
     a: "Your agent calls /db/new without auth. Resources expire in 24 h unless claimed via the link in the response."
   },
   {
+    // B2-P1-3 (BugBash 2026-05-20): the hero subhead "Free for the first
+    // agent call" is intentionally agent-centric, but a paying user
+    // reading the pricing table needs the unambiguous reassurance that
+    // Hobby/Pro/Team are pay-from-day-one — no trial period, no surprise
+    // charge after 14 days. Mirrors MEMORY.md: "anonymous (24h TTL) is
+    // the only free tier; hobby/pro/team are paid from signup."
+    q: 'Is there a free trial on Hobby, Pro, or Team?',
+    a: "No — you pay from day one. The anonymous tier (24h TTL) is the only free option; once you upgrade to Hobby, Pro, or Team you're billed at the listed rate immediately. Existing anonymous resources you claim before upgrading keep their data; they just get the paid tier's limits going forward."
+  },
+  {
+    // B2-P1-4 (BugBash 2026-05-20): Hobby Plus + Growth exist as real
+    // tiers in api/plans.yaml but are intentionally absent from the
+    // public ladder — they're API-only intermediate steps offered via
+    // dashboard upsell flows (quota wall nudges, custom-domain prompts).
+    // Calling this out on the public surface stops customers from
+    // emailing us asking "what's $19/mo or $99/mo?".
+    q: 'What are Hobby Plus and Growth — I see them in the API?',
+    a: "Intermediate tiers ($19/mo and $99/mo) offered as API-only upsell steps. They sit between Hobby/Pro and Pro/Team and are surfaced to existing customers as upgrade nudges (e.g. when a Hobby team hits 80% of its quota). They're not on the public pricing page on purpose — three public tiers are a cleaner first-time funnel. If you want them, ask in the dashboard or email support@instanode.dev."
+  },
+  {
     // W12 H14: previous copy said "Cancel anytime" which contradicted the
     // platform's no-self-serve-cancel policy. The honest answer matches
     // the BillingPage copy: cancellation is support-only with a 24h SLA.
@@ -177,13 +198,55 @@ export function PricingPage() {
   // Hydrates from storage on mount (after first paint) so SSR output is
   // stable and search engines see the canonical monthly view.
   const [frequency, setFrequencyState] = useState<PricingFrequency>('monthly')
+
+  // B2-P1-1 / B2-P1-2 (BugBash 2026-05-20): read ?frequency, ?tier, and
+  // location.hash on mount so shareable links work. URL param wins over
+  // localStorage so a marketing CTA like /pricing?frequency=yearly always
+  // lands the visitor on the yearly view, even if their previous visit
+  // saved 'monthly' to localStorage.
+  const [searchParams] = useSearchParams()
+  const location = useLocation()
+  const tierParam = searchParams.get('tier')
+  const tierHash = location.hash.replace(/^#/, '').toLowerCase()
+  const requestedTier = tierParam || tierHash
+
   useEffect(() => {
+    if (typeof window === 'undefined') return
+    // 1. ?frequency param takes precedence over localStorage. This is
+    //    the shareable-link entry path; localStorage is the
+    //    return-visitor preference fallback.
+    const freqParam = searchParams.get('frequency')
+    if (freqParam === 'yearly' || freqParam === 'monthly') {
+      setFrequencyState(freqParam)
+      try { window.localStorage.setItem(FREQ_STORAGE_KEY, freqParam) } catch { /* non-fatal */ }
+      return
+    }
+    // 2. Fall back to last-used preference.
     try {
-      if (typeof window === 'undefined') return
       const v = window.localStorage.getItem(FREQ_STORAGE_KEY)
       if (v === 'yearly') setFrequencyState('yearly')
     } catch { /* private mode / disabled storage — keep default */ }
-  }, [])
+  }, [searchParams])
+
+  // Scroll the requested tier into view + highlight it briefly. We do this
+  // after the layout settles (50ms) so the scroll lands on the column
+  // header, not a half-mounted body. The highlight class is removed after
+  // 1.5s — long enough to draw the eye, short enough to feel intentional.
+  useEffect(() => {
+    if (!requestedTier) return
+    if (typeof document === 'undefined') return
+    const valid = ['anonymous', 'hobby', 'pro', 'team']
+    if (!valid.includes(requestedTier)) return
+    const t = window.setTimeout(() => {
+      const el = document.getElementById(`pricing-tier-${requestedTier}`)
+      if (!el) return
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      el.classList.add('pricing-tier-flash')
+      window.setTimeout(() => el.classList.remove('pricing-tier-flash'), 1500)
+    }, 50)
+    return () => window.clearTimeout(t)
+  }, [requestedTier])
+
   const setFrequency = (f: PricingFrequency) => {
     setFrequencyState(f)
     try {
@@ -231,6 +294,14 @@ export function PricingPage() {
               return (
                 <div
                   key={t.key}
+                  // B2-P1-2 (BugBash 2026-05-20): #hobby/#pro/#team anchors used
+                  // to silently no-op because no element on the page had
+                  // matching ids. The id="pricing-tier-<key>" lets a shareable
+                  // link like /pricing#pro or /pricing?tier=pro scroll the
+                  // column into view (handled in the useEffect at the top of
+                  // PricingPage). Stable id derived from the tier key so the
+                  // selector survives copy renames.
+                  id={`pricing-tier-${t.key}`}
                   className={`pricing-cell pricing-cell--tier${t.highlighted ? ' is-highlighted' : ''}`}
                   role="columnheader"
                   data-tier={t.key}
@@ -308,7 +379,18 @@ export function PricingPage() {
                     // L-03: the Team tier's `cta` is an empty string, so this
                     // pill rendered as a dead empty rounded box. Fall back to
                     // a "coming soon" label so the cell carries meaning.
-                    <span className="pricing-cta pricing-cta--disabled" aria-disabled="true">
+                    // B2-P1-5 (BugBash 2026-05-20): data-testid carries
+                    // through both the live-link branch and the
+                    // coming-soon branch so the Playwright suite can
+                    // assert the disabled-state CTA without conditional
+                    // selectors. Mirrors the
+                    // `pricing-cta-${tier}` selector pattern used by
+                    // the live-link branch below.
+                    <span
+                      className="pricing-cta pricing-cta--disabled"
+                      aria-disabled="true"
+                      data-testid={`pricing-cta-${t.key}`}
+                    >
                       {t.cta || 'Coming soon'}
                     </span>
                   ) : (
@@ -638,6 +720,20 @@ function PricingStyles() {
         background: var(--amber, #f5b13c);
         border-radius: 3px;
         vertical-align: middle;
+      }
+
+      /* B2-P1-2 (BugBash 2026-05-20): /pricing?tier=pro and /pricing#pro
+         shareable links scroll the matching column into view and pulse
+         it briefly. The flash class is added by the useEffect at the
+         top of PricingPage and removed 1.5s later. Box-shadow rather
+         than background so the cell content stays readable. */
+      .pricing-tier-flash {
+        animation: pricing-tier-flash-anim 1500ms ease-out;
+      }
+      @keyframes pricing-tier-flash-anim {
+        0%   { box-shadow: 0 0 0 0 rgba(0,228,142,0.6); }
+        25%  { box-shadow: 0 0 0 6px rgba(0,228,142,0.3); }
+        100% { box-shadow: 0 0 0 0 rgba(0,228,142,0); }
       }
 
       @media (max-width: 880px) {

@@ -31,6 +31,11 @@
     <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
     <link rel="manifest" href="/site.webmanifest" />
+    <!-- B3-P1-7 (BugBash 2026-05-20): Atom feeds for /blog and /changelog
+         emitted by scripts/prerender.mjs. Listed here so feed readers
+         auto-discover the feeds when a user "adds" instanode.dev. -->
+    <link rel="alternate" type="application/atom+xml" title="instanode blog" href="/blog/rss.xml" />
+    <link rel="alternate" type="application/atom+xml" title="instanode changelog" href="/changelog/rss.xml" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link

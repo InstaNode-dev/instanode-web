@@ -6,12 +6,26 @@
  * Wrapped in PublicShell so the top nav + footer match the rest of the
  * marketing pages. */
 
+import { useEffect } from 'react'
 import { PublicShell } from '../layout/PublicShell'
 import { POSTS } from '../content/posts'
 
 const sorted = [...POSTS].sort((a, b) => b.date.localeCompare(a.date))
 
 export function BlogPage() {
+  // B3-P1-9 (BugBash 2026-05-20): SPA-nav title fix for /blog. Same
+  // pattern as ChangelogPage + BlogPostPage — the prerendered title is
+  // correct on cold load, but never re-applied when the visitor SPA-navs
+  // back from a post. Restore on unmount.
+  useEffect(() => {
+    if (typeof document === 'undefined') return
+    const prev = document.title
+    document.title = 'Blog · instanode'
+    return () => {
+      document.title = prev
+    }
+  }, [])
+
   return (
     <PublicShell>
       <BlogPageStyles />
