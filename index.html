@@ -39,12 +39,55 @@
     <link rel="manifest" href="/site.webmanifest" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <!-- Preload the Bricolage Grotesque stylesheet so the font request races
+         with the JS bundle parse instead of waiting on it. The print/onload
+         pattern lets the browser fetch as a low-priority *resource* and
+         apply once the bundle has hydrated — paint-blocking is avoided. -->
     <link
+      rel="preload"
+      as="style"
       href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,200..800&family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap"
-      rel="stylesheet"
+      onload="this.onload=null;this.rel='stylesheet'"
     />
+    <noscript>
+      <link
+        href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,200..800&family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap"
+        rel="stylesheet"
+      />
+    </noscript>
+
+    <!-- Apply the persisted dark/light theme override BEFORE first paint.
+         Without this snippet, a user who saved "light" mode sees the dark
+         CSS for ~100ms then a flash to light when React hydrates. Reading
+         localStorage synchronously here moves the override into the same
+         frame as the prerendered HTML. Wrapped in try/catch so storage
+         denial (private mode, sandboxed iframe) is a no-op. -->
+    <script>
+      (function () {
+        try {
+          var pref = localStorage.getItem('instant.theme');
+          if (pref === 'light' || pref === 'dark') {
+            document.documentElement.setAttribute('data-theme', pref);
+          }
+        } catch (e) { /* fail silently */ }
+      })();
+    </script>
   </head>
   <body>
+    <noscript>
+      <div style="padding:48px 24px;max-width:680px;margin:0 auto;font-family:system-ui,sans-serif;color:#f4f4f6;background:#08080a;line-height:1.6;">
+        <h1 style="margin:0 0 12px;">instanode.dev — JavaScript required</h1>
+        <p style="margin:0 0 12px;color:#91919c;">
+          The dashboard is a single-page React app. The agent API at
+          <a href="https://api.instanode.dev/openapi.json" style="color:#00e48e;">api.instanode.dev</a>
+          does not require JavaScript and can be called directly with curl.
+        </p>
+        <p style="margin:0;color:#91919c;">
+          See the <a href="/docs" style="color:#00e48e;">docs</a> for examples, or the
+          <a href="/pricing" style="color:#00e48e;">pricing page</a> for tier limits.
+        </p>
+      </div>
+    </noscript>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
