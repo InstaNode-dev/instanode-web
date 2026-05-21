@@ -95,7 +95,7 @@ const ROUTES = {
 } as const
 
 type Service = {
-  id: 'pg' | 'rd' | 'mg' | 'qu' | 'st' | 'wh' | 'dp'
+  id: 'pg' | 'rd' | 'mg' | 'vc' | 'qu' | 'st' | 'wh' | 'dp'
   name: string
   curl: string
   liveIn: string
@@ -105,6 +105,9 @@ const SERVICES: Service[] = [
   { id: 'pg', name: 'Postgres',       curl: 'POST /db/new',      liveIn: '1.4s' },
   { id: 'rd', name: 'Redis',          curl: 'POST /cache/new',   liveIn: '0.9s' },
   { id: 'mg', name: 'MongoDB',        curl: 'POST /nosql/new',   liveIn: '1.2s' },
+  // Vector — added 2026-05-20. plans.yaml has vector_storage_mb on every
+  // tier (anon=10, hobby=500, pro=10240, team=-1); /vector/new is live.
+  { id: 'vc', name: 'Vector (pgvector)', curl: 'POST /vector/new', liveIn: '1.4s' },
   { id: 'qu', name: 'Queue (NATS)',   curl: 'POST /queue/new',   liveIn: '0.7s' },
   // PB04 P2 (2026-05-21): label was 'Storage (S3)' which implied AWS;
   // the live backend is DO Spaces (S3-compatible API, not AWS S3).
@@ -193,20 +196,27 @@ const PLANS: Plan[] = [
     cta: { label: 'Start pro →', href: ROUTES.signin, variant: 'primary' },
   },
   {
-    // Team tier — not launched yet. Per launch posture (2026-05-15), the
-    // homepage card shows ONLY a "coming soon" placeholder. No price, no
-    // feature list. BugBash P3-09: the CTA is rendered as a 'disabled'
-    // variant so the card shows a "Coming soon" pill instead of an empty
-    // <a href=""> dead button — and the pricing teaser's "talk to us"
-    // line links to a real contact address.
+    // Team tier — launched 2026-05-20 (DOC-REALITY-DELTA sweep).
+    // plans.yaml:375 has team at $199/mo, every limit -1 (unlimited).
+    // CTA goes via mailto: until the assisted-Razorpay flow ships; that
+    // keeps the funnel intact while honoring the support-only onboarding
+    // path for enterprise customers.
     id: 'team',
     name: 'Team',
-    tagline: 'For the engineering org. Coming soon.',
-    price: 'coming soon',
-    freq: '',
-    features: [],
-    cta: { label: 'Coming soon', href: '', variant: 'disabled' },
-    comingSoon: true,
+    tagline: 'For the engineering org. Dedicated infra + SLA + SSO.',
+    price: '$199',
+    freq: '/ mo',
+    features: [
+      'unlimited Postgres · Redis · MongoDB',
+      'unlimited deployments · 50 custom domains',
+      '90-day backups · self-serve restore · RBAC + audit',
+      'SSO/SAML · 99.9% SLA',
+    ],
+    cta: {
+      label: 'Contact sales →',
+      href: 'mailto:support@instanode.dev?subject=Team%20plan%20inquiry',
+      variant: 'secondary',
+    },
   },
 ]
 
@@ -291,7 +301,7 @@ export function MarketingPage() {
             <span className="mkt-accent">with one curl.</span>
           </h1>
           <p className="mkt-hero-sub">
-            Postgres, Redis, MongoDB, queues, storage, webhooks, and deployments.{' '}
+            Postgres, Redis, MongoDB, vectors, queues, storage, webhooks, and deployments.{' '}
             <strong>Provisioned in &lt;2 seconds.</strong>{' '}
             No signup, no Docker, no waitlist.
           </p>

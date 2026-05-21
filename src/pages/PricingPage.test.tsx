@@ -140,14 +140,27 @@ describe('PricingPage — four public tier cards present (M11 regression guard)'
     expect(hobbyPlusCells.length).toBe(0)
   })
 
-  it('paid-tier CTAs are clickable links (not disabled spans) for hobby / pro', () => {
+  it('paid-tier CTAs are clickable links (not disabled spans) for hobby / pro / team', () => {
     renderPage()
-    for (const tier of ['hobby', 'pro']) {
+    // 2026-05-20 DOC-REALITY-DELTA: Team tier launched. CTA now points at
+    // a real mailto: (contact-sales). plans.yaml has team at $199/mo with
+    // every limit -1 (unlimited). If Team flips back to "coming soon",
+    // it'll be a disabled span and this test fails — the regression guard.
+    for (const tier of ['hobby', 'pro', 'team']) {
       const cta = screen.getByTestId(`pricing-cta-${tier}`)
       // <a> with href, not <span aria-disabled>.
       expect(cta.tagName).toBe('A')
       expect(cta.getAttribute('href')).toBeTruthy()
     }
+  })
+
+  it('Team tier shows $199/mo (DOC-REALITY-DELTA 2026-05-20 launch)', () => {
+    renderPage()
+    // Team launched per plans.yaml:375 ($199/mo, $1990/yr). Marketing
+    // surface must mirror the registry. Yearly CTA reuses mailto: until
+    // assisted-Razorpay flow ships.
+    const body = document.body.textContent ?? ''
+    expect(body).toContain('$199')
   })
 })
 

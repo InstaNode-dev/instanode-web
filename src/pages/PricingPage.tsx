@@ -80,21 +80,23 @@ const TIERS: {
     ctaHrefYearly: '/app/checkout?plan=pro&frequency=yearly',
     highlighted: true,
   },
-  // Team tier — not launched yet, but PB04 P3 (2026-05-21) surfaced
-  // the price from plans.yaml ($199/mo) so the "soon" badge reads as an
-  // availability label rather than a vaporware signal. The "soon" badge
-  // (from t.comingSoon below) renders next to the tier name; the price
-  // itself stays a real number sourced from plans.yaml. Matches the
-  // existing Hobby/Pro {price, sub} pattern. The CTA stays empty until
-  // launch — interested customers can email support.
+  // Team tier — launched 2026-05-20 (DOC-REALITY-DELTA sweep). Limits are
+  // unlimited across the board; the upsell vs Pro is dedicated infra +
+  // 90-day backup retention + SLA + RBAC + SAML. Per api/plans.yaml:375
+  // ($199/mo, $1990/yr). Razorpay plan IDs are configured server-side.
   {
     key: 'team',
     name: 'Team',
     monthly: { price: '$199', sub: '/ mo' },
-    // No yearly — annual billing wires up at launch.
-    cta: '',
-    ctaHrefMonthly: '',
-    comingSoon: true,
+    // team_yearly: $1990/yr ≈ $165.83/mo (~17% off $199 x 12).
+    yearly: { price: '$165.83', sub: '/ mo billed yearly', saveLabel: 'save $398/yr' },
+    cta: 'Contact sales →',
+    // Team checkout goes through sales rather than self-serve until the
+    // full assisted-onboarding flow ships — same pattern as enterprise
+    // ladders elsewhere. Mailto keeps the funnel intact while we wire
+    // the assisted Razorpay path.
+    ctaHrefMonthly: 'mailto:support@instanode.dev?subject=Team%20plan%20inquiry',
+    ctaHrefYearly: 'mailto:support@instanode.dev?subject=Team%20plan%20inquiry%20(yearly)',
   },
 ]
 
@@ -108,47 +110,54 @@ type Cell =
 // lock-step with the TIERS array above.
 type Row = { label: string; sub?: string; values: [Cell, Cell, Cell, Cell] }
 
-// Team-tier values use { text: '', comingSoon: true } across the board because
-// the tier hasn't launched. Marketing copy keeps Team as "coming soon"
-// until the launch ships; do not list capacity numbers here even if
-// plans.yaml has them — the source of truth for what's advertised is
-// the launch posture, not the registry.
-const SOON: Cell = { text: '', comingSoon: true }
+// UNLIMITED — Team-tier marker. plans.yaml uses -1 sentinel for "no cap"
+// on every Team limit; we render this as the visual "unlimited" cell.
+// Kept as its own helper so a future redesign can swap in a richer
+// visualisation (e.g. lightning-bolt icon) without rewriting every row.
+const UNLIMITED: Cell = 'unlimited'
 
 // Each row has 4 cells: [Anonymous, Hobby, Pro, Team]. Numbers come from
 // api/plans.yaml. 2026-05-15: Hobby Plus column removed (the tier exists
 // for upsell flows but is not part of the public ladder); Pro storage
 // bumped per PRICING-AUDIT-2026-05-15.md (Postgres 5→10 GB, Redis
-// 256→512 MB, Mongo 2→5 GB, object 10→50 GB).
+// 256→512 MB, Mongo 2→5 GB, object 10→50 GB). 2026-05-20: Team tier
+// launched — every limit -1 in plans.yaml becomes 'unlimited' here.
 const ROWS: Row[] = [
-  { label: 'Postgres', values: ['10 MB / 2 conn / 24h TTL', '1 GB / 8 conn',     '10 GB / 20 conn', SOON] },
-  { label: 'Redis',    values: ['5 MB / 24h TTL',           '50 MB',             '512 MB',          SOON] },
-  { label: 'MongoDB',  values: ['5 MB / 2 conn / 24h TTL',  '100 MB / 5 conn',   '5 GB / 20 conn',  SOON] },
+  { label: 'Postgres', values: ['10 MB / 2 conn / 24h TTL', '1 GB / 8 conn',     '10 GB / 20 conn', UNLIMITED] },
+  { label: 'Redis',    values: ['5 MB / 24h TTL',           '50 MB',             '512 MB',          UNLIMITED] },
+  { label: 'MongoDB',  values: ['5 MB / 2 conn / 24h TTL',  '100 MB / 5 conn',   '5 GB / 20 conn',  UNLIMITED] },
   // FIX-G (2026-05-14): the column used to advertise "1 000 / 5 000 / 100k
   // msg/d" but there's no backing queue_messages_per_day field on the
   // plans.yaml side — quota enforcement is on queue_storage_mb. Shipping
   // a per-day-msg counter is real scope and not in flight, so the copy
   // moves to the field we actually enforce. Numbers mirror plans.yaml
   // queue_storage_mb (anonymous=1024, hobby=5120, pro=10240).
-  { label: 'Queue',    sub: 'NATS storage', values: ['1 GB / 24h TTL', '5 GB', '10 GB', SOON] },
+  { label: 'Queue',    sub: 'NATS storage', values: ['1 GB / 24h TTL', '5 GB', '10 GB', UNLIMITED] },
+  // Vector — added 2026-05-20 to surface /vector/new alongside the other
+  // services. plans.yaml vector_storage_mb: anon=10, hobby=500, pro=10240,
+  // team=-1 (unlimited).
+  { label: 'Vector',   sub: 'pgvector', values: ['10 MB / 24h TTL', '500 MB', '10 GB', UNLIMITED] },
   // Anonymous storage: plans.yaml storage_storage_mb=10 (anonymous tier).
   // PB04 P1 (2026-05-21): cell used to render '—' which contradicted the
   // shipped backend — anonymous /storage/new returns a real 10 MB bucket.
-  { label: 'Storage',  values: ['10 MB / 24h TTL',              '512 MB',           '50 GB',          SOON] },
-  { label: 'Webhook stored', values: ['100',                   '1 000',            '10k',            SOON] },
-  { label: 'Deploy apps', values: [{ mark: 'dash' },           '1 small',          '10 medium',      SOON] },
-  { label: 'Domains',  values: [{ mark: 'dash' }, '*.deployment.instanode.dev', 'custom domain', SOON] },
+  { label: 'Storage',  values: ['10 MB / 24h TTL',              '512 MB',           '50 GB',          UNLIMITED] },
+  { label: 'Webhook stored', values: ['100',                   '1 000',            '10k',            UNLIMITED] },
+  // 2026-05-20: dropped "small / medium" pod-size adjectives — there is no
+  // deployment_size field on api/internal/handlers/deploy.go. Numbers map
+  // to plans.yaml deployments_apps (hobby=1, pro=10, team=-1 → unlimited).
+  { label: 'Deploy apps', values: [{ mark: 'dash' },           '1',                '10',             UNLIMITED] },
+  { label: 'Domains',  values: [{ mark: 'dash' }, '*.deployment.instanode.dev', 'custom domain', '50 custom domains'] },
   // Multi-env workflows (stack promotion + vault copy across envs) is a
   // shipped Pro-tier feature: POST /api/v1/stacks/:slug/promote and
   // POST /api/v1/vault/copy are live (RETRO-2026-05-12 §10.17). Hobby is
   // single-env (production only).
-  { label: 'Multi-env workflows', sub: 'stack promotion + vault copy', values: [{ mark: 'dash' }, { mark: 'dash' }, 'dev / staging / prod', SOON] },
-  { label: 'RBAC + audit', values: [{ mark: 'dash' }, { mark: 'dash' }, { mark: 'dash' }, SOON] },
-  { label: 'Vault entries', values: [{ mark: 'dash' }, '20', '200', SOON] },
-  { label: 'Vault envs',    values: [{ mark: 'dash' }, 'production only', 'multi-env', SOON] },
-  { label: 'Backups',       values: [{ mark: 'dash' }, '7-day · no restore', '30-day · 1-click restore', SOON] },
-  { label: 'SSO / SAML', values: [{ mark: 'dash' }, { mark: 'dash' }, { mark: 'dash' }, SOON] },
-  { label: '99.9% SLA',  values: [{ mark: 'dash' }, { mark: 'dash' }, { mark: 'dash' }, SOON] }
+  { label: 'Multi-env workflows', sub: 'stack promotion + vault copy', values: [{ mark: 'dash' }, { mark: 'dash' }, 'dev / staging / prod', 'dev / staging / prod'] },
+  { label: 'RBAC + audit', values: [{ mark: 'dash' }, { mark: 'dash' }, { mark: 'dash' }, { mark: 'check' }] },
+  { label: 'Vault entries', values: [{ mark: 'dash' }, '20', '200', UNLIMITED] },
+  { label: 'Vault envs',    values: [{ mark: 'dash' }, 'production only', 'multi-env', 'multi-env'] },
+  { label: 'Backups',       values: [{ mark: 'dash' }, '7-day · no restore', '30-day · 1-click restore', '90-day · self-serve restore'] },
+  { label: 'SSO / SAML', values: [{ mark: 'dash' }, { mark: 'dash' }, { mark: 'dash' }, { mark: 'check' }] },
+  { label: '99.9% SLA',  values: [{ mark: 'dash' }, { mark: 'dash' }, { mark: 'dash' }, { mark: 'check' }] }
 ]
 
 const FAQ: { q: string; a: string }[] = [

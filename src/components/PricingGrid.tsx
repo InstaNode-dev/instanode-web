@@ -55,8 +55,10 @@ interface TierDefinition {
   // user is already on Pro.
   upgradesTo?: TierKey
   highlight?: boolean
-  // Set when the tier is announced but not yet purchasable (today: Team).
-  // Renders a "coming soon" badge and disables the CTA.
+  // Set when the tier is announced but not yet purchasable. As of
+  // 2026-05-20, Team is launched — no current tier sets this, but
+  // the flag is preserved as the type-system safety net for any
+  // future "announced but unbuyable" rollout (early-access waitlists).
   comingSoon?: boolean
 }
 
@@ -166,14 +168,27 @@ export const PRICING_GRID_TIERS: TierDefinition[] = [
     upgradesTo: 'team',
   },
   {
-    // Team — coming soon. No price, no yearly, no feature list. The card
-    // header and "coming soon" badge are enough; we don't promise anything
-    // about Team until launch.
+    // Team — launched 2026-05-20 (DOC-REALITY-DELTA sweep). plans.yaml:375
+    // has team at $199/mo, $1990/yr, every limit -1 (unlimited).
+    // CTA goes via buildCtaLabel('team') → "Contact sales" until the
+    // assisted-Razorpay self-serve flow ships.
     key: 'team',
     label: 'Team',
-    monthly: { price: 'coming soon', sub: '' },
-    features: [],
-    comingSoon: true,
+    monthly: { price: '$199', sub: '/mo' },
+    yearly: {
+      price: '$165.83',
+      sub: '/mo billed yearly',
+      savings: '$1990/yr · save $398 (17%)',
+      yearlyTotal: '$1990/yr',
+    },
+    features: [
+      { text: 'unlimited Postgres · Redis · MongoDB · queues · storage' },
+      { text: 'unlimited deployments · 50 custom domains' },
+      { text: 'unlimited vault entries · multi-env' },
+      { text: '90-day backups · self-serve restore' },
+      { text: 'RBAC + audit log · SSO / SAML' },
+      { text: '99.9% SLA' },
+    ],
   },
 ]
 
