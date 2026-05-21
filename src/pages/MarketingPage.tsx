@@ -99,7 +99,10 @@ const SERVICES: Service[] = [
   { id: 'rd', name: 'Redis',          curl: 'POST /cache/new',   liveIn: '0.9s' },
   { id: 'mg', name: 'MongoDB',        curl: 'POST /nosql/new',   liveIn: '1.2s' },
   { id: 'qu', name: 'Queue (NATS)',   curl: 'POST /queue/new',   liveIn: '0.7s' },
-  { id: 'st', name: 'Storage (S3)',   curl: 'POST /storage/new', liveIn: '0.8s' },
+  // PB04 P2 (2026-05-21): label was 'Storage (S3)' which implied AWS;
+  // the live backend is DO Spaces (S3-compatible API, not AWS S3).
+  // Renamed to avoid the brand-tie-in confusion.
+  { id: 'st', name: 'Storage (S3-compatible)', curl: 'POST /storage/new', liveIn: '0.8s' },
   { id: 'wh', name: 'Webhook',        curl: 'POST /webhook/new', liveIn: '0.3s' },
   { id: 'dp', name: 'Deploy',         curl: 'POST /deploy/new',  liveIn: '<10s' },
 ]
