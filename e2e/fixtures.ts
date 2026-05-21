@@ -361,6 +361,25 @@ export async function installAPIFake(page: Page) {
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, keys: [] }) }),
   )
 
+  // Team members + invitations — BugBash T15-P1-1 (2026-05-20): the navigation
+  // sweep now includes `/app/team` because the route was orphaned from the
+  // sidebar prior to that fix. TeamPage fires these two calls on mount; mock
+  // them so the navigation spec doesn't 404 on the API surface.
+  await page.route('**/api/v1/team/members', (route: Route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ ok: true, members: [], member_limit: 5 }),
+    }),
+  )
+  await page.route('**/api/v1/team/invitations', (route: Route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ ok: true, invitations: [] }),
+    }),
+  )
+
   // PATs
   await page.route('**/api/v1/auth/api-keys', (route: Route) => {
     if (route.request().method() === 'GET') {

@@ -184,11 +184,18 @@ export function TeamPage() {
                       : 'linear-gradient(135deg, var(--violet), #6c45ce)'
                   }}
                 >
-                  {(m.display_name ?? m.email)[0].toUpperCase()}
+                  {/* BugBash T15-P1-2: `(m.display_name ?? m.email)[0]` crashed
+                      with TypeError when both display_name was null AND email
+                      was ''. `??` only guards null/undefined, so `''[0]` ===
+                      undefined and `.toUpperCase()` threw, taking the whole
+                      dashboard down via ErrorBoundary. Mirror UserMenu.tsx's
+                      defensive pattern: collapse the chain to the first
+                      truthy string, fall back to '?', then index. */}
+                  {avatarInitial(m.display_name, m.email)}
                 </div>
                 <div>
-                  <div className="name">{m.display_name ?? m.email.split('@')[0]}</div>
-                  <div className="email">{m.email}</div>
+                  <div className="name">{memberDisplayName(m.display_name, m.email)}</div>
+                  <div className="email">{m.email ?? ''}</div>
                 </div>
                 <RolePill role={m.role} />
               </div>
@@ -231,6 +238,51 @@ export function TeamPage() {
       </div>
     </>
   )
+}
+
+/**
+ * avatarInitial — defensive single-character avatar label for a team member.
+ *
+ * BugBash T15-P1-2 (2026-05-20): the old `(m.display_name ?? m.email)[0].toUpperCase()`
+ * expression took the whole dashboard down via ErrorBoundary the moment a
+ * backend row arrived with `display_name: null, email: ''`. `??` only catches
+ * null/undefined; an empty-string `email` survives the coalesce and then
+ * `''[0]` is `undefined`, so `.toUpperCase()` threw at render time.
+ *
+ * Rules:
+ *   - prefer `display_name` (trimmed) when it has at least one printable char
+ *   - else use `email` (trimmed) when it has at least one printable char
+ *   - else fall back to '?' — the same convention UserMenu.tsx uses
+ *
+ * Exported for the regression test that pins this defence in place; the test
+ * fails the day someone reintroduces the indexed-access footgun.
+ */
+export function avatarInitial(
+  displayName: string | null | undefined,
+  email: string | null | undefined,
+): string {
+  const dn = (displayName ?? '').trim()
+  if (dn.length > 0) return dn[0]!.toUpperCase()
+  const em = (email ?? '').trim()
+  if (em.length > 0) return em[0]!.toUpperCase()
+  return '?'
+}
+
+/**
+ * memberDisplayName — defensive display label for the row's primary text.
+ * Same fall-back chain as {@link avatarInitial}; renders the email local-part
+ * when display_name is missing, and a bare '—' when both are blank so we
+ * never render an empty cell that looks like a layout glitch.
+ */
+export function memberDisplayName(
+  displayName: string | null | undefined,
+  email: string | null | undefined,
+): string {
+  const dn = (displayName ?? '').trim()
+  if (dn.length > 0) return dn
+  const em = (email ?? '').trim()
+  if (em.length > 0) return em.split('@')[0] || em
+  return '—'
 }
 
 // minimal hex shading helper

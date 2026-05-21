@@ -13,13 +13,19 @@ test.describe('Navigation', () => {
     //
     // Tracks the live AppShell sidebar — Stacks was retired (b13b8ee:
     // "/app/stacks duplicate route + StacksPage.tsx deleted, same data as
-    // Deployments") and Team has no sidebar nav link in the user-facing
-    // sidebar (the route exists but is no longer linked from chrome).
+    // Deployments"). Team was orphaned from the sidebar between the route
+    // landing and 2026-05-20; BugBash T15-P1-1 restored it. The Team entry
+    // below now functions as the regression gate against re-orphaning.
     await page.goto('/app')
     const targets: { name: RegExp; pathFragment?: string }[] = [
       { name: /Resources/i, pathFragment: '/app/resources' },
       { name: /Deployments/i, pathFragment: '/app/deployments' },
       { name: /Vault/i, pathFragment: '/app/vault' },
+      // BugBash T15-P1-1 (2026-05-20): /app/team must be reachable from the
+      // sidebar — the previous regression was that the route rendered but
+      // no NavRow existed, so the entire invite/remove-teammates surface was
+      // URL-typing-only. Failing here means somebody removed the NavRow.
+      { name: /^Team$/i, pathFragment: '/app/team' },
       { name: /Billing/i, pathFragment: '/app/billing' },
       { name: /Settings/i, pathFragment: '/app/settings' },
       { name: /Overview/i, pathFragment: '/app' },

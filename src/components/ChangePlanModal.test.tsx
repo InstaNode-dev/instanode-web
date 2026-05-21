@@ -21,6 +21,7 @@ vi.mock('../api', async () => {
   return {
     ...actual,
     changePlan: vi.fn(),
+    createCheckout: vi.fn(),
   }
 })
 
@@ -166,19 +167,36 @@ describe('ChangePlanModal — confirm flow', () => {
     expect((api.changePlan as any).mock.calls[0]).toEqual(['pro', 'monthly'])
   })
 
-  it('forwards the chosen frequency when the user picks Annual', async () => {
-    ;(api.changePlan as any).mockResolvedValue({ ok: true, immediate: true })
+  // BugBash T9-P1-1 (2026-05-20): the modal used to call api.changePlan
+  // with frequency=yearly, but POST /api/v1/billing/change-plan ignores
+  // plan_frequency and Portal.ChangePlan only resolves monthly plan IDs —
+  // the user was silently billed monthly. The yearly branch now routes
+  // through api.createCheckout (the same path CheckoutPage uses) so the
+  // user gets a real annual Razorpay subscription.
+  it('routes Annual frequency through createCheckout (BugBash T9-P1-1)', async () => {
+    ;(api.createCheckout as any).mockResolvedValue({
+      ok: true,
+      short_url: 'https://rzp.io/i/annual-checkout',
+    })
     render(<ChangePlanModal currentTier="hobby" defaultTargetTier="pro" onClose={() => {}} />)
     fireEvent.click(screen.getByTestId('change-plan-frequency-yearly'))
     fireEvent.click(screen.getByTestId('change-plan-confirm'))
     await waitFor(() => {
-      expect((api.changePlan as any).mock.calls.length).toBe(1)
+      expect((api.createCheckout as any).mock.calls.length).toBe(1)
     })
-    expect((api.changePlan as any).mock.calls[0]).toEqual(['pro', 'yearly'])
+    // changePlan is NOT called on the yearly branch — that endpoint can't
+    // deliver an annual subscription.
+    expect((api.changePlan as any).mock.calls.length).toBe(0)
+    // createCheckout receives the target tier + 'yearly' so Razorpay opens
+    // the annual plan, not the monthly one.
+    expect((api.createCheckout as any).mock.calls[0]).toEqual(['pro', 'yearly'])
   })
 
-  it('honors defaultFrequency=yearly without an extra click', async () => {
-    ;(api.changePlan as any).mockResolvedValue({ ok: true, immediate: true })
+  it('honors defaultFrequency=yearly without an extra click (routes via createCheckout)', async () => {
+    ;(api.createCheckout as any).mockResolvedValue({
+      ok: true,
+      short_url: 'https://rzp.io/i/annual-checkout',
+    })
     render(
       <ChangePlanModal
         currentTier="hobby"
@@ -189,7 +207,21 @@ describe('ChangePlanModal — confirm flow', () => {
     )
     fireEvent.click(screen.getByTestId('change-plan-confirm'))
     await waitFor(() => {
-      expect((api.changePlan as any).mock.calls[0]).toEqual(['pro', 'yearly'])
+      expect((api.createCheckout as any).mock.calls[0]).toEqual(['pro', 'yearly'])
+    })
+    expect((api.changePlan as any).mock.calls.length).toBe(0)
+  })
+
+  it('navigates to the createCheckout short_url for an Annual upgrade', async () => {
+    ;(api.createCheckout as any).mockResolvedValue({
+      ok: true,
+      short_url: 'https://rzp.io/i/annual-checkout',
+    })
+    render(<ChangePlanModal currentTier="hobby" defaultTargetTier="pro" onClose={() => {}} />)
+    fireEvent.click(screen.getByTestId('change-plan-frequency-yearly'))
+    fireEvent.click(screen.getByTestId('change-plan-confirm'))
+    await waitFor(() => {
+      expect(hrefSetTo).toBe('https://rzp.io/i/annual-checkout')
     })
   })
 

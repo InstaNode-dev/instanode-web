@@ -133,6 +133,26 @@ export function ChangePlanModal({
     setError(null)
     setShowSupportFallback(false)
     try {
+      // BugBash T9-P1-1 (2026-05-20): the Annual radio used to silently
+      // bill the user monthly because `POST /api/v1/billing/change-plan`
+      // ignores `plan_frequency` and `Portal.ChangePlan` only resolves
+      // monthly plan IDs. The handler comment (api/index.ts:1917-1919) is
+      // explicit: "yearly changes still route through createCheckout per
+      // the inline comment on razorpayPlanIDs()." So for the yearly branch
+      // we now route through the same checkout flow CheckoutPage uses —
+      // the user gets a real annual Razorpay subscription, no silent
+      // contract lie. Razorpay handles the swap-from-monthly-to-annual
+      // proration on the hosted page. Monthly→monthly stays on the
+      // in-place change-plan endpoint (the immediate-swap path).
+      if (frequency === 'yearly') {
+        const r = await api.createCheckout(targetTier, 'yearly')
+        if (r.short_url) {
+          window.location.href = r.short_url
+          return
+        }
+        setError('Unexpected response from billing. Please try again.')
+        return
+      }
       const r = await api.changePlan(targetTier, frequency)
       if (r.short_url) {
         // Razorpay-hosted portal handoff. The page navigates away — no

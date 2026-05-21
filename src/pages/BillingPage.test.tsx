@@ -999,6 +999,13 @@ describe('BillingPage — Change plan button', () => {
     await waitForLoaded()
     const initialFetchCount = (api.fetchBilling as any).mock.calls.length
     fireEvent.click(screen.getByTestId('open-change-plan-modal'))
+    // BugBash T9-P1-1 (2026-05-20): the modal now routes yearly-frequency
+    // submits through createCheckout (the only path that can deliver an
+    // annual subscription) and only the monthly branch hits the immediate-
+    // swap changePlan endpoint. BillingPage defaults to Annual now, so for
+    // this immediate-change refetch assertion we must flip the modal's
+    // frequency to monthly before confirming.
+    fireEvent.click(screen.getByTestId('change-plan-frequency-monthly'))
     fireEvent.click(screen.getByTestId('change-plan-confirm'))
     await waitFor(() => {
       expect((api.fetchBilling as any).mock.calls.length).toBeGreaterThan(initialFetchCount)

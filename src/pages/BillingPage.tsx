@@ -7,6 +7,7 @@ import type { TierKey } from '../components/TierCard'
 import * as api from '../api'
 import type { BillingDetails, BillingUsage, ChangePlanTier, Invoice, PlanFrequency, Tier } from '../api'
 import { useDashboardCtx } from '../hooks/useDashboardCtx'
+import { formatInvoiceAmount, formatInvoiceDate } from '../lib/currency'
 
 // Tiers eligible for the in-dashboard Change-plan modal. Anonymous + free
 // users have no active subscription to swap, so the /api/v1/billing/change-
@@ -573,11 +574,21 @@ export function BillingPage() {
             <div key={i.id} className="invoice-row">
               <span className="id">{i.id}</span>
               <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11.5, color: 'var(--text-dim)' }}>
-                {/* Prefer a real billing window if a future API revision
-                    sends one; otherwise show the single charge date. */}
-                {i.period_start && i.period_end
-                  ? `${new Date(i.period_start).toLocaleDateString()} → ${new Date(i.period_end).toLocaleDateString()}`
-                  : new Date(i.issued_at).toLocaleDateString()}
+                {/* BugBash T15-P1-4 (2026-05-20): unguarded `new Date(...)`
+                    rendered the literal `Invalid Date` for any null/malformed
+                    `issued_at`. Use the defensive `formatInvoiceDate` helper
+                    so an em-dash shows up instead of a string that looks
+                    like a bug. Prefer the billing window when both ends are
+                    present and valid; otherwise fall back to the single
+                    charge date. */}
+                {(() => {
+                  const startStr = formatInvoiceDate(i.period_start)
+                  const endStr = formatInvoiceDate(i.period_end)
+                  if (i.period_start && i.period_end && startStr !== '—' && endStr !== '—') {
+                    return `${startStr} → ${endStr}`
+                  }
+                  return formatInvoiceDate(i.issued_at)
+                })()}
               </span>
               {/* The invoices endpoint doesn't carry a plan tier — render the
                   pill only when one is actually present, never fabricate. */}
@@ -589,7 +600,12 @@ export function BillingPage() {
                 {i.status}
               </span>
               <span className="amt">
-                ${(i.amount_cents / 100).toFixed(2)}
+                {/* BugBash T15-P1-4 (2026-05-20): unguarded
+                    `(i.amount_cents/100).toFixed(2)` rendered `$NaN` for any
+                    null/undefined/non-numeric amount. A money UI saying `$NaN`
+                    destroys trust on contact. `formatInvoiceAmount` falls
+                    back to em-dash. */}
+                {formatInvoiceAmount(i.amount_cents)}
                 {/* Only render the pdf link when the API actually has one.
                     A live `href="#"` is a dead-end click. (§10.8.) */}
                 {i.pdf_url && (

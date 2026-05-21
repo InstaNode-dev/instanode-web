@@ -150,3 +150,36 @@ export function writeStoredCurrency(c: CurrencyCode): void {
     // Ignore — see readStoredCurrency.
   }
 }
+
+/**
+ * formatInvoiceAmount — defensive `$NN.NN` renderer for invoice rows.
+ *
+ * BugBash T15-P1-4 (2026-05-20): BillingPage.tsx invoice grid rendered
+ * `${(i.amount_cents/100).toFixed(2)}` unguarded. A partial / legacy invoice
+ * row with `amount_cents = null | undefined | string` produced `$NaN` — a
+ * money-UI showing `$NaN` destroys trust on contact. Centralise the guard
+ * here so every invoice-amount call site uses the same fallback.
+ *
+ * Returns `'—'` for any non-finite input. Matches the em-dash convention
+ * the existing formatINR / formatUSD use.
+ */
+export function formatInvoiceAmount(amountCents: number | null | undefined): string {
+  if (amountCents == null || !Number.isFinite(amountCents)) return '—'
+  return `$${(amountCents / 100).toFixed(2)}`
+}
+
+/**
+ * formatInvoiceDate — defensive `MM/DD/YYYY` renderer for invoice rows.
+ *
+ * BugBash T15-P1-4 (2026-05-20): BillingPage.tsx rendered
+ * `new Date(i.issued_at).toLocaleDateString()` unguarded. A row with a
+ * missing/empty/malformed timestamp produced the user-visible string
+ * `'Invalid Date'`. Mirror AdminCustomersPage's `formatDate`: parse first,
+ * `isNaN(d.getTime())` check, em-dash on failure.
+ */
+export function formatInvoiceDate(iso: string | null | undefined): string {
+  if (iso == null || iso === '') return '—'
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return '—'
+  return d.toLocaleDateString()
+}
