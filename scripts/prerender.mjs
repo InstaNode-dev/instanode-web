@@ -240,7 +240,18 @@ function metaForRoute(route) {
  * Twitter values. Each tag is matched by a stable signature and swapped in
  * place, so the rest of <head> (favicons, fonts, theme-color) is untouched. */
 function rewriteHead(template, route, meta) {
-  const canonical = route === '/' ? `${SITE_ORIGIN}/` : `${SITE_ORIGIN}${route}`
+  // B3-P1-10 (BugBash 2026-05-20): normalise canonical to the
+  // trailing-slash variant. Previously /pricing canonicalized to
+  // https://instanode.dev/pricing (no trailing slash) but every other
+  // production surface (GH Pages serving, sitemap.xml, nav anchors)
+  // ends up 301-redirecting that to /pricing/. The 301 hop confused
+  // crawlers — Google occasionally indexed both variants and split
+  // the link signal in half. Always emit the trailing-slash form
+  // (mirroring routeToFile which writes dist/<path>/index.html) so the
+  // canonical, the rendered file path, and the served URL all agree.
+  const canonical = route === '/'
+    ? `${SITE_ORIGIN}/`
+    : `${SITE_ORIGIN}${route}/`
   const title = escapeHtmlAttr(meta.title)
   const desc = escapeHtmlAttr(meta.description)
   let html = template
@@ -503,6 +514,18 @@ async function main() {
   await writeSitemap(routes)
   console.log(`prerender: wrote sitemap.xml (${routes.length + 1} urls)`)
 
+  // Step 7.6: B3-P1-7 (BugBash 2026-05-20) — emit an Atom feed for
+  // /blog and a separate Atom feed for /changelog. Both surfaces have
+  // a visible "Subscribe" CTA but no machine-readable feed before this:
+  // /rss.xml, /feed.xml, /blog/rss.xml, /changelog/rss.xml all 404'd.
+  // Atom (RFC 4287) over RSS 2.0 because the spec is stricter — most
+  // feed readers prefer it for new sites and it avoids the well-known
+  // RSS pubDate ambiguity. /blog/rss.xml + /changelog/rss.xml are the
+  // canonical URLs (mirroring the GitHub /releases.atom convention).
+  await writeBlogAtomFeed()
+  await writeChangelogAtomFeed()
+  console.log('prerender: wrote /blog/rss.xml + /changelog/rss.xml Atom feeds')
+
   // Step 8: clean up the SSR bundle — it's only needed during this script.
   // Leaving it in dist-ssr would inflate the GH Pages upload by ~400 KB.
   await rm(SSR_DIST, { recursive: true, force: true })
@@ -611,10 +634,13 @@ async function writeSitemap(routes) {
     return { priority: '0.7', changefreq: 'weekly' }
   }
 
-  // Every pre-rendered route + the llms.txt manifest.
+  // Every pre-rendered route + the llms.txt manifest. B3-P1-10 (BugBash
+  // 2026-05-20): emit the trailing-slash variant so the sitemap matches
+  // the canonical link emitted in rewriteHead (no 301 hop between
+  // sitemap, canonical, and the actual served file).
   const entries = [
     ...routes.map((route) => ({
-      loc: route === '/' ? `${SITE_ORIGIN}/` : `${SITE_ORIGIN}${route}`,
+      loc: route === '/' ? `${SITE_ORIGIN}/` : `${SITE_ORIGIN}${route}/`,
       ...hints(route),
     })),
     { loc: `${SITE_ORIGIN}/llms.txt`, priority: '0.6', changefreq: 'monthly' },
@@ -639,6 +665,175 @@ async function writeSitemap(routes) {
     `</urlset>\n`
 
   await writeFile(resolve(DIST, 'sitemap.xml'), xml, 'utf-8')
+}
+
+/* writeBlogAtomFeed — emit dist/blog/rss.xml as an Atom 1.0 feed listing
+ * every post from .content/blog/<slug>.md (frontmatter title + date +
+ * author + excerpt). Sorted newest-first. The URL is /blog/rss.xml
+ * (matching the "rss.xml" filename convention used by every major blog
+ * platform) even though the payload is Atom — feed readers sniff the
+ * format from the response body. Self-link points at the canonical
+ * /blog/rss.xml so reader software can find updates. */
+async function writeBlogAtomFeed() {
+  const blogDir = resolve(ROOT, '.content/blog')
+  if (!existsSync(blogDir)) return
+  const files = readdirSync(blogDir).filter((f) => f.endsWith('.md'))
+  if (files.length === 0) return
+
+  const posts = []
+  for (const f of files) {
+    const src = await readFile(resolve(blogDir, f), 'utf-8')
+    const meta = parseFrontmatter(src)
+    if (!meta.title || !meta.date) continue
+    posts.push({
+      slug: f.replace(/\.md$/, ''),
+      title: meta.title,
+      date: meta.date,
+      author: meta.author || 'instanode.dev',
+      excerpt: meta.excerpt || '',
+    })
+  }
+  posts.sort((a, b) => b.date.localeCompare(a.date))
+
+  const updated = posts[0]?.date
+    ? new Date(`${posts[0].date}T00:00:00Z`).toISOString()
+    : new Date().toISOString()
+
+  const entries = posts.map((p) => {
+    const url = `${SITE_ORIGIN}/blog/${p.slug}`
+    const ts = new Date(`${p.date}T00:00:00Z`).toISOString()
+    return (
+      `  <entry>\n` +
+      `    <id>${url}</id>\n` +
+      `    <title type="text">${escapeXmlText(p.title)}</title>\n` +
+      `    <link href="${url}" />\n` +
+      `    <updated>${ts}</updated>\n` +
+      `    <published>${ts}</published>\n` +
+      `    <author><name>${escapeXmlText(p.author)}</name></author>\n` +
+      `    <summary type="text">${escapeXmlText(p.excerpt)}</summary>\n` +
+      `  </entry>`
+    )
+  }).join('\n')
+
+  const xml =
+    `<?xml version="1.0" encoding="UTF-8"?>\n` +
+    `<feed xmlns="http://www.w3.org/2005/Atom">\n` +
+    `  <id>${SITE_ORIGIN}/blog/</id>\n` +
+    `  <title>instanode blog</title>\n` +
+    `  <subtitle>Build notes, retrospectives, and engineering writing.</subtitle>\n` +
+    `  <link rel="self" href="${SITE_ORIGIN}/blog/rss.xml" />\n` +
+    `  <link rel="alternate" type="text/html" href="${SITE_ORIGIN}/blog" />\n` +
+    `  <updated>${updated}</updated>\n` +
+    `  <author><name>instanode.dev</name></author>\n` +
+    `${entries}\n` +
+    `</feed>\n`
+
+  const outPath = resolve(DIST, 'blog', 'rss.xml')
+  await mkdir(dirname(outPath), { recursive: true })
+  await writeFile(outPath, xml, 'utf-8')
+}
+
+/* writeChangelogAtomFeed — emit /changelog/rss.xml from the
+ * hardcoded ChangelogPage entries. Source duplicates the array
+ * inlined in src/pages/ChangelogPage.tsx because the page renders in
+ * the browser and prerender runs in Node — no shared loader yet.
+ * If you add an entry to ChangelogPage.tsx, mirror it here. The
+ * coupling is documented in CLAUDE.md (sister to plans.yaml). */
+const CHANGELOG_ENTRIES = [
+  {
+    date: '2026-05-18',
+    title: 'Marketing + dashboard hardening pass',
+    summary:
+      'Pricing grid corrected to four tier columns, mobile nav restored, per-page Helmet meta + canonical, sitemap.xml at build time, claim flow + billing checkout fixes.',
+  },
+  {
+    date: '2026-05-17',
+    title: 'Bug-hunt remediation — P0/P1 fixes',
+    summary:
+      'Hardened POST /claim against account-takeover, large-tarball ReadAll, vault:// redeploy re-resolve, NetworkPolicy egress, api+worker+provisioner auto-deploy.',
+  },
+  {
+    date: '2026-05-16',
+    title: 'Tier enforcement + billing resilience',
+    summary:
+      'Secret-bearing env values redacted, storage-quota revoke + auto-unsuspend, deploy/stack tier elevation, 15-minute Razorpay reconciler, dedicated Redis maxmemory cap.',
+  },
+  {
+    date: '2026-05-15',
+    title: 'Pro storage bump + annual pricing',
+    summary:
+      'Pro raised to 10 GB Postgres / 512 MB Redis / 5 GB Mongo. Annual billing for Hobby, Hobby Plus, Pro, Team. Free + Hobby Plus + Growth tiers reconciled across surfaces. Default env now development.',
+  },
+  {
+    date: '2026-05-14',
+    title: 'Trust + marketing accuracy pass (W12)',
+    summary:
+      'DPA + trust-residency align on SCCs Module Two. Subprocessor list expanded. Step-02 encryption claim narrowed. /changelog live as a real route. llms.txt calls out DO Spaces.',
+  },
+  {
+    date: '2026-05-13',
+    title: 'Hobby Plus tier + W11 dashboard honesty pass',
+    summary:
+      'Hobby Plus tier ($19/mo) shipped as triple-tier-pricing decoy. Agent error envelope standardised. security.md + DPA + subprocessor list at /docs/public/*. Per-tenant MinIO IAM.',
+  },
+  {
+    date: '2026-05-12',
+    title: 'DO Spaces production cutover + deploy wedge live',
+    summary:
+      'Object storage cut from in-cluster MinIO to DO Spaces. POST /deploy/new end-to-end. Idempotency-Key replay header. dashboard-api retired — agent API serves dashboard directly.',
+  },
+]
+async function writeChangelogAtomFeed() {
+  const sorted = [...CHANGELOG_ENTRIES].sort((a, b) => b.date.localeCompare(a.date))
+  const updated = sorted[0]?.date
+    ? new Date(`${sorted[0].date}T00:00:00Z`).toISOString()
+    : new Date().toISOString()
+
+  const entries = sorted.map((e) => {
+    // Entry IDs use a tag: URI to give every entry a stable opaque
+    // identifier independent of URL (we don't have per-entry permalinks
+    // on the changelog page yet — they're all on /changelog).
+    const id = `tag:instanode.dev,${e.date}:changelog-${e.date.replace(/-/g, '')}`
+    const ts = new Date(`${e.date}T00:00:00Z`).toISOString()
+    return (
+      `  <entry>\n` +
+      `    <id>${id}</id>\n` +
+      `    <title type="text">${escapeXmlText(e.title)}</title>\n` +
+      `    <link href="${SITE_ORIGIN}/changelog#${e.date}" />\n` +
+      `    <updated>${ts}</updated>\n` +
+      `    <published>${ts}</published>\n` +
+      `    <summary type="text">${escapeXmlText(e.summary)}</summary>\n` +
+      `  </entry>`
+    )
+  }).join('\n')
+
+  const xml =
+    `<?xml version="1.0" encoding="UTF-8"?>\n` +
+    `<feed xmlns="http://www.w3.org/2005/Atom">\n` +
+    `  <id>${SITE_ORIGIN}/changelog/</id>\n` +
+    `  <title>instanode changelog</title>\n` +
+    `  <subtitle>What changed on instanode — subprocessor adds, material posture changes.</subtitle>\n` +
+    `  <link rel="self" href="${SITE_ORIGIN}/changelog/rss.xml" />\n` +
+    `  <link rel="alternate" type="text/html" href="${SITE_ORIGIN}/changelog" />\n` +
+    `  <updated>${updated}</updated>\n` +
+    `  <author><name>instanode.dev</name></author>\n` +
+    `${entries}\n` +
+    `</feed>\n`
+
+  const outPath = resolve(DIST, 'changelog', 'rss.xml')
+  await mkdir(dirname(outPath), { recursive: true })
+  await writeFile(outPath, xml, 'utf-8')
+}
+
+/* escapeXmlText — minimal XML-character-data escape (NOT attribute
+ * escape — that's escapeHtmlAttr above). Atom feed bodies use it for
+ * <title>, <summary>, <name> text payloads where authors may legitimately
+ * include & < >. */
+function escapeXmlText(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
 }
 
 /* writeAggregate — bundle every .md mirror into one llms-full.txt at
