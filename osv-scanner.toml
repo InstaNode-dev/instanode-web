@@ -1,0 +1,16 @@
+# OSV-Scanner config
+#
+# vite + esbuild CVEs below are dev-server-only and CANNOT reach prod
+# users because instanode-web ships a static GitHub Pages site.
+# The prod artifact is HTML/CSS/JS — no Node runtime, no dev server.
+#
+# These suppressions will be removed when vite is bumped to v7+
+# (a separate PR — major-version breaking change).
+
+[[IgnoredVulns]]
+id = "GHSA-4w7w-66w2-5vf9"
+reason = "Dev-only (vite dev-server path traversal in .map handling). Prod ships as static HTML/CSS/JS to GitHub Pages — no Node runtime, no dev server in the deployed artifact. Will lift when vite is bumped to v7 (separate breaking-change PR)."
+
+[[IgnoredVulns]]
+id = "GHSA-67mh-4wv8-2f99"
+reason = "Dev-only (esbuild dev-server CORS issue, pinned by vite ^5.x). Same rationale as the vite suppression above — no prod exposure. Will lift when vite v7 bump removes the esbuild^0.21 pin."
