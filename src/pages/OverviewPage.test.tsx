@@ -368,6 +368,68 @@ describe('OverviewPage — Recently active', () => {
       expect(link.getAttribute('href')).toBe('/app/resources/res_a')
     })
   })
+
+  // T15 P2-1 regression guard: the "resources" stat tile MUST count only
+  // resources in the current env. The previous bug had the tile reading
+  // `resources.length` (all envs) while the sidebar badge used the
+  // env-scoped `ctx.counts.resources` from refreshCounts — so users saw
+  // "8" on the tile and "5" in the rail and couldn't tell which was real.
+  // The fix derives `envScopedCount` client-side from the same fetched
+  // resource list, applying the same `r.env ?? 'production' === ctx.env`
+  // filter the sidebar uses.
+  it('resources stat tile counts only resources in the current env (matches sidebar)', async () => {
+    const now = new Date().toISOString()
+    ;(api.listResources as any).mockResolvedValueOnce({
+      ok: true,
+      total: 3,
+      items: [
+        {
+          id: 'r_prod_1', token: 'r_prod_1', resource_type: 'postgres',
+          tier: 'pro', status: 'active', name: 'prod-db',
+          env: 'production', storage_bytes: 1_000_000,
+          storage_limit_bytes: 500_000_000, storage_exceeded: false,
+          connections_in_use: 1, connections_limit: 5,
+          expires_at: null, created_at: now,
+        },
+        {
+          id: 'r_prod_2', token: 'r_prod_2', resource_type: 'redis',
+          tier: 'pro', status: 'active', name: 'prod-cache',
+          env: 'production', storage_bytes: 1_000_000,
+          storage_limit_bytes: 500_000_000, storage_exceeded: false,
+          connections_in_use: 0, connections_limit: 5,
+          expires_at: null, created_at: now,
+        },
+        {
+          id: 'r_staging', token: 'r_staging', resource_type: 'postgres',
+          tier: 'pro', status: 'active', name: 'staging-db',
+          // env=staging — must NOT count when the ambient env is production.
+          env: 'staging', storage_bytes: 1_000_000,
+          storage_limit_bytes: 500_000_000, storage_exceeded: false,
+          connections_in_use: 0, connections_limit: 5,
+          expires_at: null, created_at: now,
+        },
+      ],
+    })
+    ;(api.fetchActivity as any).mockResolvedValueOnce({ ok: true, items: [] })
+    const { container } = render(withRouter(<OverviewPage />))
+    // Wait for the loading "—" placeholder to flip to a real number on
+    // the resources tile — that's the post-fetch state we care about.
+    // listDeployments isn't mocked at module scope so it rejects; the
+    // OverviewPage's `.catch(() => ({items:[],total:0}))` swallows the
+    // failure, but the Promise.all still resolves only after the catch
+    // runs. Give it a longer waitFor so the second microtask lands.
+    await waitFor(
+      () => {
+        const resourcesTile = container.querySelectorAll('.stat')[0] as HTMLElement
+        // Expect the env-scoped count "2", NOT the all-envs "3".
+        expect(resourcesTile.textContent).toMatch(/\b2\b/)
+      },
+      { timeout: 3000 },
+    )
+    const resourcesTile = container.querySelectorAll('.stat')[0] as HTMLElement
+    expect(resourcesTile.textContent).toContain('resources')
+    expect(resourcesTile.textContent).not.toMatch(/\b3\b/)
+  })
 })
 
 // ─── Stat tiles must NOT show fake sparkline data ─────────────────────────

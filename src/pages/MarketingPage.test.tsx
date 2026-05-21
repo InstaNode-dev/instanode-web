@@ -59,3 +59,61 @@ describe('MarketingPage — legal footer links (W12 H15)', () => {
     expect(a!.getAttribute('href')).toBe('https://instanode.dev/llms.txt')
   })
 })
+
+// ─── T18 P1-2 / P1-4 / P1-6 regression guards ──────────────────────────────
+//
+// These pin the post-bug-bash invariants on the homepage 'For agents' nav
+// link and the page's own claim copy. The nav-drift guard (T18 P1-1) is
+// covered by sibling PR #107's MarketingNav shared module, so this PR
+// sticks to the residual fixes #107 did not address.
+describe('MarketingPage — homepage nav drift (T18 P1-2)', () => {
+  it("homepage nav 'For agents' link points at /for-agents (not '#for-agents')", () => {
+    const { container } = render(
+      <MemoryRouter initialEntries={['/']}>
+        <MarketingPage />
+      </MemoryRouter>,
+    )
+    // T18 P1-2: every 'For agents' anchor in the homepage nav routes to
+    // the dedicated page. (The page also still has an `id="for-agents"`
+    // section so direct hash-links continue to scroll; this test just
+    // pins that the nav label routes consistently.)
+    const anchors = Array.from(container.querySelectorAll('a')).filter(
+      (a) => (a.textContent ?? '').trim() === 'For agents',
+    )
+    expect(anchors.length).toBeGreaterThan(0)
+    for (const a of anchors) {
+      expect(a.getAttribute('href')).toBe('/for-agents')
+    }
+  })
+})
+
+describe('MarketingPage — claim consistency (T18 P1-4 / P1-6)', () => {
+  it("'Seven services' headline matches the MCP tools card (both say seven, listing webhook)", () => {
+    const { container } = render(
+      <MemoryRouter initialEntries={['/']}>
+        <MarketingPage />
+      </MemoryRouter>,
+    )
+    const text = container.textContent ?? ''
+    // Headline says "Seven services. One bundle."
+    expect(text).toMatch(/Seven services\. One bundle\./)
+    // MCP tools card must NOT say "Six tools registered" (the dropped-
+    // webhook regression). It must say "Seven" and list webhook.
+    expect(text).not.toMatch(/Six tools registered/)
+    expect(text).toMatch(/Seven tools registered/)
+    expect(text).toMatch(/webhook/)
+  })
+
+  it("Deploy service card claims a build window consistent with content/llms.txt (~60s, not '<10s')", () => {
+    const { container } = render(
+      <MemoryRouter initialEntries={['/']}>
+        <MarketingPage />
+      </MemoryRouter>,
+    )
+    const text = container.textContent ?? ''
+    // The previous '<10s' claim contradicted content/llms.txt's ~30–90s
+    // kaniko-build window. The honest number is ~60s.
+    expect(text).not.toMatch(/<10s/)
+    expect(text).toMatch(/~60s/)
+  })
+})

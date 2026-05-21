@@ -104,15 +104,31 @@ describe('DeploymentsPage — empty state', () => {
     expect(text).toMatch(/\/deploy\/new/)
   })
 
-  it('renders the same honest empty state when listDeployments rejects', async () => {
-    // The page swallows errors and falls back to the empty state — better
-    // than rendering a fabricated row. The contract test in index.test.ts
-    // asserts the API helper *does* propagate so a future surface could
-    // render a real error banner; this surface chooses empty for now.
+  it('surfaces a real error banner (not "No deployments yet") when listDeployments rejects', async () => {
+    // T15 P2-7 fix: a 429 or 5xx must NOT collapse to "No deployments
+    // yet" — that lies about platform state and looks like normal empty
+    // state. The page renders a dedicated error banner via retryHint and
+    // an honest empty list under it. Regression guard: catch any future
+    // refactor that re-swallows the error.
     mockListDeployments.mockRejectedValueOnce(new Error('network'))
     render(withRouter(<DeploymentsPage />))
-    const empty = await screen.findByTestId('deployments-empty')
-    expect(empty.textContent).toMatch(/No deployments yet/)
+    const banner = await screen.findByTestId('deployments-error')
+    expect(banner.textContent).toMatch(/Could not load deployments/)
+  })
+
+  it('renders a 429 rate-limit hint with the Retry-After seconds', async () => {
+    // Regression guard for T15 P2-7: DeploymentsPage now consumes
+    // retryHint just like TeamPage. A rejected fetch carrying status=429
+    // + retryAfter must render the user-friendly retry hint, not a raw
+    // error string.
+    const rateLimited: Error & { status?: number; retryAfter?: number } = new Error('rate limited')
+    rateLimited.status = 429
+    rateLimited.retryAfter = 30
+    mockListDeployments.mockRejectedValueOnce(rateLimited)
+    render(withRouter(<DeploymentsPage />))
+    const banner = await screen.findByTestId('deployments-error')
+    expect(banner.textContent).toMatch(/Too many requests/i)
+    expect(banner.textContent).toMatch(/30 seconds/i)
   })
 })
 
@@ -135,14 +151,22 @@ describe('DeploymentsPage — non-empty state', () => {
       expect(container.querySelector('[data-testid="deployments-empty"]')).toBeNull(),
     )
 
-    // Each row is a <Link to="/deployments/:app_id"> — we route by app_id
-    // (not the UUID `id`) because GET /api/v1/deployments/:id on the
-    // agent API resolves `:id` against the app_id column. Routing by
-    // UUID would 404.
-    const links = Array.from(container.querySelectorAll('a[href^="/deployments/"]'))
+    // Each row is a <Link to="/app/deployments/:app_id"> — we route by
+    // app_id (not the UUID `id`) because GET /api/v1/deployments/:id on
+    // the agent API resolves `:id` against the app_id column. Routing
+    // by UUID would 404. Linking to /app/deployments/* directly (rather
+    // than the unprefixed legacy path) avoids the
+    // LegacyDeploymentRedirect render→Navigate→render double-hop on
+    // every row click — regression guard for T15 P2-2.
+    const links = Array.from(container.querySelectorAll('a[href^="/app/deployments/"]'))
     expect(links.length).toBe(2)
-    expect(links.map((a) => a.getAttribute('href'))).toContain('/deployments/app-a')
-    expect(links.map((a) => a.getAttribute('href'))).toContain('/deployments/app-b')
+    expect(links.map((a) => a.getAttribute('href'))).toContain('/app/deployments/app-a')
+    expect(links.map((a) => a.getAttribute('href'))).toContain('/app/deployments/app-b')
+    // Negative assertion: no unprefixed /deployments/* links. The legacy
+    // unprefixed route exists for external bookmarks only; internal nav
+    // must skip the redirect.
+    const legacyLinks = Array.from(container.querySelectorAll('a[href^="/deployments/"]'))
+    expect(legacyLinks.length).toBe(0)
 
     // URL column renders the hostname (https:// stripped). Use textContent
     // on the full page rather than scoping to row — the row uses CSS grid
@@ -228,5 +252,24 @@ describe('DeploymentsPage — private deploy section, tier-gated', () => {
     fireEvent.click(toggle)
     expect(toggle.checked).toBe(false)
     expect(screen.queryByTestId('ip-allow-list')).toBeNull()
+  })
+
+  // T15 P2-3 regression guard: DeploymentsPage must read the
+  // private-deploy tier gate from team.tier, NOT user.tier. The team is
+  // the billing entity; reading from user.tier was a latent divergence
+  // that would silently break the gate the moment the API splits the
+  // two fields. Construct a `me` shape where team.tier='pro' but
+  // user.tier='hobby' — under the bug, the page would render the
+  // hobby upsell; under the fix it must render the pro configurator.
+  it('uses team.tier (not user.tier) for the private-deploy gate', async () => {
+    mockMe = {
+      user: { id: 'u', email: 'me@test', tier: 'hobby', team_id: 't', created_at: '' },
+      team: { id: 't', slug: 't', name: 't', owner_id: 'u', member_count: 1, tier: 'pro', created_at: '' },
+    }
+    render(withRouter(<DeploymentsPage />))
+    await waitFor(() => screen.getByTestId('private-deploy-section'))
+    // team.tier=pro → configurator renders, upsell does NOT.
+    expect(screen.getByTestId('private-deploy-configurator')).toBeTruthy()
+    expect(screen.queryByTestId('private-deploy-upsell')).toBeNull()
   })
 })

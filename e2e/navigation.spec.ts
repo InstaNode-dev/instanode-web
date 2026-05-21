@@ -40,4 +40,21 @@ test.describe('Navigation', () => {
       await expect(page.getByRole('heading', { level: 1 }).first()).toBeVisible()
     }
   })
+
+  // T15 P2-2 regression guard: clicking a resource row on /app/resources
+  // must land directly on /app/resources/<token> — no intermediate
+  // /resources/<token> hop through LegacyResourceRedirect. The previous
+  // implementation linked rows at the unprefixed legacy path, which
+  // resolved via <Navigate replace> → render→navigate→render, adding
+  // a wrong intermediate entry to the browser history.
+  test('resource row links go straight to /app/resources/:id (no legacy hop)', async ({ page }) => {
+    await page.goto('/app/resources')
+    // The first row's `<a class="res-name">` wraps the resource name +
+    // identifiers. Its href must already be the /app/-prefixed path.
+    const firstRow = page.getByRole('link').filter({ hasText: /flashcards-db/i }).first()
+    await expect(firstRow).toBeVisible()
+    const href = await firstRow.getAttribute('href')
+    expect(href).toMatch(/^\/app\/resources\//)
+    expect(href).not.toMatch(/^\/resources\//)
+  })
 })

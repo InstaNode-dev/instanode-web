@@ -230,7 +230,10 @@ export function TeamPage() {
             <p style={{ fontSize: 12.5, color: 'var(--text-dim)', lineHeight: 1.55, marginBottom: 12 }}>
               {tierLabel} · {seatLabel}. Higher seat limits ship with the Team tier.
             </p>
-            <Link to="/billing" className="btn btn-secondary btn-sm" style={{ display: 'inline-flex' }}>
+            {/* T15 P2-2: link directly to /app/billing — the unprefixed
+                /billing path goes through a Navigate-replace redirect,
+                producing a double-hop on every click. */}
+            <Link to="/app/billing" className="btn btn-secondary btn-sm" style={{ display: 'inline-flex' }}>
               View billing →
             </Link>
           </Card>
