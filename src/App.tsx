@@ -208,6 +208,36 @@ function LegacyDeploymentRedirect() {
   return <Navigate to={`/app/deployments/${id}`} replace />
 }
 
+// CliAuthRedirect — defensive fallback for the /cli-auth path.
+//
+// The canonical CLI device-flow URL the api emits today is
+// /login?cli_session=<id>. /cli-auth was never a real route on
+// instanode.dev — but it appears as a stale URL in:
+//   - cli/cmd/testapi_test.go (hermetic test mock — "?s=test")
+//   - any old terminal scrollback / chat transcript a user pastes
+//   - any external docs we missed
+// Until the test mock is rewritten AND every CLI binary in the wild
+// has rotated, /cli-auth must not 404. We normalize ?s=<id> and
+// ?cli_session=<id> to the canonical /login?cli_session=<id> path so
+// the user lands on the real login form with the session preserved.
+//
+// Note: NO query param → still redirect to /login. The LoginPage's
+// session_expired banner and OAuth start paths both work without a
+// cli_session, so this is safe.
+// Exported for unit testing in App.cli-auth.test.tsx — keeps the redirect
+// logic verifiable without mounting the full lazy-loaded route tree.
+export function CliAuthRedirect() {
+  if (typeof window === 'undefined') {
+    // SSR: emit a Navigate without a query string. The client will
+    // re-run and pick the query up from window.location.search.
+    return <Navigate to="/login" replace />
+  }
+  const params = new URLSearchParams(window.location.search)
+  const session = params.get('cli_session') || params.get('s') || ''
+  const dest = session ? `/login?cli_session=${encodeURIComponent(session)}` : '/login'
+  return <Navigate to={dest} replace />
+}
+
 // AppLoadingFallback — shown while a lazy-loaded /app/* chunk is in flight.
 // Tiny inline style so it renders even before the page's own CSS resolves.
 // In practice this fallback is on screen for ~50-150ms on a warm cache.
@@ -349,6 +379,13 @@ export function AppRoutes() {
         <Route path="/team" element={<Navigate to="/app/team" replace />} />
         <Route path="/billing" element={<Navigate to="/app/billing" replace />} />
         <Route path="/settings" element={<Navigate to="/app/settings" replace />} />
+        {/* /cli-auth — defensive redirect to the canonical /login?cli_session=<s>.
+            The api has always emitted /login?cli_session=...; /cli-auth was
+            never a real route. But it surfaces in the CLI test mock and in
+            any stale terminal scrollback / chat transcript a user pastes.
+            Without this route, /cli-auth fell through to the catch-all 404.
+            See CliAuthRedirect above for the param-preservation logic. */}
+        <Route path="/cli-auth" element={<CliAuthRedirect />} />
 
         {/* B1-P1 (2026-05-20): real 404 page replaces the silent
             redirect-to-homepage. The same NotFoundPage is also

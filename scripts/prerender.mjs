@@ -178,6 +178,14 @@ const ROUTE_META = {
     description:
       'Claim the anonymous resources your agent provisioned and convert them to a permanent team account.',
   },
+  // /cli-auth — defensive redirect to /login?cli_session=<s> (App.tsx
+  // CliAuthRedirect). Even though the visible time on this URL is a few
+  // ms before the Navigate runs, the SPA shell still needs a meaningful
+  // <title> so the tab strip doesn't briefly flash the homepage title.
+  '/cli-auth': {
+    title: 'Signing in CLI… · instanode',
+    description: 'Completing CLI device-flow sign-in for instanode.dev.',
+  },
   // /app is the dashboard SPA entry. Visitors who type instanode.dev/app
   // hit this shell before AuthGate runs; a meaningful title is friendlier
   // than the homepage title bleeding through.
@@ -416,7 +424,12 @@ async function main() {
   // /login in a new tab saw the wrong title, breaking WCAG 2.4.2 and
   // confusing tab-strip navigation. metaForRoute() returns sensible
   // titles for /login, /login/callback, and /claim from ROUTE_META.
-  const authShellRoutes = ['/login', '/login/callback', '/claim']
+  // /cli-auth — defensive redirect emitted by App.tsx's CliAuthRedirect.
+  // The api emits the canonical /login?cli_session=<id>, but /cli-auth
+  // appears in the CLI test mock and any stale terminal scrollback /
+  // chat transcript a user pastes. Without an entry under dist/cli-auth/,
+  // GH Pages returns its 404 shell and the React Navigate never runs.
+  const authShellRoutes = ['/login', '/login/callback', '/claim', '/cli-auth']
   for (const route of authShellRoutes) {
     const p = resolve(DIST, route.replace(/^\//, ''), 'index.html')
     await mkdir(dirname(p), { recursive: true })
