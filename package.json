@@ -15,8 +15,7 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
-    "deploy:pages": "npm run build && echo 'Built to dist/. dist/404.html is the SPA shell (written by prerender.mjs Step 4.7). Push to main to deploy.'",
-    "gate": "npm run build && npm test"
+    "deploy:pages": "npm run build && echo 'Built to dist/. dist/404.html is the SPA shell (written by prerender.mjs Step 4.7). Push to main to deploy.'"
   },
   "dependencies": {
     "@newrelic/browser-agent": "^1.314.0",
