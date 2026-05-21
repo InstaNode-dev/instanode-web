@@ -1,0 +1,32 @@
+name: size-limit
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  size:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # First install reports, doesn't block — main bundle currently exceeds
+    # the 350KB budget (~667KB) and the action's own npx-shell loses sight
+    # of the preset-app devDep. Once budget + invocation are tuned, flip
+    # this to required.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - uses: andresz1/size-limit-action@v1
+        continue-on-error: true
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          script: npm exec size-limit
