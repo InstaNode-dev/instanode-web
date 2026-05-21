@@ -8,6 +8,7 @@ import * as api from '../api'
 import type { BillingDetails, BillingUsage, ChangePlanTier, Invoice, PlanFrequency, Tier } from '../api'
 import { useDashboardCtx } from '../hooks/useDashboardCtx'
 import { formatInvoiceAmount, formatInvoiceDate } from '../lib/currency'
+import { isEmailVerifiedError, VerifyEmailBanner } from '../components/VerifyEmailBanner'
 
 // Tiers eligible for the in-dashboard Change-plan modal. Anonymous + free
 // users have no active subscription to swap, so the /api/v1/billing/change-
@@ -169,6 +170,10 @@ export function BillingPage() {
   const [billingLoading, setBillingLoading] = useState(true)
   const [checkoutErr, setCheckoutErr] = useState<string | null>(null)
   const [checkoutLoading, setCheckoutLoading] = useState(false)
+  // B6-P0 008 (BUGBASH 2026-05-20): when the api 403s for email_not_verified,
+  // we surface the VerifyEmailBanner inline next to the upgrade grid instead
+  // of just dropping the failure into the generic checkout error toast.
+  const [verifyEmailGate, setVerifyEmailGate] = useState(false)
 
   // Frequency state — default Annual. Read once on mount.
   const [frequency, setFrequencyState] = useState<PlanFrequency>(() => readStoredFrequency())
@@ -294,6 +299,7 @@ export function BillingPage() {
       return
     }
     setCheckoutErr(null)
+    setVerifyEmailGate(false)
     setCheckoutLoading(true)
     try {
       // Promo codes are intentionally NOT plumbed through the dashboard
@@ -309,7 +315,13 @@ export function BillingPage() {
       }
       setCheckoutErr('checkout returned no url')
     } catch (e: any) {
-      setCheckoutErr(e?.message ?? 'checkout failed')
+      if (isEmailVerifiedError(e)) {
+        // B6-P0 008: don't render the generic toast — show the recoverable
+        // "Verify your email" banner with a resend-magic-link button.
+        setVerifyEmailGate(true)
+      } else {
+        setCheckoutErr(e?.message ?? 'checkout failed')
+      }
     } finally {
       setCheckoutLoading(false)
     }
@@ -415,6 +427,9 @@ export function BillingPage() {
           >
             {checkoutErr}
           </div>
+        )}
+        {verifyEmailGate && (
+          <VerifyEmailBanner email={me?.user?.email} />
         )}
         <div style={{ marginTop: 10, display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
           <a

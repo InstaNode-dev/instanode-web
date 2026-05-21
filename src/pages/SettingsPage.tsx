@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from 'react'
+import { FormEvent, useEffect, useRef, useState } from 'react'
 import { PromptCard, copyToClipboard } from '../components/Common'
 import * as api from '../api'
 import type { APIKey, APIKeyCreated, TeamSettings } from '../api'
@@ -69,19 +69,7 @@ export function SettingsPage() {
 
       {/* PAT mint result */}
       {created && (
-        <div role="alert" data-testid="pat-created" style={{ border: '1px solid var(--accent)', background: 'var(--accent-soft)', padding: 14, marginBottom: 20, borderRadius: 6 }}>
-          <div style={{ marginBottom: 8 }}>
-            <strong>Token created — save it now.</strong> This is the only time you'll see it.
-          </div>
-          <code data-testid="created-token-value" style={{ display: 'block', background: 'var(--ink)', padding: 10, borderRadius: 4, fontSize: 12, wordBreak: 'break-all', color: 'var(--accent)' }}>{created.key}</code>
-          <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-            <button className="btn btn-sm btn-secondary" onClick={async () => {
-              const ok = await copyToClipboard(created.key)
-              if (!ok) console.warn('[SettingsPage] copy failed — clipboard unavailable')
-            }}>copy</button>
-            <button className="btn btn-sm btn-ghost" onClick={() => setCreated(null)}>dismiss</button>
-          </div>
-        </div>
+        <PatCreatedBanner token={created.key} onDismiss={() => setCreated(null)} />
       )}
 
       <div className="card" style={{ padding: 0 }}>
@@ -389,14 +377,51 @@ function fmtRel(iso: string) {
 // ttl_policy?" knob. Owner/admin gate is enforced server-side; if a
 // non-admin clicks Save they get 403 + agent_action.
 function DeployTtlPolicyCard() {
+  const ctx = useDashboardCtx()
   const [settings, setSettings] = useState<TeamSettings | null>(null)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [ok, setOk] = useState(false)
+  // B8-P1 F5 (BUGBASH 2026-05-20): hide the card for non-admin team members.
+  // The api enforces owner/admin via PATCH /api/v1/team/settings (403 +
+  // agent_action), but rendering a card a developer/viewer can't save into
+  // is confusing UX — the Save button "looks" available, only to 403 on
+  // click. /auth/me doesn't carry the caller's role; derive it from
+  // listMembers() (RBAC source of truth). Default to hidden until we know,
+  // so a flicker can't reveal the card to a viewer mid-fetch.
+  const [canEdit, setCanEdit] = useState<boolean | null>(null)
+  const meUserId = ctx.me?.user?.id
 
   useEffect(() => {
     let cancelled = false
+    if (!meUserId) {
+      // No /auth/me yet — leave canEdit unresolved.
+      return
+    }
+    api
+      .listMembers()
+      .then((r) => {
+        if (cancelled) return
+        const self = r.members.find((m) => (m as any).user_id === meUserId || m.id === meUserId)
+        const role = self?.role
+        setCanEdit(role === 'owner' || role === 'admin')
+      })
+      .catch(() => {
+        if (cancelled) return
+        // If we can't determine the role, fail closed — hide the card.
+        // Mistakenly hiding it for an admin is recoverable (reload);
+        // mistakenly showing it to a viewer leaks "is this even editable?".
+        setCanEdit(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [meUserId])
+
+  useEffect(() => {
+    let cancelled = false
+    if (canEdit !== true) return
     api
       .getTeamSettings()
       .then((r) => {
@@ -414,7 +439,11 @@ function DeployTtlPolicyCard() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [canEdit])
+
+  // B8-P1 F5: render nothing for non-admins. Server still enforces, this
+  // is purely a UX cleanup.
+  if (canEdit !== true) return null
 
   const save = async (policy: 'auto_24h' | 'permanent') => {
     setBusy(true)
@@ -479,3 +508,128 @@ function DeployTtlPolicyCard() {
   )
 }
 
+
+// PatCreatedBanner — B8-P1 F21 (BUGBASH 2026-05-20).
+//
+// The original implementation called copyToClipboard(token) and silently
+// swallowed failures into a console.warn(). On insecure contexts (any
+// non-https origin reachable to a dev), browsers reject
+// navigator.clipboard.writeText with a NotAllowedError, the
+// `document.execCommand('copy')` fallback also fails in modern Chrome
+// (deprecated), and the user sees a button click that "succeeded" with
+// nothing on the clipboard — a one-time-shown PAT lost forever.
+//
+// Fix surfaces three guarantees:
+//   1. Visible status — failure renders a red alert with explicit copy
+//      instructions, not a buried console.warn.
+//   2. Selectable token — the token is shown in a textarea pre-focused
+//      and select-all'd on copy failure so the user can Cmd/Ctrl+C the
+//      same way they'd copy any other text.
+//   3. Auto-select fallback — even on success, the textarea is rendered
+//      so the user has a manual escape hatch if the clipboard read
+//      doesn't survive the next paste (extensions, password managers).
+function PatCreatedBanner({ token, onDismiss }: { token: string; onDismiss: () => void }) {
+  const [status, setStatus] = useState<'idle' | 'copied' | 'failed'>('idle')
+  const tokenRef = useRef<HTMLTextAreaElement | null>(null)
+
+  async function handleCopy() {
+    const ok = await copyToClipboard(token)
+    if (ok) {
+      setStatus('copied')
+      window.setTimeout(() => setStatus('idle'), 1500)
+      return
+    }
+    // Copy failed (insecure context, blocked permission, or execCommand
+    // refused). Surface a loud error AND focus+select the textarea so
+    // the user can copy with the keyboard.
+    setStatus('failed')
+    const ta = tokenRef.current
+    if (ta) {
+      ta.focus()
+      ta.select()
+    }
+  }
+
+  return (
+    <div
+      role="alert"
+      data-testid="pat-created"
+      style={{
+        border: '1px solid var(--accent)',
+        background: 'var(--accent-soft)',
+        padding: 14,
+        marginBottom: 20,
+        borderRadius: 6,
+      }}
+    >
+      <div style={{ marginBottom: 8 }}>
+        <strong>Token created — save it now.</strong> This is the only time you'll see it.
+      </div>
+      {/* The token lives in a textarea so it's natively selectable and
+          can be select()ed via the ref when the clipboard API refuses.
+          readOnly so it can't be edited; wrapped so wordBreak still
+          shows the full value. */}
+      <textarea
+        ref={tokenRef}
+        readOnly
+        data-testid="created-token-value"
+        value={token}
+        onClick={(e) => (e.target as HTMLTextAreaElement).select()}
+        style={{
+          display: 'block',
+          width: '100%',
+          minHeight: 60,
+          resize: 'none',
+          background: 'var(--ink)',
+          padding: 10,
+          borderRadius: 4,
+          border: 'none',
+          fontFamily: 'var(--font-mono)',
+          fontSize: 12,
+          wordBreak: 'break-all',
+          color: 'var(--accent)',
+          boxSizing: 'border-box',
+        }}
+      />
+      <div style={{ display: 'flex', gap: 8, marginTop: 10, alignItems: 'center' }}>
+        <button
+          className="btn btn-sm btn-secondary"
+          data-testid="pat-copy-button"
+          onClick={handleCopy}
+        >
+          copy
+        </button>
+        <button className="btn btn-sm btn-ghost" onClick={onDismiss}>
+          dismiss
+        </button>
+        {status === 'copied' && (
+          <span
+            data-testid="pat-copy-success"
+            style={{ fontSize: 11.5, color: 'var(--accent, #00e48e)' }}
+          >
+            copied
+          </span>
+        )}
+      </div>
+      {status === 'failed' && (
+        <div
+          role="alert"
+          data-testid="pat-copy-failed"
+          style={{
+            marginTop: 10,
+            padding: '8px 10px',
+            background: 'var(--rose-soft, rgba(255, 90, 110, 0.12))',
+            border: '1px solid var(--rose, #ff5a6e)',
+            color: 'var(--rose, #ff5a6e)',
+            fontSize: 12,
+            borderRadius: 4,
+          }}
+        >
+          <strong>Couldn't reach the clipboard</strong> — this happens on insecure
+          (non-HTTPS) origins and in some browser permission states. The token above is
+          selected; press <kbd>Cmd</kbd>+<kbd>C</kbd> (or <kbd>Ctrl</kbd>+<kbd>C</kbd>) to copy it.
+        </div>
+      )}
+    </div>
+  )
+}
