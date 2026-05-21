@@ -53,7 +53,7 @@ describe('PublicShell — mobile hamburger nav (B2-P2-1)', () => {
     const btn = getHamburger()
     fireEvent.click(btn)
     const panel = document.getElementById('public-mobile-menu')!
-    const labels = ['Pricing', 'Use cases', 'For agents', 'Docs', 'Blog', 'Status']
+    const labels = ['Pricing', 'Use cases', 'For agents', 'Docs', 'Blog', 'Changelog']
     for (const l of labels) {
       expect(panel.textContent ?? '').toContain(l)
     }
