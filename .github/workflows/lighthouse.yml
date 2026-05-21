@@ -1,0 +1,61 @@
+name: Lighthouse
+
+# Lighthouse CI gate (Wave 3 polish, 2026-05-21).
+#
+# Builds the static site, serves it locally, runs Lighthouse against the
+# prerendered HTML for each of the five most-trafficked public routes,
+# and fails the PR when any category drops below the configured floor:
+#
+#   perf >= 90, a11y >= 95, best-practices >= 95, seo >= 95
+#
+# A green Lighthouse score on the homepage is meaningless if the SSR
+# splice broke /docs or /pricing — every prerendered surface is checked.
+# Mobile emulation (the default) is the harshest test, so we use it.
+#
+# The fail-on-budget config in .lighthouserc.json holds the thresholds.
+# Update both this workflow and that file together when bumping a floor.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lighthouse:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - run: npm ci
+
+      - name: Build static site
+        run: npm run build
+        env:
+          # Do not pull NR keys in PRs — fork forks would 401 the secrets
+          # lookup. The browser agent fails open when the keys are unset.
+          VITE_API_URL: https://api.instanode.dev
+
+      - name: Install Lighthouse CI
+        run: npm install -g @lhci/cli@0.14.x
+
+      - name: Run Lighthouse CI
+        run: lhci autorun
+        env:
+          # autorun reads `lhci` block in package.json or .lighthouserc.json;
+          # ours lives at .lighthouserc.json in the repo root.
+          LHCI_BUILD_CONTEXT__CURRENT_HASH: ${{ github.sha }}
+          LHCI_BUILD_CONTEXT__CURRENT_BRANCH: ${{ github.head_ref || github.ref_name }}
+
+      - name: Upload Lighthouse artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lighthouse-results
+          path: .lighthouseci/
+          retention-days: 30

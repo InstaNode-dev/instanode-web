@@ -245,17 +245,24 @@ export function PricingPage() {
                     <span className="pricing-tier-sub">{price.sub}</span>
                   </div>
                   {showYearly && t.yearly?.saveLabel && (
+                    /* BugBash B2-P2-5: green-on-near-transparent-green
+                       was failing 4.5:1 small-text AA. Bumped font-size
+                       from 10.5 → 11, weight to 500, and darkened the
+                       border + filled the background to push the ratio
+                       above 5:1 against #08080a (--ink) without changing
+                       the visual brand. */
                     <span
                       data-testid={`pricing-save-${t.key}`}
                       style={{
                         marginTop: 4,
-                        padding: '1px 6px',
+                        padding: '2px 8px',
                         borderRadius: 4,
                         fontFamily: 'var(--font-mono)',
-                        fontSize: 10.5,
+                        fontSize: 11,
+                        fontWeight: 500,
                         color: 'var(--accent)',
-                        border: '1px solid rgba(0,228,142,0.35)',
-                        background: 'rgba(0,228,142,0.07)',
+                        border: '1px solid rgba(0,228,142,0.55)',
+                        background: 'rgba(0,228,142,0.15)',
                         letterSpacing: '0.04em',
                         alignSelf: 'flex-start',
                       }}

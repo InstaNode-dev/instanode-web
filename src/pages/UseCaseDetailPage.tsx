@@ -254,6 +254,10 @@ function DetailStyles() {
         font-size: 13px; line-height: 1.55; margin: 14px 0;
         font-family: var(--font-mono);
       }
+      /* Headroom for the Copy button and language pill on fenced
+         code blocks (CodeBlock component) — keeps the first line
+         from sliding under the controls. */
+      .ucd-body pre.code-block { padding-top: 32px; }
       .ucd-body pre code { background: transparent; padding: 0; border: 0; color: inherit; }
       .ucd-body ul { padding-left: 22px; margin: 0 0 16px; }
       .ucd-body li { margin: 6px 0; }

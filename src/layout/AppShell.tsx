@@ -247,6 +247,38 @@ export function AppShell() {
                 </>
               )}
 
+            {/* B8-P2 F12 (2026-05-20): operator diagnostic. When the
+                caller IS a platform admin (per ADMIN_EMAILS) but the
+                deploy has no ADMIN_PATH env var configured, the admin
+                nav row would silently disappear above with no signal
+                back to the human reading the sidebar — leading to "I'm
+                an admin but I can't see the link". Render a small
+                visible hint so the operator knows the cluster-side
+                env-var is missing, not their membership. Only admin
+                emails see this string, so we're not leaking the path's
+                existence to other users. */}
+            {ctx.me?.is_platform_admin &&
+              (typeof ctx.me?.admin_path_prefix !== 'string' ||
+                ctx.me.admin_path_prefix.length === 0) && (
+                <div
+                  data-testid="admin-path-missing-hint"
+                  style={{
+                    margin: '8px 12px 4px',
+                    padding: '6px 10px',
+                    background: 'rgba(255,193,7,0.06)',
+                    border: '1px solid rgba(255,193,7,0.25)',
+                    borderRadius: 4,
+                    fontFamily: 'var(--font-mono)',
+                    fontSize: 10.5,
+                    color: 'var(--text-dim)',
+                    lineHeight: 1.4,
+                  }}
+                  title="admin nav hidden because the ADMIN_PATH env var is not set on this cluster"
+                >
+                  admin panel not configured — set <code>ADMIN_PATH</code> in api env
+                </div>
+              )}
+
             <div className="nav-section">design ref</div>
             {/* §10.21: removed the "11 gaps" badge — the contracts page is a
                 design-ref artifact and the badge promised a gap-tracker that
