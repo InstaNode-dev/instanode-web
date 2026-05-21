@@ -79,16 +79,18 @@ const TIERS: {
     ctaHrefYearly: '/app/checkout?plan=pro&frequency=yearly',
     highlighted: true,
   },
-  // Team tier — not launched yet. We intentionally show NO pricing, NO
-  // detail, NO CTA. A single quiet "coming soon" placeholder is enough to
-  // signal the tier exists without making any commitment customers can
-  // hold us to. The per-row SOON markers in the matrix below render as
-  // empty cells for the same reason.
+  // Team tier — not launched yet, but PB04 P3 (2026-05-21) surfaced
+  // the price from plans.yaml ($199/mo) so the "soon" badge reads as an
+  // availability label rather than a vaporware signal. The "soon" badge
+  // (from t.comingSoon below) renders next to the tier name; the price
+  // itself stays a real number sourced from plans.yaml. Matches the
+  // existing Hobby/Pro {price, sub} pattern. The CTA stays empty until
+  // launch — interested customers can email support.
   {
     key: 'team',
     name: 'Team',
-    monthly: { price: 'coming soon', sub: '' },
-    // No yearly — there's nothing to bill annually for an unlaunched tier.
+    monthly: { price: '$199', sub: '/ mo' },
+    // No yearly — annual billing wires up at launch.
     cta: '',
     ctaHrefMonthly: '',
     comingSoon: true,
@@ -128,7 +130,10 @@ const ROWS: Row[] = [
   // moves to the field we actually enforce. Numbers mirror plans.yaml
   // queue_storage_mb (anonymous=1024, hobby=5120, pro=10240).
   { label: 'Queue',    sub: 'NATS storage', values: ['1 GB / 24h TTL', '5 GB', '10 GB', SOON] },
-  { label: 'Storage',  values: [{ mark: 'dash' },              '512 MB',           '50 GB',          SOON] },
+  // Anonymous storage: plans.yaml storage_storage_mb=10 (anonymous tier).
+  // PB04 P1 (2026-05-21): cell used to render '—' which contradicted the
+  // shipped backend — anonymous /storage/new returns a real 10 MB bucket.
+  { label: 'Storage',  values: ['10 MB / 24h TTL',              '512 MB',           '50 GB',          SOON] },
   { label: 'Webhook stored', values: ['100',                   '1 000',            '10k',            SOON] },
   { label: 'Deploy apps', values: [{ mark: 'dash' },           '1 small',          '10 medium',      SOON] },
   { label: 'Domains',  values: [{ mark: 'dash' }, '*.deployment.instanode.dev', 'custom domain', SOON] },

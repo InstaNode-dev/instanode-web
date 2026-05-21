@@ -72,8 +72,17 @@ export function renderMarkdown(md: string, opts: RenderOptions = {}): ReactNode 
       // The CodeBlock component handles syntax highlighting + the
       // "Copy" affordance (BugBash B3-P2-1, B3-P2-2).
       const langMatch = block.match(/^```(\w+)?/)
-      const lang = langMatch?.[1] ?? null
+      const explicitLang = langMatch?.[1] ?? null
       const inner = block.replace(/^```\w*\r?\n?/, '').replace(/\r?\n?```$/, '')
+      // PB04 P3 (2026-05-21): the docs content repo authors curl examples
+      // with an unlabelled fence (```\ncurl …\n```) — that lands at
+      // CodeBlock with lang=null, which renders monochrome with no badge.
+      // The first two code blocks on /docs (quickstart, services) are
+      // both curl examples, so the first thing readers see is a blank
+      // black block. Auto-detect the shell-curl shape and treat it as
+      // bash so the badge + syntax highlight kick in. Explicit fences
+      // win — this branch only fires when the author omitted the lang.
+      const lang = explicitLang ?? sniffLang(inner)
       return <CodeBlock key={key} lang={lang} code={inner} />
     }
 
@@ -124,6 +133,36 @@ export function renderMarkdown(md: string, opts: RenderOptions = {}): ReactNode 
 
     return <p key={key}>{inline(block, key)}</p>
   })
+}
+
+/* sniffLang — last-resort language guess for a fenced code block whose
+ * author omitted the language tag. Only fires when the explicit fence
+ * label is empty (```\n…) — never overrides ```bash / ```json / etc.
+ *
+ * Conservative: returns a language only when the first non-empty line
+ * is unambiguously shell-ish (starts with curl / kubectl / npm / a flag
+ * pattern / a `$` prompt). Anything else stays null so the monochrome
+ * fallback path still works — never wrong-coloured.
+ *
+ * Background: the /docs content lives in InstaNode-dev/content. The
+ * first two code blocks on /docs (quickstart.md, services.md) are curl
+ * examples with an unlabelled fence, which left the first impression
+ * of the docs as two blank-black code blocks. Fixing the markdown in
+ * content+ requires a cross-repo PR and a content-repo redeploy; the
+ * cheaper, safer fix is to sniff at render time inside the existing
+ * markdown pipeline so unfenced curl examples get the bash badge +
+ * syntax highlighting they should have had all along. */
+function sniffLang(code: string): string | null {
+  const firstLine = code.split(/\r?\n/).find((l) => l.trim().length > 0)
+  if (!firstLine) return null
+  const trimmed = firstLine.trim()
+  // curl / kubectl / npm / docker / git / brew / sudo / a $-prompt all
+  // start unambiguously shell-ish. Keep this list short and obvious —
+  // anything weird stays monochrome.
+  if (/^(curl|kubectl|npm|docker|git|brew|sudo|cd|ls|cat|echo|export|node|go|make|bash|sh|\$)\b/.test(trimmed)) {
+    return 'bash'
+  }
+  return null
 }
 
 function headingTag(level: number, key: string, content: string): ReactNode {
