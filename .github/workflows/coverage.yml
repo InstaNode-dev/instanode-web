@@ -15,6 +15,9 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Full history so diff-cover can resolve origin/<base_ref>.
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -25,3 +28,28 @@ jobs:
         if: always()
         with:
           fail_ci_if_error: false
+
+      # ------------------------------------------------------------------
+      # Org patch-coverage mandate: every changed line in a PR diff must be
+      # covered by a test (100%). Tool: diff-cover
+      # (https://github.com/Bachmann1234/diff-cover). vitest's v8 provider
+      # emits lcov with src/*.ts(x) paths + source-mapped line numbers, so it
+      # lines up directly with the PR diff. `npm run gate` is untouched.
+      # ------------------------------------------------------------------
+      - name: Generate lcov coverage
+        if: github.event_name == 'pull_request'
+        run: npx vitest run --coverage --coverage.provider=v8 --coverage.reporter=lcov --coverage.reportsDirectory=coverage
+      - uses: actions/setup-python@v5
+        if: github.event_name == 'pull_request'
+        with:
+          python-version: '3.12'
+      - name: Install diff-cover
+        if: github.event_name == 'pull_request'
+        run: pip install diff-cover
+      - name: Patch coverage gate (100% of changed lines)
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch origin "${{ github.base_ref }}" --depth=1 || true
+          diff-cover coverage/lcov.info \
+            --compare-branch="origin/${{ github.base_ref }}" \
+            --fail-under=100
