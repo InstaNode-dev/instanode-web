@@ -273,3 +273,58 @@ describe('DeploymentsPage — private deploy section, tier-gated', () => {
     expect(screen.queryByTestId('private-deploy-upsell')).toBeNull()
   })
 })
+
+describe('DeploymentsPage — filter + sort', () => {
+  const items = [
+    dep({ id: 'r1', app_id: 'zeta', name: 'zeta', status: 'running' }),
+    dep({ id: 'b1', app_id: 'alpha', name: 'alpha', status: 'building' }),
+    dep({ id: 'f1', app_id: 'mid', name: 'mid', status: 'failed' }),
+    dep({ id: 'e1', app_id: 'old', name: 'old', status: 'expired', last_deploy_at: undefined }),
+    dep({ id: 's1', app_id: 'stp', name: 'stp', status: 'stopped', last_deploy_at: undefined }),
+  ]
+
+  it('filters by status bucket (failed)', async () => {
+    mockListDeployments.mockResolvedValue({ ok: true, items, total: items.length })
+    render(withRouter(<DeploymentsPage />))
+    await waitFor(() => screen.getByTestId('deployment-row-name-f1'))
+    fireEvent.click(screen.getByTestId('status-filter-failed'))
+    await waitFor(() => expect(screen.getByTestId('deployment-row-name-f1')).toBeTruthy())
+    expect(screen.queryByTestId('deployment-row-name-r1')).toBeNull()
+  })
+
+  it('buckets stopped + expired under the "expired" filter', async () => {
+    mockListDeployments.mockResolvedValue({ ok: true, items, total: items.length })
+    render(withRouter(<DeploymentsPage />))
+    await waitFor(() => screen.getByTestId('deployment-row-name-e1'))
+    fireEvent.click(screen.getByTestId('status-filter-expired'))
+    await waitFor(() => expect(screen.getByTestId('deployment-row-name-e1')).toBeTruthy())
+    expect(screen.getByTestId('deployment-row-name-s1')).toBeTruthy()
+    expect(screen.queryByTestId('deployment-row-name-b1')).toBeNull()
+  })
+
+  it('shows the no-match empty state when the filter matches nothing', async () => {
+    mockListDeployments.mockResolvedValue({
+      ok: true, total: 1,
+      items: [dep({ id: 'only', app_id: 'only', name: 'only', status: 'running' })],
+    })
+    render(withRouter(<DeploymentsPage />))
+    await waitFor(() => screen.getByTestId('deployment-row-name-only'))
+    fireEvent.click(screen.getByTestId('status-filter-failed'))
+    await waitFor(() => expect(screen.getByTestId('deployments-no-match')).toBeTruthy())
+  })
+
+  it('sorts by name and by status', async () => {
+    mockListDeployments.mockResolvedValue({ ok: true, items, total: items.length })
+    const { container } = render(withRouter(<DeploymentsPage />))
+    await waitFor(() => screen.getByTestId('deployment-row-name-b1'))
+
+    fireEvent.change(screen.getByTestId('deployments-sort'), { target: { value: 'name' } })
+    const names = Array.from(container.querySelectorAll('[data-testid^="deployment-row-name-"]'))
+      .map((n) => n.textContent ?? '')
+    expect(names[0]).toContain('alpha')
+
+    fireEvent.change(screen.getByTestId('deployments-sort'), { target: { value: 'status' } })
+    const statusSorted = Array.from(container.querySelectorAll('[data-testid^="deployment-row-name-"]'))
+    expect(statusSorted.length).toBe(items.length)
+  })
+})

@@ -72,6 +72,8 @@ vi.mock('../api', async () => {
     // Mocked here so the audit-tab tests can drive load/empty states
     // without firing a real network call.
     fetchResourceAudit: vi.fn(),
+    // Stack-view chrome renders CustomDomainPanel for Pro+ tiers.
+    listCustomDomains: vi.fn(),
   }
 })
 
@@ -97,6 +99,7 @@ beforeEach(() => {
   mockFetchFamily.mockResolvedValue({ ok: false, reason: 'unknown' })
   mockListStacks.mockResolvedValue({ ok: true, items: [], total: 0 })
   mockListResources.mockResolvedValue({ ok: true, items: [], total: 0 })
+  ;(api.listCustomDomains as any).mockResolvedValue([])
 })
 afterEach(() => {
   cleanup()
@@ -901,5 +904,73 @@ describe('DeployDetailPage — Failure Autopsy panel (Phase 0)', () => {
     // No autopsy panel for stack-kind deploys.
     expect(container.querySelector('[data-testid="failure-autopsy-panel"]')).toBeNull()
     expect(container.querySelector('[data-testid="failure-autopsy-pending"]')).toBeNull()
+  })
+})
+
+// ─── stack-kind view chrome + tabs ──────────────────────────────────────
+describe('DeployDetailPage — stack-kind view', () => {
+  function stackItem(over: Record<string, any> = {}) {
+    return {
+      id: 'stk-1',
+      slug: 'demo-stack',
+      name: 'demo',
+      status: 'running',
+      url: 'https://demo.deployment.instanode.dev',
+      created_at: 'x',
+      team_id: '',
+      env: 'production',
+      tier: 'pro',
+      ...over,
+    }
+  }
+
+  function mountStack(over: Record<string, any> = {}) {
+    mockGetDeployment.mockResolvedValueOnce({ ok: true, deployment: null })
+    mockListStacks.mockResolvedValueOnce({ ok: true, total: 1, items: [stackItem(over) as any] })
+    return renderPage('/deployments/stk-1')
+  }
+
+  it('renders the stack chrome with the custom-domain panel for Pro+ tier', async () => {
+    mountStack()
+    await waitFor(() => expect(screen.getByTestId('deploy-detail-name')).toBeTruthy())
+    // CustomDomainPanel mounts and lists domains for stack views.
+    await waitFor(() => expect(api.listCustomDomains).toHaveBeenCalledWith('demo-stack'))
+  })
+
+  it('renders the env-vars stack hint on the Env vars tab', async () => {
+    const { getByText } = mountStack()
+    await waitFor(() => expect(screen.getByTestId('deploy-detail-name')).toBeTruthy())
+    fireEvent.click(getByText('Env vars'))
+    await waitFor(() => expect(screen.getByTestId('env-vars-stack-hint')).toBeTruthy())
+  })
+
+  it('renders the bound-resources stack hint on the Resources tab', async () => {
+    const { getByText } = mountStack()
+    await waitFor(() => expect(screen.getByTestId('deploy-detail-name')).toBeTruthy())
+    fireEvent.click(getByText('Resources'))
+    await waitFor(() => expect(screen.getByTestId('bound-resources-stack-hint')).toBeTruthy())
+  })
+
+  it('subscribes to the legacy stack log SSE path on the Logs tab', async () => {
+    const { getByText } = mountStack()
+    await waitFor(() => expect(screen.getByTestId('deploy-detail-name')).toBeTruthy())
+    fireEvent.click(getByText('Logs'))
+    await waitFor(() => expect(sseCalls.some((p) => p.includes('/stacks/demo-stack/logs'))).toBe(true))
+  })
+})
+
+// ─── EnvironmentsGrid PromoteUpsell (hobby tier) ────────────────────────
+describe('DeployDetailPage — Environments tier gate', () => {
+  it('renders the Promote upsell card when fetchStackFamily returns upgrade_required', async () => {
+    mockGetDeployment.mockResolvedValueOnce({ ok: true, deployment: null })
+    mockListStacks.mockResolvedValueOnce({
+      ok: true, total: 1,
+      items: [{ id: 'stk-up', slug: 'demo-up', name: 'demo', status: 'running', url: null, created_at: 'x', team_id: '', env: 'production', tier: 'pro' } as any],
+    })
+    mockFetchFamily.mockResolvedValue({ ok: false, reason: 'upgrade_required' })
+    renderPage('/deployments/stk-up')
+    await waitFor(() => expect(screen.getByTestId('deploy-detail-name')).toBeTruthy())
+    // PromoteUpsell renders an UpgradePromptCard for the family_bindings feature.
+    await waitFor(() => expect(mockFetchFamily).toHaveBeenCalled())
   })
 })

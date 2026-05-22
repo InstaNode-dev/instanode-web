@@ -19,7 +19,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { render, screen, waitFor, fireEvent, cleanup } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { BillingPage } from './BillingPage'
+import { BillingPage, formatAsOf } from './BillingPage'
 import type { BillingDetails, DashboardTeam, Invoice, User } from '../api'
 
 // §10.21: test-only data lives here, inlined and minimal.
@@ -77,6 +77,7 @@ vi.mock('../api', async () => {
     createCheckout: vi.fn(),
     cancelSubscription: vi.fn(),
     validatePromotion: vi.fn(),
+    updatePaymentMethod: vi.fn(),
   }
 })
 
@@ -1010,5 +1011,124 @@ describe('BillingPage — Change plan button', () => {
     await waitFor(() => {
       expect((api.fetchBilling as any).mock.calls.length).toBeGreaterThan(initialFetchCount)
     })
+  })
+})
+
+// ─── checkout error / verify-email gate ─────────────────────────────────
+describe('BillingPage — checkout error handling', () => {
+  it('surfaces a verify-email banner when checkout 403s email_not_verified', async () => {
+    mockTier = 'hobby'
+    mockHappyBilling()
+    ;(api.createCheckout as any).mockRejectedValue({ status: 403, code: 'email_not_verified' })
+    const user = userEvent.setup()
+    render(<BillingPage />)
+    await waitForLoaded()
+    await user.click(screen.getByTestId('upgrade-button'))
+    await waitFor(() => expect(screen.getByTestId('verify-email-banner')).toBeTruthy())
+    expect(screen.queryByTestId('checkout-error')).toBeNull()
+  })
+
+  it('shows "checkout returned no url" when short_url is missing', async () => {
+    mockTier = 'hobby'
+    mockHappyBilling()
+    ;(api.createCheckout as any).mockResolvedValue({ ok: true })
+    const user = userEvent.setup()
+    render(<BillingPage />)
+    await waitForLoaded()
+    await user.click(screen.getByTestId('upgrade-button'))
+    await waitFor(() => expect(screen.getByTestId('checkout-error').textContent).toContain('no url'))
+  })
+
+  it('shows a generic checkout error on a non-email failure', async () => {
+    mockTier = 'hobby'
+    mockHappyBilling()
+    ;(api.createCheckout as any).mockRejectedValue(new Error('rzp down'))
+    const user = userEvent.setup()
+    render(<BillingPage />)
+    await waitForLoaded()
+    await user.click(screen.getByTestId('upgrade-button'))
+    await waitFor(() => expect(screen.getByTestId('checkout-error').textContent).toContain('rzp down'))
+  })
+})
+
+// ─── UpdatePaymentButton ────────────────────────────────────────────────
+describe('BillingPage — UpdatePaymentButton', () => {
+  it('redirects to the Razorpay short_url on success', async () => {
+    mockTier = 'pro'
+    mockHappyBilling()
+    ;(api.updatePaymentMethod as any).mockResolvedValue({ short_url: 'https://rzp.io/update' })
+    const user = userEvent.setup()
+    render(<BillingPage />)
+    await waitForLoaded()
+    await user.click(screen.getByTestId('contact-support-update-payment'))
+    await waitFor(() => expect(hrefSetTo).toBe('https://rzp.io/update'))
+  })
+
+  it('falls back to a support mailto when the api errors', async () => {
+    mockTier = 'pro'
+    mockHappyBilling()
+    ;(api.updatePaymentMethod as any).mockRejectedValue(new Error('nope'))
+    const user = userEvent.setup()
+    render(<BillingPage />)
+    await waitForLoaded()
+    await user.click(screen.getByTestId('contact-support-update-payment'))
+    await waitFor(() => {
+      const link = screen.getByTestId('contact-support-update-payment') as HTMLAnchorElement
+      expect(link.href.toLowerCase()).toContain('mailto:')
+    })
+  })
+
+  it('falls back to mailto when the response has no short_url', async () => {
+    mockTier = 'pro'
+    mockHappyBilling()
+    ;(api.updatePaymentMethod as any).mockResolvedValue({})
+    const user = userEvent.setup()
+    render(<BillingPage />)
+    await waitForLoaded()
+    await user.click(screen.getByTestId('contact-support-update-payment'))
+    await waitFor(() => {
+      const link = screen.getByTestId('contact-support-update-payment') as HTMLAnchorElement
+      expect(link.href.toLowerCase()).toContain('mailto:')
+    })
+  })
+})
+
+// ─── invoice period rendering ───────────────────────────────────────────
+describe('BillingPage — invoice period column', () => {
+  it('renders a period range when period_start/end + plan + pdf are present', async () => {
+    mockTier = 'pro'
+    mockHappyBilling()
+    ;(api.listInvoices as any).mockResolvedValue({
+      ok: true,
+      invoices: [
+        {
+          id: 'inv_period',
+          issued_at: '2026-05-22T00:00:00Z',
+          period_start: '2026-05-01T00:00:00Z',
+          period_end: '2026-05-31T00:00:00Z',
+          plan: 'pro',
+          amount_cents: 4900,
+          currency: 'USD',
+          status: 'paid',
+          pdf_url: 'https://example.com/inv.pdf',
+        } as any,
+      ],
+    })
+    const { container } = render(<BillingPage />)
+    await waitForLoaded()
+    await waitFor(() => expect(container.textContent).toContain('→'))
+    expect(container.querySelector('a.dl')).toBeTruthy()
+  })
+})
+
+describe('formatAsOf', () => {
+  it('handles invalid, just-now, seconds, minutes, hours, and skew', () => {
+    expect(formatAsOf('not-a-date')).toBe('unknown')
+    const now = Date.now()
+    expect(formatAsOf(new Date(now).toISOString())).toBe('just now')
+    expect(formatAsOf(new Date(now - 5_000).toISOString())).toMatch(/\ds ago/)
+    expect(formatAsOf(new Date(now - 5 * 60_000).toISOString())).toMatch(/\dm ago/)
+    expect(formatAsOf(new Date(now - 3 * 3_600_000).toISOString())).toMatch(/\dh ago/)
+    expect(formatAsOf(new Date(now + 60_000).toISOString())).toBe('just now')
   })
 })
