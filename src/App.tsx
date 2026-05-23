@@ -1,4 +1,5 @@
 import { lazy, Suspense } from 'react'
+import type { JSX } from 'react'
 import { BrowserRouter, Navigate, Route, Routes, useLocation, useParams } from 'react-router-dom'
 
 // RouteTracker — eagerly imported. Tiny component (~1KB) that watches
@@ -400,19 +401,12 @@ export function AppRoutes() {
 
 export function App() {
   return (
-    // B1-P1-6 (BugBash 2026-05-20): opt-in to React Router v7 future flags
-    // so the console stops emitting the two `v7_startTransition` /
-    // `v7_relativeSplatPath` deprecation warnings on every prod load.
-    // These are forward-compatibility opt-ins — they don't change v6
-    // semantics today, but mute the noise + let us validate the v7
-    // behaviours under real traffic before the major bump lands. See
-    // https://reactrouter.com/v6/upgrading/future for the contract.
-    <BrowserRouter
-      future={{
-        v7_startTransition: true,
-        v7_relativeSplatPath: true,
-      }}
-    >
+    // react-router v7: the `v7_startTransition` / `v7_relativeSplatPath`
+    // future flags are now the DEFAULT behaviour and the `future` prop no
+    // longer accepts them (they were removed when the major landed). The
+    // forward-compatible behaviour we opted into under v6 is now baked in,
+    // so the prop is dropped entirely. See the v6→v7 upgrade guide.
+    <BrowserRouter>
       {/* RouteTracker must sit inside the router so its useLocation() has a
           context, and outside any Suspense boundary so it never unmounts
           during a lazy-chunk fetch (an unmount would skip the

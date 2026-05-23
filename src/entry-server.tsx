@@ -29,7 +29,11 @@
 import { StrictMode } from 'react'
 import { Route, Routes } from 'react-router-dom'
 import { renderToString } from 'react-dom/server'
-import { StaticRouter } from 'react-router-dom/server'
+// react-router v7: the `react-router-dom/server` subpath export was removed.
+// StaticRouter is now exported from the `react-router` package itself (which
+// react-router-dom re-exports). See the v6→v7 upgrade guide ("Server-side
+// rendering" section).
+import { StaticRouter } from 'react-router'
 
 // Public marketing pages — synchronous imports so renderToString resolves
 // every component to real HTML instead of a Suspense fallback.

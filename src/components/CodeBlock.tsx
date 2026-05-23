@@ -13,6 +13,7 @@
  * monochrome code + no copy button before this. */
 
 import { useState } from 'react'
+import type { JSX } from 'react'
 import { copyToClipboard } from './Common'
 
 export type CodeBlockProps = {
