@@ -3,6 +3,12 @@ name: Deploy to GitHub Pages
 on:
   push:
     branches: [main]
+  # Run on PRs too so the `build` job reports its required status check — the
+  # `build` context is a required check on main, but it previously only ran on
+  # push, so no PR could ever satisfy it (every PR sat BLOCKED). The deploy job
+  # below is gated to non-PR events so PRs build but never publish to Pages.
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -11,7 +17,8 @@ permissions:
   id-token: write
 
 concurrency:
-  group: pages
+  # Ref-scoped so a PR build can't cancel an in-progress main Pages deploy.
+  group: pages-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -49,6 +56,8 @@ jobs:
 
   deploy:
     needs: build
+    # Publish only on push to main / manual dispatch — never on a PR.
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     environment:
       name: github-pages

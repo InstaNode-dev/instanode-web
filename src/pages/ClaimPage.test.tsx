@@ -313,9 +313,16 @@ describe('ClaimPage — countdown', () => {
     mockHappyClaim(59 * 60 * 1000 + 30_000)   // 59m30s
     renderClaim()
     await claimAndReachFunnel()
-    const val = screen.getByTestId('claim-countdown-value').textContent ?? ''
-    // Should be 00:59:30 give-or-take a second of test latency.
-    expect(val).toMatch(/^00:5[89]:\d{2}$/)
+    // The countdown is populated by a useEffect tick() that fires after the
+    // funnel paints — under React 19's effect/transition flush timing the
+    // 'choose-plan' stage (and thus the 'claim-funnel' test-id) can be visible
+    // for a beat before setCountdownMs has committed, leaving the placeholder
+    // '—' on screen. waitFor for the real HH:MM:SS value instead of reading it
+    // synchronously. Should settle to 00:59:30 give-or-take a second.
+    await waitFor(() => {
+      const val = screen.getByTestId('claim-countdown-value').textContent ?? ''
+      expect(val).toMatch(/^00:5[89]:\d{2}$/)
+    })
   })
 
   it('shows the placeholder "—" when no resource has an expires_at', async () => {
