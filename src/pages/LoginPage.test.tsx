@@ -24,6 +24,9 @@ function renderAt(url = '/login') {
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route path="/app" element={<div>APP HOME</div>} />
+        {/* BUG-P013 round-trip route — when /login?next=/app/checkout?…
+            preserves the plan + frequency, post-signin must land here. */}
+        <Route path="/app/checkout" element={<div>CHECKOUT PAGE</div>} />
       </Routes>
     </MemoryRouter>,
   )
@@ -127,5 +130,44 @@ describe('LoginPage', () => {
     await userEvent.type(screen.getByTestId('token-input'), 'ink_x')
     await userEvent.click(screen.getByTestId('login-submit'))
     await waitFor(() => expect(screen.getByTestId('login-error').textContent).toContain('network down'))
+  })
+
+  // BUG-P013 (P1, 2026-05-29) — PAT signin with ?next=/app/checkout?... must
+  // round-trip the user back to the checkout page they were on, NOT the
+  // generic /app dashboard. The CheckoutPage's BUG-P111 fix calls
+  // window.location.assign('/login?next=…') which drops React Router
+  // state, so LoginPage MUST read the query param.
+  it('honors ?next= and round-trips to /app/checkout after PAT signin', async () => {
+    ;(api.fetchMe as any).mockResolvedValue({ ok: true })
+    ;(window as any).location.search = '?next=%2Fapp%2Fcheckout%3Fplan%3Dhobby%26frequency%3Dmonthly'
+    renderAt('/login?next=%2Fapp%2Fcheckout%3Fplan%3Dhobby%26frequency%3Dmonthly')
+    await userEvent.click(screen.getByTestId('toggle-token-form'))
+    await userEvent.type(screen.getByTestId('token-input'), 'ink_secret')
+    await userEvent.click(screen.getByTestId('login-submit'))
+    await waitFor(() => expect(screen.getByText('CHECKOUT PAGE')).toBeTruthy())
+  })
+
+  // Open-redirect safety — never honour an absolute external URL even
+  // if a phishing link drops it into ?next=.
+  it('rejects ?next=https://evil.com and falls back to /app', async () => {
+    ;(api.fetchMe as any).mockResolvedValue({ ok: true })
+    ;(window as any).location.search = '?next=https%3A%2F%2Fevil.com'
+    renderAt('/login?next=https%3A%2F%2Fevil.com')
+    await userEvent.click(screen.getByTestId('toggle-token-form'))
+    await userEvent.type(screen.getByTestId('token-input'), 'ink_secret')
+    await userEvent.click(screen.getByTestId('login-submit'))
+    await waitFor(() => expect(screen.getByText('APP HOME')).toBeTruthy())
+  })
+
+  // Protocol-relative URLs are equally dangerous (//evil.com → browser
+  // treats as scheme-inherit absolute). Reject those too.
+  it('rejects protocol-relative ?next=//evil.com and falls back to /app', async () => {
+    ;(api.fetchMe as any).mockResolvedValue({ ok: true })
+    ;(window as any).location.search = '?next=%2F%2Fevil.com'
+    renderAt('/login?next=%2F%2Fevil.com')
+    await userEvent.click(screen.getByTestId('toggle-token-form'))
+    await userEvent.type(screen.getByTestId('token-input'), 'ink_secret')
+    await userEvent.click(screen.getByTestId('login-submit'))
+    await waitFor(() => expect(screen.getByText('APP HOME')).toBeTruthy())
   })
 })
