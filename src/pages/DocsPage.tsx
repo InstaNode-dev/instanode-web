@@ -159,8 +159,19 @@ function DocsBody() {
         <p className="docs-toc-label">Docs</p>
 
         <div className="docs-search">
+          {/* UI-6 (2026-05-29): visually-hidden <label> + matching id/name
+              on the input so password managers, form autofill, and screen
+              readers all resolve a real label, not just an aria-label.
+              The .visually-hidden CSS class is defined in the styles block
+              below — keeps the label out of the visual layout while
+              leaving it discoverable by AT and Lighthouse's a11y audit. */}
+          <label htmlFor="docs-search" className="visually-hidden">
+            Search documentation
+          </label>
           <input
             ref={inputRef}
+            id="docs-search"
+            name="docs-search"
             type="search"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
@@ -273,6 +284,23 @@ function DocsStyles() {
       .docs-search {
         position: relative;
         margin: 0 0 16px;
+      }
+      /* UI-6 (2026-05-29): visually-hidden — standard a11y pattern. Keeps
+         the search-field <label> out of the visual layout while leaving
+         it discoverable by screen readers, form autofill, and Lighthouse's
+         a11y audit. (aria-label alone failed the a11y rule "Form elements
+         must have labels"; password managers and Lighthouse both still
+         expect a real <label htmlFor>.) */
+      .visually-hidden {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
       }
       .docs-search-input {
         width: 100%;
