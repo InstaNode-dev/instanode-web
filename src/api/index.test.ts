@@ -244,6 +244,14 @@ describe('fetchBilling()', () => {
       payment_method: { type: 'card', brand: 'visa', last4: '4242' },
       razorpay_subscription_id: 'sub_abc',
       razorpay_customer_id: 'cust_abc',
+      // BUG-P088 (2026-05-29): the SPA default for razorpay_configured is
+      // now FAIL-CLOSED (false) when the API omits it — so a healthy
+      // active-subscription mock must set the flag explicitly to keep
+      // exercising the mapped-through-true path. The previous `?? true`
+      // default masked a real bug: an older API build omitting the flag
+      // rendered the upgrade button as configured even when Razorpay was
+      // disabled.
+      razorpay_configured: true,
     }))
     const r = await fetchBilling()
     expect(r.ok).toBe(true)
@@ -265,13 +273,30 @@ describe('fetchBilling()', () => {
     expect(String(url)).toContain('/api/v1/billing')
   })
 
-  // P2-19: razorpay_configured no longer infers itself from
-  // subscription_status. A freshly-claimed paid team has no subscription
-  // yet (status='none') but Razorpay IS configured — checkout must not be
-  // suppressed. When the API omits the explicit flag we default to true.
-  it("keeps razorpay_configured=true when subscription_status='none' (API omits the flag)", async () => {
+  // BUG-P088 (P1, 2026-05-29): the SPA default for razorpay_configured is
+  // FAIL-CLOSED — when the API omits the flag we render the upgrade button
+  // as if Razorpay were NOT configured. Per
+  // CLAUDE.md memory project_razorpay_recurring_not_enabled.md, Razorpay
+  // recurring is not enabled on the prod account and clicking that button
+  // returns 502 from the create-subscription call. Defaulting to false
+  // routes those users to the honest "contact support" copy instead.
+  it("defaults razorpay_configured=false when the API omits the flag (BUG-P088 fail-closed)", async () => {
     const m = installFetch()
     m.mockResolvedValueOnce(jsonResponse({ ok: true, tier: 'hobby', subscription_status: 'none' }))
+    const r = await fetchBilling()
+    expect(r.billing.razorpay_configured).toBe(false)
+    expect(r.billing.status).toBe('none')
+  })
+
+  // P2-19 (kept): the explicit wire value must still be honored when the
+  // server says razorpay_configured=true. A freshly-claimed paid team has
+  // no subscription yet (status='none') but Razorpay IS configured — the
+  // API surfaces the explicit flag so checkout is not suppressed.
+  it("honors an explicit razorpay_configured=true even when subscription_status='none'", async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse({
+      ok: true, tier: 'hobby', subscription_status: 'none', razorpay_configured: true,
+    }))
     const r = await fetchBilling()
     expect(r.billing.razorpay_configured).toBe(true)
     expect(r.billing.status).toBe('none')

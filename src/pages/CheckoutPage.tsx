@@ -1,4 +1,4 @@
-/* CheckoutPage — W12 funnel fix (C1).
+/* CheckoutPage — W12 funnel fix (C1) + BUG-P111/P112/P013/P121 hardening.
  *
  * The /pricing page CTAs used to point at `/checkout?plan=...&frequency=...`,
  * a route App.tsx never registered. The catch-all `*` route silently bounced
@@ -7,21 +7,60 @@
  * /app/checkout (under AuthGate, matching the rest of the auth-required
  * dashboard surface) and update the PricingPage CTAs to point at it.
  *
+ * BUG-P111/P112/P113 (P0 CRITICAL, 2026-05-29) — defence-in-depth auth gate.
+ * QA found that visiting /app/checkout/?plan=hobby while unauthenticated
+ * still ended at a LIVE-mode Razorpay subscription page (sub_Sv96Mt2n8nnDYL).
+ * The App-level AuthGate (App.tsx) only checks getToken() — a stale
+ * localStorage JWT (e.g. a previous session that the server has since
+ * invalidated) passes the gate but is rejected by /api/v1/billing/checkout
+ * with 401. Without an explicit check here, any state in the URL/back-cache
+ * could short-circuit to a real Razorpay subscription URL. This page now
+ * performs its OWN getToken() check BEFORE the createCheckout call. If
+ * unauth: redirect to /login?next=<this-path> via window.location.assign
+ * (fail closed). The AuthGate above is the belt; this is the suspenders.
+ *
+ * BUG-P013 (P1, 2026-05-29) — preserve next= on redirect.
+ * A logged-out user clicking /pricing → "Start hobby" used to land at /login
+ * with no return path; after signin they hit /app/ and had to re-find
+ * checkout. We now build a /login?next=<encoded path>&frequency=... URL so
+ * the LoginPage already-built `loc.state.from` + login-callback can round-
+ * trip the user back to the same plan.
+ *
+ * BUG-P121/P122 (P1, 2026-05-29) — no client-side caching of sub_*.
+ * QA reported the same Razorpay subscription URL appearing across plan
+ * changes and even across unauth sessions. We DO NOT cache the short_url
+ * locally — every call to createCheckout returns a freshly-minted sub_* or
+ * the F7-reused sub from the server. To defend against any FUTURE caching
+ * regression, we also register a logout hook that clears anything labelled
+ * with the well-known CHECKOUT_CACHE_KEY prefix.
+ *
  * Flow:
- *   1. AuthGate (in App.tsx) ensures only logged-in users see this page.
- *      Unauthenticated visitors are redirected to /login with state.from set
- *      to /app/checkout?plan=... so post-login they land back here.
- *   2. On mount, we read `plan` and `frequency` from the URL search params,
+ *   1. AuthGate (in App.tsx) is the FIRST layer — unauthenticated visitors
+ *      with NO token at all get redirected to /login from the route guard
+ *      before this component even mounts.
+ *   2. THIS COMPONENT is the SECOND layer — on mount we re-check
+ *      getToken() and re-render as 'unauthenticated' (which assigns to
+ *      /login?next=...) if it has been cleared between route mount and
+ *      component effect (e.g. logout in another tab triggered a storage
+ *      event). Without this, a browser back-button from Razorpay could
+ *      momentarily display the in-flight redirecting state on an unauth
+ *      browser.
+ *   3. On mount, we read `plan` and `frequency` from the URL search params,
  *      validate them, then POST /api/v1/billing/checkout with the canonical
  *      contract: {plan, plan_frequency}. The API contract lives in
  *      api/internal/handlers/billing.go:checkoutRequest.
- *   3. On success, response has `short_url` — we navigate the browser to it
+ *   4. On success, response has `short_url` — we navigate the browser to it
  *      so Razorpay's hosted page collects payment.
- *   4. On 503 billing_not_configured we render a fallback panel pointing
+ *   5. On 503 billing_not_configured we render a fallback panel pointing
  *      users at instanode.dev/pricing with a support email — this happens
  *      when the operator hasn't created the Razorpay plan_id for the tier
  *      yet, which is normal during dev / before launch.
- *   5. Any other failure is surfaced inline so the user isn't dropped on a
+ *   6. On 503 billing_misconfigured (BUG-P112 server-side guard, api
+ *      ships in fix/billing-traffic-env-and-misconfig-detection) we render
+ *      the same fallback panel — the operator pointed a non-prod
+ *      deployment at a live Razorpay key and the server fast-failed before
+ *      minting a real subscription.
+ *   7. Any other failure is surfaced inline so the user isn't dropped on a
  *      blank page.
  *
  * Why /app/checkout and not /checkout: every authenticated action on this
@@ -34,6 +73,7 @@
 import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import * as api from '../api'
+import { getToken, registerLogoutHook } from '../api'
 import { isEmailVerifiedError, VerifyEmailBanner } from '../components/VerifyEmailBanner'
 import { useDashboardCtx } from '../hooks/useDashboardCtx'
 
@@ -44,6 +84,11 @@ import { useDashboardCtx } from '../hooks/useDashboardCtx'
 const RAZORPAY_FALLBACK_URL = 'https://instanode.dev/pricing'
 const SUPPORT_EMAIL = 'support@instanode.dev'
 
+// Login redirect target — used when the second-layer auth gate trips.
+// Lives outside the component so it survives test re-renders and matches
+// the App-level AuthGate's destination exactly.
+const LOGIN_PATH = '/login'
+
 // Allowed plans + frequencies — must mirror the API's accepted values
 // (api/internal/handlers/billing.go:CreateCheckoutAPI). Anything outside
 // these sets is rejected before we even attempt the network call so the
@@ -53,10 +98,42 @@ const ALLOWED_FREQUENCIES = ['monthly', 'yearly'] as const
 type AllowedPlan = (typeof ALLOWED_PLANS)[number]
 type AllowedFrequency = (typeof ALLOWED_FREQUENCIES)[number]
 
+// CHECKOUT_CACHE_KEY_PREFIX — every localStorage key we might one day use
+// to cache checkout state (subscription_id, short_url, etc.) MUST start
+// with this prefix so the logout hook below can purge them in one sweep.
+// Today the page does NOT cache the short_url locally — but the prefix +
+// purge-on-logout guarantee is the defensive belt against a future
+// regression that adds such caching (BUG-P121/P122).
+export const CHECKOUT_CACHE_KEY_PREFIX = 'instanode.checkout.'
+
+// clearCheckoutCache — purge every localStorage entry whose key begins
+// with CHECKOUT_CACHE_KEY_PREFIX. Idempotent. Called from the logout
+// hook registered at module load below + exported for tests.
+export function clearCheckoutCache(): void {
+  try {
+    if (typeof localStorage === 'undefined') return
+    const doomed: string[] = []
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i)
+      if (k && k.startsWith(CHECKOUT_CACHE_KEY_PREFIX)) doomed.push(k)
+    }
+    for (const k of doomed) localStorage.removeItem(k)
+  } catch {
+    // localStorage may throw in some embedded contexts (private browsing,
+    // storage quota) — clearing is best-effort. If we can't read it, we
+    // also can't write into it from this page, so there's nothing to leak.
+  }
+}
+
+// Register the cache-purge on every logout. The hook registry is
+// idempotent (registerLogoutHook dedupes by reference) so this is safe
+// even if this module is re-evaluated under HMR / SSR hydration.
+registerLogoutHook(clearCheckoutCache)
+
 type Status =
   | { kind: 'loading' }
   | { kind: 'redirecting'; shortUrl: string }
-  | { kind: 'fallback' } // 503 billing_not_configured
+  | { kind: 'fallback' } // 503 billing_not_configured | billing_misconfigured
   | { kind: 'invalid'; reason: string }
   | { kind: 'error'; message: string }
   // B6-P0 008 (BUGBASH 2026-05-20): api returns 403 with an
@@ -64,12 +141,36 @@ type Status =
   // to upgrade. Surface a recoverable banner with a resend-magic-link
   // button instead of dropping the user on a generic "Checkout failed".
   | { kind: 'email_not_verified' }
+  // BUG-P111/P013 (P0/P1, 2026-05-29): second-layer auth gate. Set when
+  // getToken() returns null at component mount. Renders nothing visible
+  // because the effect immediately window.location.assign('/login?next=…')
+  // — but holding the state lets tests assert "we did not call
+  // createCheckout" without timing flake.
+  | { kind: 'unauthenticated' }
 
 function isAllowedPlan(p: string | null): p is AllowedPlan {
   return p !== null && (ALLOWED_PLANS as readonly string[]).includes(p)
 }
 function isAllowedFrequency(f: string | null): f is AllowedFrequency {
   return f !== null && (ALLOWED_FREQUENCIES as readonly string[]).includes(f)
+}
+
+// buildLoginRedirect — assemble the /login?next=<encoded path> URL that
+// preserves the plan + frequency the user was about to buy (BUG-P013).
+// Exported for unit testing.
+export function buildLoginRedirect(plan: string | null, frequency: string): string {
+  // Reconstruct the canonical /app/checkout path with the same plan +
+  // frequency the user was on so the LoginCallback round-trip can drop
+  // them back here. Use URLSearchParams so future query-param additions
+  // (e.g. ?promo=) get encoded correctly without hand-formatted ampersands.
+  const search = new URLSearchParams()
+  if (plan) search.set('plan', plan)
+  search.set('frequency', frequency)
+  const next = `/app/checkout?${search.toString()}`
+  // /login?next=<encoded> — LoginPage reads loc.state.from in the React
+  // Router path, but the OAuth + magic-link round-trips drop state, so we
+  // surface `next` as a query param too. The login flow normalizes both.
+  return `${LOGIN_PATH}?next=${encodeURIComponent(next)}`
 }
 
 export function CheckoutPage() {
@@ -82,6 +183,26 @@ export function CheckoutPage() {
 
   useEffect(() => {
     let cancelled = false
+
+    // ──────────────────────────────────────────────────────────────────────
+    // BUG-P111 second-layer auth gate (P0).
+    // The App-level AuthGate (App.tsx) already redirects token-less users
+    // to /login before this component mounts. BUT: a stale JWT in
+    // localStorage passes that gate; the server then 401s — and in the
+    // intervening millisecond the user has seen "Creating your Razorpay
+    // checkout session…" + we have a real outbound network call. Worse,
+    // any back/forward-cache restoration of a previously rendered
+    // 'redirecting' state could surface a leaked sub_* URL to an unauth
+    // browser (BUG-P121/P122). Re-check explicitly here, before any
+    // network call, and fail CLOSED with a redirect to /login?next=… so
+    // the user round-trips to their selected plan post-signin (BUG-P013).
+    // ──────────────────────────────────────────────────────────────────────
+    if (!getToken()) {
+      setStatus({ kind: 'unauthenticated' })
+      const dest = buildLoginRedirect(planRaw, frequencyRaw)
+      window.location.assign(dest)
+      return
+    }
 
     // Validate query params before hitting the API. The pricing CTAs always
     // send valid values, but a hand-typed URL or a stale bookmark could
@@ -121,10 +242,26 @@ export function CheckoutPage() {
         setStatus({ kind: 'error', message: 'Checkout response missing short_url.' })
       } catch (e: any) {
         if (cancelled) return
+        // 401 from the API: the user's token was rejected mid-flight (e.g.
+        // logged out from another tab, server-side jti invalidation). The
+        // global call() wrapper already calls handle401() which fires
+        // clearToken() + redirects to /login?session_expired=1. We tag the
+        // state so a test (or a future onAuthError analytics hook) can
+        // observe the path without us doing a second redirect on top of
+        // the wrapper's.
+        if (e?.status === 401) {
+          setStatus({ kind: 'unauthenticated' })
+          return
+        }
         // 503 billing_not_configured is the documented path when the
         // operator hasn't created the Razorpay plan_id for this tier yet.
-        // Render the friendly fallback instead of a raw error banner.
-        if (e?.status === 503 && e?.code === 'billing_not_configured') {
+        // 503 billing_misconfigured (BUG-P112 server-side guard) is the
+        // sibling — operator wired a live Razorpay key to a non-prod
+        // deployment. Both render the same fallback panel.
+        if (
+          e?.status === 503 &&
+          (e?.code === 'billing_not_configured' || e?.code === 'billing_misconfigured')
+        ) {
           setStatus({ kind: 'fallback' })
           return
         }
@@ -151,6 +288,16 @@ export function CheckoutPage() {
       <h2 style={{ fontSize: 22, fontWeight: 500, letterSpacing: '-0.02em', marginBottom: 16 }}>
         Checkout
       </h2>
+      {status.kind === 'unauthenticated' && (
+        // We've already issued window.location.assign('/login?next=…')
+        // synchronously in the effect — this marker is visible for the
+        // brief flash before the browser navigates, AND it gives tests
+        // a stable assertion target. Use a neutral message so a screen
+        // reader doesn't read "Checkout failed" during the redirect.
+        <p data-testid="checkout-unauthenticated" style={{ color: 'var(--text-dim)', fontSize: 14 }}>
+          Sign in to continue to checkout…
+        </p>
+      )}
       {status.kind === 'loading' && (
         <p data-testid="checkout-loading" style={{ color: 'var(--text-dim)', fontSize: 14 }}>
           Creating your Razorpay checkout session…

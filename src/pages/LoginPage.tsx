@@ -77,7 +77,22 @@ export function LoginPage() {
     setToken(token.trim())
     try {
       await fetchMe()
-      const dest = loc.state?.from && loc.state.from !== '/login' ? loc.state.from : '/app'
+      // BUG-P013 (P1, 2026-05-29): when CheckoutPage's second-layer auth
+      // gate redirects an unauth user it issues `/login?next=<encoded
+      // path>` (a hard window.location.assign, so React Router state is
+      // dropped). Read `next=` from the query string FIRST, fall back to
+      // `loc.state.from` (the App-level AuthGate path), then `/app`.
+      // /login itself is never a valid landing — reject so a stale
+      // bookmark doesn't trap the user in a loop.
+      const queryNext = typeof window !== 'undefined'
+        ? new URLSearchParams(window.location.search).get('next')
+        : null
+      const candidate = queryNext ?? loc.state?.from ?? '/app'
+      // Only honour relative same-origin paths so a forged
+      // /login?next=https://evil.com cannot phish the post-signin nav.
+      const dest = candidate.startsWith('/') && !candidate.startsWith('//') && candidate !== '/login'
+        ? candidate
+        : '/app'
       navigate(dest, { replace: true })
     } catch (e: any) {
       clearToken()

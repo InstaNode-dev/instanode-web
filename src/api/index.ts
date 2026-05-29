@@ -1780,10 +1780,18 @@ function mapBillingState(r: BillingStateResp): BillingDetails {
     // `subscription_status !== 'none'`. That conflates "the team already
     // has a subscription" with "checkout is available" — a freshly-claimed
     // paid team (subscription_status='none') would see checkout suppressed
-    // even though Razorpay is configured. Prefer the explicit wire field
-    // when the API sends it; otherwise default to `true` (Razorpay is
-    // configured in production) so checkout is never wrongly hidden.
-    razorpay_configured: r.razorpay_configured ?? true,
+    // even though Razorpay is configured. Prefer the explicit wire field.
+    //
+    // BUG-P088 (P1, 2026-05-29): the previous default `?? true` was
+    // optimistic — an older API build that omits the flag (or a partial
+    // outage where the field is dropped) would render the upgrade button
+    // as if Razorpay were live. Per CLAUDE.md memory
+    // `project_razorpay_recurring_not_enabled.md`, Razorpay recurring is
+    // NOT enabled on the prod account, so clicking that button surfaces a
+    // raw 502 from Razorpay's create-subscription call. Default FAIL-CLOSED
+    // (false) — when the server doesn't say, hide the button. Honest copy
+    // ("contact support to upgrade") beats a button that 502s.
+    razorpay_configured: r.razorpay_configured ?? false,
     subscription_status: r.subscription_status,
     payment_last4: r.payment_method?.last4,
     payment_network: r.payment_method?.brand,
