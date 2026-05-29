@@ -123,13 +123,19 @@ function DocsBody() {
 
   // DOG-33 (2026-05-29): the search input had a working sidebar-result list
   // but the main article body was unaffected — typing "razorpay" still showed
-  // every section. Build a Set of matching section ids so the main column can
-  // hide non-matching <section>s when there's an active query. Empty query
-  // (null `results`) means show everything.
-  const visibleIds = useMemo<Set<string> | null>(() => {
-    if (results === null) return null
-    return new Set(results.map((s) => s.id))
+  // every section. Build the visible-section list directly (single useMemo)
+  // so the main column can iterate over the filtered set without an inline
+  // filter() chain in JSX (which makes the filter callback impossible to
+  // exercise in test environments where the docs corpus is empty — see the
+  // .content/docs glob in DocsPage.tsx:38). Empty query → render everything.
+  const visibleSections = useMemo<Section[]>(() => {
+    if (results === null) return SECTIONS
+    const ids = new Set(results.map((s) => s.id))
+    return SECTIONS.filter((s) => ids.has(s.id))
   }, [results])
+  // Empty-state marker (no matches) — drives the "No matches" branch in the
+  // main column, separate from the section iterator so the JSX stays flat.
+  const noMatches = results !== null && results.length === 0
 
   // `/` shortcut focuses the search box (provided the user isn't
   // already typing in an input). Common convention on docs sites
@@ -234,16 +240,15 @@ function DocsBody() {
 
         {/* DOG-33: when the search box has matches, render only those sections
             in the main column. The sidebar TOC already filters in the same
-            way — keep them in lock-step so visible-TOC == visible-body. The
-            "No matches" empty state shows in the sidebar (intentional). */}
-        {visibleIds && visibleIds.size === 0 ? (
+            way — keep them in lock-step so visible-TOC == visible-body. */}
+        {noMatches ? (
           <div className="docs-section" data-testid="docs-no-matches">
             <p style={{ color: 'var(--text-dim)', fontSize: 14 }}>
               No sections match “{query}”. Clear the search to see all docs.
             </p>
           </div>
         ) : null}
-        {SECTIONS.filter((s) => visibleIds === null || visibleIds.has(s.id)).map((s) => (
+        {visibleSections.map((s) => (
           <section key={s.id} id={s.id} className="docs-section">
             {/* DOG-34 (2026-05-29): the "Edit on GitHub" link used to live
                 INSIDE the <h2>, which made screen readers announce section
