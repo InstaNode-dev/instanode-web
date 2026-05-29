@@ -666,7 +666,7 @@ export function MarketingPage() {
                   {'\n  '}<span className="key">"mcpServers"</span>: {'{'}
                   {'\n    '}<span className="key">"instanode"</span>: {'{'}
                   {'\n      '}<span className="key">"command"</span>: <span className="str">"npx"</span>,
-                  {'\n      '}<span className="key">"args"</span>: [<span className="str">"-y"</span>, <span className="str">"@instanode/mcp"</span>]
+                  {'\n      '}<span className="key">"args"</span>: [<span className="str">"-y"</span>, <span className="str">"instanode-mcp"</span>]
                   {'\n    '}{'}'}
                   {'\n  '}{'}'}
                   {'\n'}{'}'}
