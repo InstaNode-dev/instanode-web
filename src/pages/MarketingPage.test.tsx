@@ -116,4 +116,21 @@ describe('MarketingPage — claim consistency (T18 P1-4 / P1-6)', () => {
     expect(text).not.toMatch(/<10s/)
     expect(text).toMatch(/~60s/)
   })
+
+  // BIZ-3 (2026-05-29): the landing pricing tile shipped "1 small deployment"
+  // and "10 medium deployments" copy from the days when /deploy/new had a
+  // deployment_size field. The backend dropped that field; marketing
+  // /pricing dropped the size adjectives in the 2026-05-20 sweep; the
+  // landing tile lagged. Pin both strings out so a future copy edit can't
+  // silently re-introduce a contract claim the API doesn't honor.
+  it('landing pricing tile no longer claims "small / medium" deployment sizes', () => {
+    const { container } = render(
+      <MemoryRouter initialEntries={['/']}>
+        <MarketingPage />
+      </MemoryRouter>,
+    )
+    const text = container.textContent ?? ''
+    expect(text).not.toMatch(/small deployment/i)
+    expect(text).not.toMatch(/medium deployments/i)
+  })
 })
