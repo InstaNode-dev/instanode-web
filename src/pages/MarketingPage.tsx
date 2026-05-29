@@ -164,7 +164,7 @@ const PLANS: Plan[] = [
     features: [
       '1 GB Postgres · 8 conn',
       '50 MB Redis · 100 MB Mongo · 5 conn',
-      '1 small deployment · *.deployment.instanode.dev',
+      '1 deployment · *.deployment.instanode.dev',
       '20 vault entries · production env',
     ],
     cta: { label: 'Start hobby →', href: ROUTES.signin, variant: 'secondary' },
@@ -186,7 +186,7 @@ const PLANS: Plan[] = [
     features: [
       '10 GB Postgres · 20 conn',
       '512 MB Redis · 5 GB Mongo · 20 conn',
-      '50 GB object storage · 10 medium deployments · custom domain',
+      '50 GB object storage · 10 deployments · custom domain',
       // BugBash P3-08: kept in sync with PricingPage's "Vault envs" row
       // and the multi-env FAQ — Pro's multi-env is dev/staging/prod. The
       // earlier "+ custom" claim implied arbitrary named environments the
