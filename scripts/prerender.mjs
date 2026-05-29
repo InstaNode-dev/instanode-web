@@ -193,6 +193,21 @@ const ROUTE_META = {
     title: 'Dashboard · instanode',
     description: 'instanode dashboard — manage resources, deployments, and billing.',
   },
+  // UI-3 (2026-05-29): /app/checkout and /app/billing are external CTA
+  // destinations (from /pricing "Start Pro", magic-link "manage billing",
+  // and agent-clickable upsell links). Without pre-generated shells they
+  // hit GH Pages' 404.html fallback and ship HTTP 404 even when the body
+  // hydrates correctly — analytics noise + tab-strip title flash. Step
+  // 4.6 emits dist/app/checkout/index.html and dist/app/billing/index.html
+  // so external entries see HTTP 200.
+  '/app/checkout': {
+    title: 'Checkout · instanode',
+    description: 'Complete your instanode plan upgrade.',
+  },
+  '/app/billing': {
+    title: 'Billing · instanode',
+    description: 'Manage your instanode subscription, payment method, and invoices.',
+  },
 }
 
 /** escapeHtmlAttr — minimal escaping for text injected into an HTML
@@ -429,7 +444,16 @@ async function main() {
   // appears in the CLI test mock and any stale terminal scrollback /
   // chat transcript a user pastes. Without an entry under dist/cli-auth/,
   // GH Pages returns its 404 shell and the React Navigate never runs.
-  const authShellRoutes = ['/login', '/login/callback', '/claim', '/cli-auth']
+  // UI-3 (2026-05-29): add /app/checkout and /app/billing so external CTA
+  // entry from /pricing → "Start Pro" or magic-link → "manage billing"
+  // hits pre-generated dist/app/checkout/index.html and
+  // dist/app/billing/index.html shells with HTTP 200 instead of the
+  // GH Pages 404.html fallback (status code 404 even when the body
+  // hydrates correctly via the catch-all SPA shell). The /app shell
+  // already covers /app on its own (Step 4.5). Other /app/* deep links
+  // remain on the 404-status fallback — they are not external CTA
+  // destinations and aren't worth pre-generating.
+  const authShellRoutes = ['/login', '/login/callback', '/claim', '/cli-auth', '/app/checkout', '/app/billing']
   for (const route of authShellRoutes) {
     const p = resolve(DIST, route.replace(/^\//, ''), 'index.html')
     await mkdir(dirname(p), { recursive: true })
