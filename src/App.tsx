@@ -201,7 +201,7 @@ import { getToken } from './api'
 // Fix: encode the requested path as ?next=<encoded> on the redirect URL too.
 // LoginPage already reads `next` from the query string FIRST (then falls back
 // to loc.state.from). Now the breadcrumb survives the OAuth callback.
-function AuthGate({ children }: { children: JSX.Element }) {
+export function AuthGate({ children }: { children: JSX.Element }) {
   const loc = useLocation()
   const token = getToken()
   if (!token) {

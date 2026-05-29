@@ -15,22 +15,23 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import type { ReactElement } from 'react'
 import { render, screen } from '@testing-library/react'
 import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom'
 
-// Stash + clear the localStorage token between tests — `getToken()` reads
-// from localStorage; the AuthGate dispatches off it.
 beforeEach(() => {
   window.localStorage.clear()
 })
 
-// Mock the New Relic + heavy dashboard bits we don't need.
+// Mock the New Relic agent + RouteTracker so we don't pull telemetry into the
+// test runtime. The App-level RouteTracker is the only other place that touches
+// the browser agent on mount; mocking keeps the test fast and offline.
 vi.mock('./components/RouteTracker', () => ({ RouteTracker: () => null }))
 
-// We re-import AuthGate from App.tsx. It's a default function (not exported),
-// so we test the behavior end-to-end via the same Navigate-based router and
-// a tiny probe page that reflects the current path.
+// Import the real AuthGate (now exported from App.tsx after DOG-9 fix). Using
+// the real export means the patch-coverage gate counts these tests against
+// the actual AuthGate lines, not a parallel implementation.
+import { AuthGate } from './App'
+
 function PathProbe() {
   const loc = useLocation()
   return (
@@ -41,24 +42,8 @@ function PathProbe() {
   )
 }
 
-// Reproduce the AuthGate logic inline so we test the exact contract without
-// pulling in the entire App tree (which mounts a BrowserRouter and a full
-// router config). This mirrors App.tsx:AuthGate verbatim — when the source
-// changes the test must be updated in lockstep.
-import { Navigate, useLocation as useLoc2 } from 'react-router-dom'
-function AuthGate({ children }: { children: ReactElement }) {
-  const loc = useLoc2()
-  const token = window.localStorage.getItem('instanode.token')
-  if (!token) {
-    const from = loc.pathname + loc.search
-    const to = from === '/app' ? '/login' : `/login?next=${encodeURIComponent(from)}`
-    return <Navigate to={to} replace state={{ from }} />
-  }
-  return children
-}
-
 describe('AuthGate — preserves ?next=<path> on unauth redirect (DOG-9 / BUG-P013)', () => {
-  it('redirects /app/checkout?plan=hobby&frequency=monthly → /login?next=%2Fapp%2Fcheckout%3Fplan%3Dhobby%26frequency%3Dmonthly', () => {
+  it('redirects /app/checkout?plan=hobby&frequency=monthly → /login?next=<encoded>', () => {
     render(
       <MemoryRouter initialEntries={['/app/checkout?plan=hobby&frequency=monthly']}>
         <Routes>
