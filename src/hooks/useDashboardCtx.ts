@@ -88,9 +88,36 @@ export function setEnv(next: string) {
   refreshCounts()
 }
 
+// BUG-DASH-001 (P0) + BUG-DASH-002:
+//
+//   Pre-fix this function accepted env names of arbitrary length and
+//   stripped characters silently, then persisted the result to
+//   localStorage. A 67-char paste → every subsequent /api/v1/* call
+//   carried `?env=<67-char-name>` → vault 400 invalid_env, resources
+//   200 with empty list, no UI affordance to delete the bad value
+//   (user had to clear localStorage from devtools).
+//
+//   The api regex is `^[a-z0-9-]{1,32}$` (see api/internal/handlers/env.go
+//   + the `invalid_env` 400 branch). Underscores are NOT part of the
+//   api regex; the pre-fix JS regex `[^a-z0-9_-]` permitted them,
+//   producing names that the api would later reject — a different
+//   class of the same "client says yes, server says no" gap.
+//
+//   Fix: align the JS regex with the api regex, enforce the 32-char
+//   cap up front, and return early if validation fails. The caller
+//   (EnvSwitcher) already gates `addEnv` behind a non-empty draft so
+//   no UI plumbing changes are required.
+const ENV_REGEX = /^[a-z0-9-]{1,32}$/
+const ENV_MAX_LEN = 32
+
 export function addEnv(name: string) {
-  const clean = name.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '')
-  if (!clean) return
+  // Lowercase + strip api-invalid chars; underscores no longer survive
+  // (BUG-DASH-002). Clip to the api cap of 32 chars (BUG-DASH-001).
+  const clean = name.trim().toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, ENV_MAX_LEN)
+  // Final regex gate: empty / leading-dash-only / any drift from the
+  // api regex → bail out without persisting. setEnv is NOT called, so
+  // the live env stays on the previous valid value (no broken state).
+  if (!ENV_REGEX.test(clean)) return
   if (!state.envs.includes(clean)) {
     state = { ...state, envs: [...state.envs, clean] }
     emit()
