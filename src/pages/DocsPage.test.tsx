@@ -88,3 +88,24 @@ describe('DocsPage', () => {
     expect(document.activeElement).not.toBe(input)
   })
 })
+
+// UI-6 (2026-05-29): the docs search input shipped with only an aria-label,
+// failing the a11y rule "Form elements must have labels" — password managers,
+// form autofill, and Lighthouse a11y all expect a real <label htmlFor> + a
+// matching id/name on the input. This block pins the wiring.
+describe('DocsPage — search input a11y (UI-6)', () => {
+  it('input has an id and a name (so a <label htmlFor> can resolve and form autofill works)', () => {
+    renderPage()
+    const input = screen.getByLabelText('Search documentation') as HTMLInputElement
+    expect(input.id).toBe('docs-search')
+    expect(input.name).toBe('docs-search')
+  })
+
+  it('a real <label htmlFor> exists and its for attribute matches the input id', () => {
+    renderPage()
+    const input = screen.getByLabelText('Search documentation') as HTMLInputElement
+    const label = document.querySelector(`label[for="${input.id}"]`)
+    expect(label).not.toBeNull()
+    expect((label as HTMLLabelElement).htmlFor).toBe(input.id)
+  })
+})
