@@ -187,11 +187,29 @@ const LegalDocPage = lazy(() =>
 
 import { getToken } from './api'
 
+// AuthGate — redirects unauthenticated users to /login and preserves the
+// originally-requested path so they round-trip back after signin.
+//
+// DOG-9 / BUG-P013 (2026-05-29): we used to set ONLY state={{from}}. React
+// Router state survives in-tab navigation, but it does NOT survive the OAuth
+// or magic-link callback round-trip (the server redirects to /auth/callback
+// → /login → /app/...), and a plain `/login` URL leaves no breadcrumb for the
+// callback path to read. Net effect: a logged-out user clicking "Start
+// hobby →" landed on bare /login, signed in, then ended up on /app/dashboard
+// with all plan + frequency context lost.
+//
+// Fix: encode the requested path as ?next=<encoded> on the redirect URL too.
+// LoginPage already reads `next` from the query string FIRST (then falls back
+// to loc.state.from). Now the breadcrumb survives the OAuth callback.
 function AuthGate({ children }: { children: JSX.Element }) {
   const loc = useLocation()
   const token = getToken()
   if (!token) {
-    return <Navigate to="/login" replace state={{ from: loc.pathname + loc.search }} />
+    const from = loc.pathname + loc.search
+    // Don't pollute the URL when the requested path is just /app (the default
+    // post-signin destination anyway). Same-origin check happens in LoginPage.
+    const to = from === '/app' ? '/login' : `/login?next=${encodeURIComponent(from)}`
+    return <Navigate to={to} replace state={{ from }} />
   }
   return children
 }

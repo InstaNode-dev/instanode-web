@@ -121,6 +121,16 @@ function DocsBody() {
     return fuse.search(q).slice(0, 10).map((r) => r.item)
   }, [fuse, query])
 
+  // DOG-33 (2026-05-29): the search input had a working sidebar-result list
+  // but the main article body was unaffected — typing "razorpay" still showed
+  // every section. Build a Set of matching section ids so the main column can
+  // hide non-matching <section>s when there's an active query. Empty query
+  // (null `results`) means show everything.
+  const visibleIds = useMemo<Set<string> | null>(() => {
+    if (results === null) return null
+    return new Set(results.map((s) => s.id))
+  }, [results])
+
   // `/` shortcut focuses the search box (provided the user isn't
   // already typing in an input). Common convention on docs sites
   // (Stripe, Linear, Vercel).
@@ -222,12 +232,33 @@ function DocsBody() {
           <p>Everything you need to provision, deploy, and claim. Every curl below works as-is.</p>
         </header>
 
-        {SECTIONS.map((s) => (
+        {/* DOG-33: when the search box has matches, render only those sections
+            in the main column. The sidebar TOC already filters in the same
+            way — keep them in lock-step so visible-TOC == visible-body. The
+            "No matches" empty state shows in the sidebar (intentional). */}
+        {visibleIds && visibleIds.size === 0 ? (
+          <div className="docs-section" data-testid="docs-no-matches">
+            <p style={{ color: 'var(--text-dim)', fontSize: 14 }}>
+              No sections match “{query}”. Clear the search to see all docs.
+            </p>
+          </div>
+        ) : null}
+        {SECTIONS.filter((s) => visibleIds === null || visibleIds.has(s.id)).map((s) => (
           <section key={s.id} id={s.id} className="docs-section">
-            <h2>
-              <a href={`#${s.id}`} className="docs-section-anchor">
-                {s.title}
-              </a>
+            {/* DOG-34 (2026-05-29): the "Edit on GitHub" link used to live
+                INSIDE the <h2>, which made screen readers announce section
+                titles as "QuickstartEdit on GitHub ↗", "The seven services
+                Edit on GitHub ↗", etc., and meant the document outline +
+                Skip-to-section landmarks carried the action text. Split into
+                a header row so the heading reads clean and the edit link is
+                a sibling action — flex layout in CSS keeps the visual side-
+                by-side rendering. */}
+            <div className="docs-section-header">
+              <h2>
+                <a href={`#${s.id}`} className="docs-section-anchor">
+                  {s.title}
+                </a>
+              </h2>
               <a
                 href={editOnGithubUrl(s.id)}
                 target="_blank"
@@ -237,7 +268,7 @@ function DocsBody() {
               >
                 Edit on GitHub ↗
               </a>
-            </h2>
+            </div>
             <div className="docs-section-body">
               {renderMarkdown(s.body, { baseHeading: 'h3', keyPrefix: s.id })}
             </div>
@@ -339,9 +370,14 @@ function DocsStyles() {
       .docs-hero h1 { font-size: 40px; margin: 0 0 12px; letter-spacing: -0.02em; }
       .docs-hero p { color: var(--text-dim); font-size: 18px; line-height: 1.5; margin: 0 0 48px; }
       .docs-section { margin: 0 0 56px; }
-      .docs-section h2 {
-        font-size: 26px; margin: 0 0 16px; letter-spacing: -0.015em;
+      /* DOG-34: Edit-on-GitHub link is now a sibling of <h2>, not a child.
+         Use the wrapper to keep the visual side-by-side layout. */
+      .docs-section-header {
         display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
+        margin: 0 0 16px;
+      }
+      .docs-section-header h2 {
+        font-size: 26px; margin: 0; letter-spacing: -0.015em;
       }
       .docs-section-anchor { color: inherit; text-decoration: none; }
       .docs-section-anchor:hover::before { content: '# '; color: var(--accent); }
@@ -390,7 +426,7 @@ function DocsStyles() {
           background: var(--surface);
         }
         .docs-toc.open { display: block; }
-        .docs-section h2 { font-size: 22px; }
+        .docs-section-header h2 { font-size: 22px; }
       }
     `}</style>
   )

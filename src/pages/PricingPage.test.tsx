@@ -142,16 +142,43 @@ describe('PricingPage — four public tier cards present (M11 regression guard)'
 
   it('paid-tier CTAs are clickable links (not disabled spans) for hobby / pro / team', () => {
     renderPage()
-    // 2026-05-20 DOC-REALITY-DELTA: Team tier launched. CTA now points at
-    // a real mailto: (contact-sales). plans.yaml has team at $199/mo with
-    // every limit -1 (unlimited). If Team flips back to "coming soon",
-    // it'll be a disabled span and this test fails — the regression guard.
+    // 2026-05-20 DOC-REALITY-DELTA: Team tier launched. DOG-10 (2026-05-29):
+    // Team CTA flipped from mailto: to self-serve /app/checkout?plan=team
+    // now that api#168 + dashboard #106 enabled the Razorpay flow. plans.yaml
+    // has team at $199/mo with every limit -1 (unlimited). If Team flips back
+    // to "coming soon", it'll be a disabled span and this test fails — the
+    // regression guard.
     for (const tier of ['hobby', 'pro', 'team']) {
       const cta = screen.getByTestId(`pricing-cta-${tier}`)
       // <a> with href, not <span aria-disabled>.
       expect(cta.tagName).toBe('A')
       expect(cta.getAttribute('href')).toBeTruthy()
     }
+  })
+
+  it('Team CTA points to /app/checkout?plan=team (DOG-10 self-serve, no mailto) — monthly default', () => {
+    renderPage()
+    // DOG-10 (2026-05-29): Team self-serve via /app/checkout?plan=team.
+    // Default is monthly; the yearly path is asserted via the dedicated
+    // ?frequency=yearly URL-param test below.
+    const cta = screen.getByTestId('pricing-cta-team')
+    const href = cta.getAttribute('href') ?? ''
+    expect(href).not.toMatch(/^mailto:/)
+    expect(href).toContain('/app/checkout')
+    expect(href).toContain('plan=team')
+    expect(href).toContain('frequency=monthly')
+  })
+
+  it('Team CTA carries frequency=yearly when ?frequency=yearly URL param is set (DOG-10)', () => {
+    render(
+      <MemoryRouter initialEntries={['/pricing?frequency=yearly']}>
+        <PricingPage />
+      </MemoryRouter>,
+    )
+    const cta = screen.getByTestId('pricing-cta-team')
+    const href = cta.getAttribute('href') ?? ''
+    expect(href).not.toMatch(/^mailto:/)
+    expect(href).toContain('/app/checkout?plan=team&frequency=yearly')
   })
 
   it('Team tier shows $199/mo (DOC-REALITY-DELTA 2026-05-20 launch)', () => {
@@ -198,6 +225,24 @@ describe('PricingPage — URL params + hash anchors (BugBash B2-P1-1 / B2-P1-2)'
       const el = document.getElementById(`pricing-tier-${tier}`)
       expect(el).toBeTruthy()
     }
+  })
+})
+
+// ─── 4b. DOG-3 / BUG-P001: hobby_plus + growth tiers surfaced inline ──────
+
+describe('PricingPage — intermediate tiers visible (DOG-3 / BUG-P001)', () => {
+  it('renders the "Between the headline tiers" section with hobby_plus + growth', () => {
+    renderPage()
+    // DOG-3 (2026-05-29): hobby_plus + growth live in plans.yaml but used to
+    // be FAQ-only. The "Self-serve sign-up at every tier" marketing promise
+    // requires that every paid tier be discoverable on the public surface,
+    // not buried in an accordion. Pin the inline section + per-tier markers.
+    expect(screen.getByTestId('pricing-intermediate-tiers')).toBeTruthy()
+    expect(screen.getByTestId('intermediate-tier-hobby_plus')).toBeTruthy()
+    expect(screen.getByTestId('intermediate-tier-growth')).toBeTruthy()
+    const body = document.body.textContent ?? ''
+    expect(body).toContain('Hobby Plus · $19/mo')
+    expect(body).toContain('Growth · $99/mo')
   })
 })
 

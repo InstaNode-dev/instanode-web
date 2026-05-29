@@ -49,7 +49,12 @@ const TIERS: {
     key: 'anonymous',
     name: 'Anonymous',
     monthly: { price: 'free', sub: '24h ttl' },
-    cta: 'Try the curl',
+    // DOG-48 (2026-05-29): previous CTA "Try the curl" implied an in-page
+    // interactive runner — but the #try-curl section is a static <code>
+    // block with a copy-to-clipboard button, not a real REPL. Renamed to
+    // "See the curl" so the language matches the surface. Building a real
+    // playground (DOG-47) is a separate scoped piece of work.
+    cta: 'See the curl',
     ctaHrefMonthly: '#try-curl',
   },
   {
@@ -90,13 +95,14 @@ const TIERS: {
     monthly: { price: '$199', sub: '/ mo' },
     // team_yearly: $1990/yr ≈ $165.83/mo (~17% off $199 x 12).
     yearly: { price: '$165.83', sub: '/ mo billed yearly', saveLabel: 'save $398/yr' },
-    cta: 'Contact sales →',
-    // Team checkout goes through sales rather than self-serve until the
-    // full assisted-onboarding flow ships — same pattern as enterprise
-    // ladders elsewhere. Mailto keeps the funnel intact while we wire
-    // the assisted Razorpay path.
-    ctaHrefMonthly: 'mailto:support@instanode.dev?subject=Team%20plan%20inquiry',
-    ctaHrefYearly: 'mailto:support@instanode.dev?subject=Team%20plan%20inquiry%20(yearly)',
+    cta: 'Start team →',
+    // Team checkout is self-serve as of api#168 + dashboard #106 (Razorpay
+    // plan IDs configured server-side). DOG-10: previous mailto CTA leaked
+    // mid-funnel conversions on the $199/mo AOV path; checkout now matches
+    // the Hobby/Pro pattern so the marketing "Self-serve at every tier"
+    // promise above the comparison table is honored.
+    ctaHrefMonthly: '/app/checkout?plan=team&frequency=monthly',
+    ctaHrefYearly: '/app/checkout?plan=team&frequency=yearly',
   },
 ]
 
@@ -183,7 +189,7 @@ const FAQ: { q: string; a: string }[] = [
     // Calling this out on the public surface stops customers from
     // emailing us asking "what's $19/mo or $99/mo?".
     q: 'What are Hobby Plus and Growth — I see them in the API?',
-    a: "Intermediate tiers ($19/mo and $99/mo) offered as API-only upsell steps. They sit between Hobby/Pro and Pro/Team and are surfaced to existing customers as upgrade nudges (e.g. when a Hobby team hits 80% of its quota). They're not on the public pricing page on purpose — three public tiers are a cleaner first-time funnel. If you want them, ask in the dashboard or email support@instanode.dev."
+    a: "Intermediate tiers ($19/mo and $99/mo) summarized above under \"Between the headline tiers\". They sit between Hobby/Pro and Pro/Team and are surfaced to existing customers as upgrade nudges (e.g. when a Hobby team hits 80% of its quota). They're not in the headline ladder on purpose — three public tiers are a cleaner first-time funnel. If you want them, ask in the dashboard or email support@instanode.dev."
   },
   {
     // W12 H14: previous copy said "Cancel anytime" which contradicted the
@@ -428,6 +434,39 @@ export function PricingPage() {
             })}
           </div>
         </div>
+      </section>
+
+      {/* ---------- Between-the-ladders note (DOG-3 / BUG-P001) ---------- */}
+      {/* Hobby Plus ($19) + Growth ($99) exist in plans.yaml but are
+          intentionally not in the public ladder above (cleaner first-time
+          funnel). Previously they were ONLY documented in the FAQ — visitors
+          who hit Pro's limits without scrolling never knew the intermediate
+          step existed. Surface them inline with the comparison so the "Self-
+          serve sign-up at every tier" promise above is harder to falsify on
+          first glance. Anchor + data-testid lets the FAQ self-link to here. */}
+      <section
+        className="public-section"
+        id="intermediate-tiers"
+        aria-labelledby="intermediate-tiers-h"
+        data-testid="pricing-intermediate-tiers"
+      >
+        <h2 id="intermediate-tiers-h" className="public-section-h">Between the headline tiers</h2>
+        <p className="public-section-sub">
+          Two intermediate plans live behind the dashboard — surfaced as upgrade nudges when
+          your usage crosses a Hobby or Pro limit, not as front-page funnel entries.
+        </p>
+        <ul className="pricing-intermediate-list">
+          <li data-testid="intermediate-tier-hobby_plus">
+            <strong>Hobby Plus · $19/mo.</strong> Same Postgres + Redis as Hobby, plus a 1 GB
+            MongoDB (vs Hobby's 100 MB), 5,000 webhook receivers, and 2 deployments. The
+            "outgrew Hobby's Mongo" step.
+          </li>
+          <li data-testid="intermediate-tier-growth">
+            <strong>Growth · $99/mo.</strong> Unlimited MongoDB, unlimited webhooks, 1 GB Redis,
+            20 GB Postgres. Pro-tier supporting services without committing to Pro's deployment
+            ladder. Yearly billing not yet offered on this tier.
+          </li>
+        </ul>
       </section>
 
       {/* ---------- FAQ ---------- */}
@@ -763,6 +802,33 @@ function PricingStyles() {
         .pricing-cell:last-child { border-bottom: 0; }
         .pricing-row--head .pricing-cell { border-bottom: 1px solid var(--border); }
         .pricing-cell--feature { background: var(--elevated); }
+      }
+
+      /* DOG-3: intermediate tiers list (Hobby Plus + Growth callout) */
+      .pricing-intermediate-list {
+        list-style: none;
+        padding: 0; margin: 0;
+        display: grid;
+        gap: 12px;
+        grid-template-columns: 1fr;
+      }
+      @media (min-width: 720px) {
+        .pricing-intermediate-list { grid-template-columns: 1fr 1fr; }
+      }
+      .pricing-intermediate-list > li {
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 16px 18px;
+        background: var(--ink);
+        font-size: 13.5px;
+        color: var(--text-dim);
+        line-height: 1.55;
+        max-width: 540px;
+      }
+      .pricing-intermediate-list > li strong {
+        color: var(--text);
+        font-weight: 600;
+        margin-right: 4px;
       }
 
       /* faq */
