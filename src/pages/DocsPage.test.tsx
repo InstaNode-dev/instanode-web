@@ -183,3 +183,27 @@ describe('DocsPage — heading separated from Edit link (DOG-34)', () => {
     })
   })
 })
+
+// renderDocSection is the extracted top-level section renderer. Test it
+// directly with a synthetic Section fixture so the coverage gate doesn't
+// depend on the .content/docs corpus being prebuilt in CI (it isn't — the
+// coverage workflow skips fetch-content). Two cases mirror the on-page
+// structure: the heading is clean, the Edit link is a sibling.
+import { renderDocSection } from './DocsPage'
+
+describe('renderDocSection — synthetic fixture (DOG-33/34 coverage)', () => {
+  it('renders a <section> with the heading separated from the Edit link', () => {
+    const synthetic = { id: 'fixture', title: 'Fixture Section', body: 'just a body' }
+    const { container } = render(<>{renderDocSection(synthetic)}</>)
+    const section = container.querySelector('section.docs-section')
+    expect(section).toBeTruthy()
+    const header = container.querySelector('.docs-section-header')
+    expect(header).toBeTruthy()
+    const h2 = header?.querySelector('h2')
+    const editLink = header?.querySelector('a.docs-section-edit')
+    expect(h2?.textContent ?? '').toContain('Fixture Section')
+    expect(h2?.textContent ?? '').not.toMatch(/Edit on GitHub/)
+    expect(editLink).toBeTruthy()
+    expect(editLink?.getAttribute('href')).toContain('github.com/InstaNode-dev/content')
+  })
+})
