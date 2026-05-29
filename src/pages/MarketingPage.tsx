@@ -153,7 +153,11 @@ const PLANS: Plan[] = [
       '100 stored webhooks · 0 deployments',
       'no vault — claim resources first',
     ],
-    cta: { label: 'Try the curl ↗', href: ROUTES.playground, variant: 'secondary' },
+    // DOG-47 (2026-05-29): copy says "See the curl" because the #playground
+    // anchor below is a static screenshot (role="img"), not an interactive
+    // playground. Old "Try the curl" CTA implied a REPL and false-promised
+    // interactivity — visitors expecting to try-before-they-buy bounced.
+    cta: { label: 'See the curl ↗', href: ROUTES.playground, variant: 'secondary' },
   },
   {
     id: 'hobby',
@@ -198,9 +202,11 @@ const PLANS: Plan[] = [
   {
     // Team tier — launched 2026-05-20 (DOC-REALITY-DELTA sweep).
     // plans.yaml:375 has team at $199/mo, every limit -1 (unlimited).
-    // CTA goes via mailto: until the assisted-Razorpay flow ships; that
-    // keeps the funnel intact while honoring the support-only onboarding
-    // path for enterprise customers.
+    // DOG-1: CTA is self-serve via /app/checkout?plan=team (Razorpay plan IDs
+    // are configured server-side as of api#168 + dashboard #106). Previous
+    // mailto Team CTA contradicted the "Self-serve at every tier. No sales
+    // call." H2 directly above this tile and leaked mid-funnel conversions
+    // on the $199/mo AOV path.
     id: 'team',
     name: 'Team',
     tagline: 'For the engineering org. Dedicated infra + SLA + SSO.',
@@ -213,8 +219,8 @@ const PLANS: Plan[] = [
       'SSO/SAML · 99.9% SLA',
     ],
     cta: {
-      label: 'Contact sales →',
-      href: 'mailto:support@instanode.dev?subject=Team%20plan%20inquiry',
+      label: 'Start team →',
+      href: '/app/checkout?plan=team&frequency=monthly',
       variant: 'secondary',
     },
   },
@@ -308,8 +314,11 @@ export function MarketingPage() {
           <HeroPromptCard />
 
           <div className="mkt-hero-cta">
+            {/* DOG-47: "See the curl" — anchor scrolls to the static terminal
+                screenshot below. The previous "Try the curl" label implied an
+                in-page REPL and bounced anyone expecting interactivity. */}
             <a href={ROUTES.playground} className="btn btn-primary mkt-btn-large">
-              Try the curl <span aria-hidden="true">→</span>
+              See the curl <span aria-hidden="true">→</span>
             </a>
             <a href={ROUTES.pricing} className="btn btn-secondary mkt-btn-large">
               View pricing
@@ -550,8 +559,14 @@ export function MarketingPage() {
         <div className="mkt-wrap">
           <div className="mkt-section-head">
             <div className="mkt-section-tag">Pricing · No talk-to-sales gate</div>
+            {/* DOG-11 (2026-05-29): previous H2 "Self-serve at every tier"
+                contradicted the FAQ "downgrades + cancellation are handled by
+                support — email" reality (memory: project_no_self_serve_cancel_
+                downgrade.md — intentional policy, not a bug). Softened to
+                "Self-serve sign-up" so the signup direction is honest while
+                the support-only off-ramp stays the policy. */}
             <h2 className="mkt-section-title">
-              Self-serve at every tier. <span className="mkt-accent">No sales call.</span>
+              Self-serve sign-up at every tier. <span className="mkt-accent">No sales call.</span>
             </h2>
             <p className="mkt-section-sub">
               {/* FIX-G (2026-05-14): softened "Pro unlocks the multi-env

@@ -22,6 +22,15 @@ const MCP_JSON = JSON.stringify(
   2
 )
 
+// DOG-39 (2026-05-29): the CLI install path (cli#18 + .goreleaser.yml release
+// notes) was invisible to anyone landing on /for-agents — only MCP runtimes
+// were surfaced. The canonical curl-bash install lives at
+// https://raw.githubusercontent.com/InstaNode-dev/cli/master/install.sh; we
+// don't yet vendor it on instanode.dev (DOG-41 — operator follow-up), but the
+// canonical raw URL is the documented install path on the cli release page
+// and in the cli repo README, so referencing it here is honest.
+const CLI_INSTALL = 'curl -fsSL https://raw.githubusercontent.com/InstaNode-dev/cli/master/install.sh | sh'
+
 const REASONS: { eyebrow: string; body: string }[] = [
   {
     eyebrow: '01 · zero-auth first call',
@@ -106,6 +115,16 @@ export function ForAgentsPage() {
             hint="Drop into ~/.config/mcp/mcp.json (or any MCP host)."
             command={MCP_JSON}
             mode="json"
+          />
+          {/* DOG-39: CLI persona — the binary release (cli#18) lives on
+              GitHub releases; install via the canonical curl-bash one-liner.
+              Surfaces the cli path for engineers who don't want an agent
+              runtime but do want a deterministic local tool. */}
+          <IntegrationCard
+            title="instanode CLI"
+            hint="Single binary. Same agent flow, from your shell."
+            command={CLI_INSTALL}
+            mode="shell"
           />
         </div>
       </section>
