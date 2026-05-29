@@ -453,7 +453,17 @@ async function main() {
   // already covers /app on its own (Step 4.5). Other /app/* deep links
   // remain on the 404-status fallback — they are not external CTA
   // destinations and aren't worth pre-generating.
-  const authShellRoutes = ['/login', '/login/callback', '/claim', '/cli-auth', '/app/checkout', '/app/billing']
+  // DOG-42 (2026-05-29): extend to every /app/* page reachable from
+  // authenticated nav so deep links / refresh / share / bookmark return
+  // HTTP 200 instead of 404 (which the catch-all 404.html hydrates as
+  // the right page anyway, but the 404 status confuses monitoring +
+  // reader-mode tools + uptime checks).
+  const authShellRoutes = [
+    '/login', '/login/callback', '/claim', '/cli-auth',
+    '/app', '/app/checkout', '/app/billing',
+    '/app/dashboard', '/app/resources', '/app/deployments',
+    '/app/team', '/app/settings', '/app/audit', '/app/vault',
+  ]
   for (const route of authShellRoutes) {
     const p = resolve(DIST, route.replace(/^\//, ''), 'index.html')
     await mkdir(dirname(p), { recursive: true })
