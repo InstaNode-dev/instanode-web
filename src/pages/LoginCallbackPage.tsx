@@ -1,7 +1,44 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Brand } from '../components/Common'
-import { setToken, fetchMe } from '../api'
+import { setToken, fetchMe, getAPIBaseURL } from '../api'
+
+// AUTH-004 (api PR #176, 2026-05-29): the OAuth/magic-link browser
+// callback no longer puts the session JWT in the URL — it sets a Secure;
+// HttpOnly cookie (`instanode_session_exchange`, Path=/auth/exchange,
+// Max-Age=30) on the api origin and redirects here with ?signed_in=1.
+// The SPA POSTs /auth/exchange with credentials, gets `{token}` in the
+// response body, stores it in localStorage like the old flow, then
+// proceeds. Keeps the JWT out of URL/Referer/server-access logs.
+//
+// Legacy `?session_token=<jwt>` path is retained for any old links /
+// alternate JSON OAuth handlers that still URL-deliver the token (see
+// api/internal/handlers/auth.go appendSessionToken docstring).
+async function exchangeCookieForToken(): Promise<string> {
+  const apiBase = getAPIBaseURL()
+  const resp = await fetch(`${apiBase}/auth/exchange`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { Accept: 'application/json' },
+  })
+  if (!resp.ok) {
+    let detail = ''
+    try {
+      const body = await resp.json()
+      detail = body?.message ?? body?.error ?? ''
+    } catch {
+      // Non-JSON or empty body — keep detail empty; fall through to status.
+    }
+    const tag = detail ? `${resp.status} ${resp.statusText}: ${detail}` : `${resp.status} ${resp.statusText}`
+    throw new Error(`Session exchange failed (${tag}).`)
+  }
+  const body = await resp.json().catch(() => null)
+  const token = body && typeof body.token === 'string' ? body.token : ''
+  if (!token) {
+    throw new Error('Session exchange returned no token.')
+  }
+  return token
+}
 
 export function LoginCallbackPage() {
   const nav = useNavigate()
@@ -9,16 +46,21 @@ export function LoginCallbackPage() {
   const [err, setErr] = useState<string | null>(null)
 
   useEffect(() => {
-    const sessionToken = params.get('session_token')
-    if (!sessionToken) {
+    // AUTH-004 cookie-exchange marker takes precedence; legacy URL token
+    // remains a fallback for any old/alternate flows that still URL-encode it.
+    const signedIn = params.get('signed_in') === '1'
+    const legacyToken = params.get('session_token')
+    if (!signedIn && !legacyToken) {
       setErr('No session token in callback URL.')
       return
     }
     let cancelled = false
     ;(async () => {
-      setToken(sessionToken)
-      // Verify the token actually works before navigating.
       try {
+        const token = legacyToken ?? (await exchangeCookieForToken())
+        if (cancelled) return
+        setToken(token)
+        // Verify the token actually works before navigating.
         await fetchMe()
         if (cancelled) return
         // Restore the original destination (set by 401 interceptor pre-login)
