@@ -16,10 +16,16 @@ import { setToken, fetchMe, getAPIBaseURL } from '../api'
 // api/internal/handlers/auth.go appendSessionToken docstring).
 async function exchangeCookieForToken(): Promise<string> {
   const apiBase = getAPIBaseURL()
+  // DELIBERATE: no custom headers (no Accept, no Content-Type). A POST
+  // with only safelisted headers + credentials:include is a "simple
+  // cross-origin request" per the CORS spec — no preflight. Adding
+  // Accept:application/json would force an OPTIONS preflight that the
+  // api's PreflightAllowlist rejects (Accept not in corsAllowHeaders),
+  // returning 403 → "Failed to fetch" in the browser. The api returns
+  // JSON regardless of the request Accept header.
   const resp = await fetch(`${apiBase}/auth/exchange`, {
     method: 'POST',
     credentials: 'include',
-    headers: { Accept: 'application/json' },
   })
   if (!resp.ok) {
     let detail = ''

@@ -107,6 +107,13 @@ describe('LoginCallbackPage', () => {
     expect(init.method).toBe('POST')
     expect(init.credentials).toBe('include')
     expect(api.setToken).toHaveBeenCalledWith('xyz')
+    // Regression guard: NO custom request headers. A POST with only
+    // safelisted headers + credentials:include is a "simple cross-origin
+    // request" and avoids a CORS preflight. Adding Accept or Content-Type
+    // would force an OPTIONS preflight that the api's PreflightAllowlist
+    // rejects (those headers aren't in corsAllowHeaders), surfacing as
+    // "Failed to fetch" in the browser.
+    expect(init.headers).toBeUndefined()
   })
 
   it('AUTH-004: exchange non-2xx surfaces the api error message', async () => {
