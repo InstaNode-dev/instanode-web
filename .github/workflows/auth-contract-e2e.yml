@@ -1,0 +1,120 @@
+# Layer-1 PR-gate: AUTH-004 CORS contract + magic-link round-trip
+#
+# Why: the 2026-05-29 → 2026-05-30 login outage had THREE stacked failures
+# (web missing /auth/exchange POST, web sending Accept:application/json,
+# api missing access-control-allow-credentials). The worker auth-probe
+# catches it 5 min post-deploy; the OpenAPI contract CI catches schema
+# drift at PR time. Neither catches it END-TO-END IN A BROWSER before
+# merge. This workflow does — see e2e/auth-contract.spec.ts.
+#
+# What it runs:
+#   - Three Chromium-driven asserts against PROD api.instanode.dev +
+#     instanode.dev (override with E2E_API_URL / E2E_WEB_ORIGIN).
+#   - Bounded under 2 minutes (live tests are ~3s; lion's share is
+#     npm ci + Chromium download).
+#
+# Triggers:
+#   - pull_request to main (any path — auth surface is implicit to every PR).
+#   - push to main (post-merge canary).
+#   - workflow_dispatch (manual smoke).
+#   - repository_dispatch with type `auth-contract-e2e-from-api` (fired by
+#     the api repo's CI workflow when an api PR opens/pushes — closes the
+#     cross-repo gap, since an api-side CORS regression would otherwise
+#     ship without this gate firing).
+
+name: Auth contract E2E (PR gate)
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      api_url:
+        description: 'Override E2E_API_URL'
+        required: false
+        default: 'https://api.instanode.dev'
+      web_origin:
+        description: 'Override E2E_WEB_ORIGIN'
+        required: false
+        default: 'https://instanode.dev'
+  repository_dispatch:
+    types: [auth-contract-e2e-from-api]
+
+concurrency:
+  # Cancel an in-flight run when a new commit lands on the same PR.
+  # Different PRs / triggers still run in parallel.
+  group: auth-contract-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  auth-contract-e2e:
+    name: Auth contract smoke against prod
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      # SECURITY: never interpolate raw repository_dispatch client_payload
+      # values into `run:` scripts (workflow-injection sink). Pipe through
+      # env: and let the validate step sanitise. workflow_dispatch inputs
+      # are gated by repo write permission so are lower-risk but get the
+      # same treatment for consistency.
+      RAW_API_URL: ${{ github.event.inputs.api_url || github.event.client_payload.api_url || '' }}
+      RAW_WEB_ORIGIN: ${{ github.event.inputs.web_origin || github.event.client_payload.web_origin || '' }}
+      TRIGGER: ${{ github.event_name }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Validate + resolve E2E targets
+        # Allowlist the only hosts this smoke is permitted to drive. An
+        # attacker who fires a repository_dispatch with a hostile api_url
+        # cannot redirect the test to an attacker-controlled origin and
+        # exfiltrate the GITHUB_TOKEN — the value is rejected here.
+        # `set -u` would NOT catch the injection; explicit validation does.
+        env:
+          DEFAULT_API_URL: https://api.instanode.dev
+          DEFAULT_WEB_ORIGIN: https://instanode.dev
+        run: |
+          set -euo pipefail
+          api="${RAW_API_URL:-$DEFAULT_API_URL}"
+          web="${RAW_WEB_ORIGIN:-$DEFAULT_WEB_ORIGIN}"
+          case "$api" in
+            https://api.instanode.dev|https://api.instanode.dev/) ;;
+            *) echo "::error::E2E_API_URL '$api' not in allowlist {https://api.instanode.dev}"; exit 1 ;;
+          esac
+          case "$web" in
+            https://instanode.dev|https://instanode.dev/|https://www.instanode.dev|https://www.instanode.dev/) ;;
+            *) echo "::error::E2E_WEB_ORIGIN '$web' not in allowlist {https://instanode.dev,https://www.instanode.dev}"; exit 1 ;;
+          esac
+          # Strip trailing slash for stable comparison in the spec.
+          api="${api%/}"
+          web="${web%/}"
+          echo "E2E_API_URL=$api" >> "$GITHUB_ENV"
+          echo "E2E_WEB_ORIGIN=$web" >> "$GITHUB_ENV"
+          echo "Resolved E2E_API_URL=$api E2E_WEB_ORIGIN=$web trigger=$TRIGGER"
+
+      - run: npm ci
+
+      # Only Chromium — this is a smoke, not a cross-browser matrix.
+      - run: npx playwright install --with-deps chromium
+
+      - name: Run auth-contract smoke
+        run: npx playwright test --config=playwright.auth-contract.config.ts
+
+      # Upload trace + screenshots on failure so the PR author can replay
+      # the exact browser session locally (`npx playwright show-trace ...`).
+      - name: Upload Playwright trace on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: auth-contract-trace-${{ github.run_id }}
+          path: |
+            test-results/
+            playwright-report-auth-contract/
+          if-no-files-found: ignore
+          retention-days: 14
