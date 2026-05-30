@@ -51,6 +51,11 @@ const REASONS: { eyebrow: string; body: string }[] = [
     eyebrow: '04 · safe retries on every create',
     body:
       'Every create endpoint deduplicates retries. Pass an Idempotency-Key header for true exactly-once across a 24h window, or just retry safely — the server fingerprints (scope + route + canonical body) and replays for 120s. The response header X-Idempotent-Replay: true tells you when you hit the cache.'
+  },
+  {
+    eyebrow: '05 · in-place app updates',
+    body:
+      'Pushing v2 of an app? Re-call POST /deploy/new with the same name + redeploy=true (multipart form field). Same app_id, same URL, no extra slot. Without the flag, each call mints a new deployment — by design, so retries are safe.'
   }
 ]
 

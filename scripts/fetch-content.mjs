@@ -32,7 +32,7 @@
  */
 
 import { execSync } from 'child_process'
-import { copyFileSync, existsSync } from 'fs'
+import { copyFileSync, existsSync, readFileSync } from 'fs'
 import { resolve, dirname } from 'path'
 import { fileURLToPath } from 'url'
 
@@ -46,8 +46,28 @@ const BRANCH = process.env.INSTANODE_CONTENT_BRANCH || 'main'
 // build. Add new top-level content files here; nested trees (blog/, docs/,
 // use-cases/, pages/) are consumed via import.meta.glob at build time and
 // don't need an explicit copy.
+//
+// `requireMarkers` (optional): if set, the destination file is OVERWRITTEN
+// from `.content/<src>` only when the upstream copy already contains every
+// listed substring. If any marker is missing upstream, the existing
+// committed `dest` file is preserved instead, with a WARNING line. This is
+// the cross-repo lock-step guard for contract drift: when a new agent-
+// facing field is documented in `instanode-web/public/llms.txt` ahead of
+// its mirror landing in the content repo, the build does NOT silently
+// revert the documentation to the stale upstream version (which would
+// break tests in src/lib/llmsContract.test.ts and lie to agents reading
+// the live `https://instanode.dev/llms.txt`). Once the content-repo PR
+// lands, both copies will diverge in lockstep and the guard becomes a
+// no-op. See PR `docs/deploy-new-redeploy-param`.
 const SYNC_FILES = [
-  { src: 'llms.txt', dest: 'public/llms.txt' },
+  {
+    src: 'llms.txt',
+    dest: 'public/llms.txt',
+    // Markers MUST be kept in sync with the assertions in
+    // src/lib/llmsContract.test.ts — see rule 18 (registry-iterating
+    // regression test) and rule 22 (contract changes touch all surfaces).
+    requireMarkers: ['redeploy=true', '"redeployed":'],
+  },
 ]
 
 function run(cmd, opts = {}) {
@@ -83,12 +103,22 @@ if (existsSync(TARGET)) {
 
 // Sync top-level content files (e.g. llms.txt) into instanode-web so
 // Vite's static pipeline serves them at the apex on the next build.
-for (const { src, dest } of SYNC_FILES) {
+for (const { src, dest, requireMarkers } of SYNC_FILES) {
   const srcPath = resolve(TARGET, src)
   const destPath = resolve(ROOT, dest)
   if (!existsSync(srcPath)) {
     console.warn(`fetch-content: WARNING — ${src} missing from .content/; leaving ${dest} as-is.`)
     continue
+  }
+  if (requireMarkers && requireMarkers.length > 0) {
+    const upstream = readFileSync(srcPath, 'utf8')
+    const missing = requireMarkers.filter((m) => !upstream.includes(m))
+    if (missing.length > 0) {
+      console.warn(
+        `fetch-content: WARNING — upstream .content/${src} is missing required markers ${JSON.stringify(missing)}; PRESERVING the committed ${dest} (likely a contract update that has not yet landed in the content repo). Land the content-repo PR to clear this warning.`
+      )
+      continue
+    }
   }
   copyFileSync(srcPath, destPath)
   console.log(`fetch-content: synced .content/${src} → ${dest}`)

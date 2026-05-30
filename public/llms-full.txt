@@ -252,6 +252,108 @@ Feature flag: requires `queue` in INSTANT_ENABLED_SERVICES. Returns 503 if not e
 
 ---
 
+### POST /deploy/new — Deploy a single containerized app
+
+**Status: Live. Requires Bearer JWT.**
+
+Deploy a single container. Builds the image via in-cluster Kaniko (~30–90s), rolls it out on Kubernetes, and exposes it on `https://<name>-<short-app-id>.deployment.instanode.dev` with a Let's Encrypt cert. Returns 202 immediately — poll `GET /api/v1/deployments/:id` until `status=healthy`.
+
+For multi-service apps with internal service-to-service URLs, use `POST /stacks/new` instead.
+
+**Content-Type: multipart/form-data**
+
+Fields:
+- `tarball` (file, required): gzipped tar archive containing your Dockerfile + source, ≤50 MB.
+- `name` (string, required): 1–64 chars matching `^[A-Za-z0-9][A-Za-z0-9 _-]*$`. The human-readable label that appears in the URL and on the dashboard.
+- `port` (string, optional): container port the app listens on (default `8080`).
+- `env` (string, optional): deployment scope — `development` (default), `staging`, or `production`. Echoed back as `environment` in the response.
+- `env_vars` (string, optional): JSON-encoded object of env vars injected into the pod on first build (e.g. `'{"DATABASE_URL":"postgres://..."}'`).
+- `redeploy` (string, optional): pass `redeploy=true` to update an EXISTING app in place instead of creating a new one. See the "Redeploying an existing app" subsection below.
+
+#### First-time deploy
+
+```bash
+# Package source
+tar czf app.tar.gz -C ./myapp .
+
+# Deploy
+curl -X POST https://api.instanode.dev/deploy/new \
+  -H "Authorization: Bearer $UPGRADE_JWT" \
+  -F tarball=@app.tar.gz \
+  -F name=expense-tracker \
+  -F port=8080 \
+  -F 'env_vars={"DATABASE_URL":"postgres://..."}'
+```
+
+#### Response 202 (build started):
+```json
+{
+  "ok": true,
+  "app_id": "36ace884-1f2c-4a9b-8d11-9c2b7e6a0f4a",
+  "deploy_id": "36ace884",
+  "name": "expense-tracker",
+  "url": "https://expense-tracker-36ace884.deployment.instanode.dev",
+  "status": "building",
+  "environment": "development",
+  "redeployed": false,
+  "tier": "hobby",
+  "note": "App is building. Poll GET /api/v1/deployments/36ace884 for status."
+}
+```
+
+#### Redeploying an existing app (push v2)
+
+The default behaviour of `POST /deploy/new` is to **always create a new deployment** — a fresh `app_id` and a fresh URL — even when the `name` field collides with an existing app on the same team. That is by design: a unique URL per `POST` makes the endpoint safely retryable, but it means that an agent shipping v2 of an app and just re-calling `POST /deploy/new` ends up with two live pods, two URLs, and the per-tier `deployments_apps` slot count incremented by one. That is the wrong outcome for "I just want to push a code update to the same app."
+
+To update an existing app in place — same `app_id`, same URL, no new slot consumed — pass `redeploy=true` along with the same `name` you used for the original deploy:
+
+```bash
+# Package the updated source
+tar czf app.tar.gz -C ./myapp .
+
+# Redeploy in place
+curl -X POST https://api.instanode.dev/deploy/new \
+  -H "Authorization: Bearer $UPGRADE_JWT" \
+  -F tarball=@app.tar.gz \
+  -F name=expense-tracker \
+  -F redeploy=true
+```
+
+#### Response 202 (in-place redeploy):
+```json
+{
+  "ok": true,
+  "app_id": "36ace884-1f2c-4a9b-8d11-9c2b7e6a0f4a",
+  "deploy_id": "36ace884",
+  "name": "expense-tracker",
+  "url": "https://expense-tracker-36ace884.deployment.instanode.dev",
+  "status": "building",
+  "environment": "development",
+  "redeployed": true,
+  "tier": "hobby",
+  "note": "Redeploying existing app expense-tracker (app_id 36ace884). URL is unchanged. Poll GET /api/v1/deployments/36ace884 for status."
+}
+```
+
+Note the **same `app_id`, same `url`, and `redeployed: true`** — distinguishing this from a first-time deploy. Optional fields (`port`, `env`, `env_vars`) on a redeploy MERGE with the existing app's config; omitted fields keep their prior value.
+
+#### Response 404 (no matching app for redeploy):
+```json
+{
+  "ok": false,
+  "error": "no_matching_deployment",
+  "message": "No existing deployment named 'expense-tracker' found for this team. Drop redeploy=true to create a new app, or list deployments with GET /api/v1/deployments to confirm the name."
+}
+```
+
+When `redeploy=true` is set but no deployment with that name exists on the calling team, the API returns 404 rather than silently creating a fresh app. An agent that gets this response should either fix the `name`, drop the flag, or call `GET /api/v1/deployments` to discover the correct name. Without `redeploy=true`, the call falls through to first-time-deploy semantics and you end up with two parallel URLs.
+
+#### Idempotency note
+
+`redeploy=true` is the **only** documented in-place-update path for single-app deployments. The `POST /deploy/:id/redeploy` endpoint surfaced in the OpenAPI spec is internal to the dashboard's "Rebuild" button and is NOT supported as a public agent surface — its request shape is undocumented and the MCP `redeploy` tool (which calls it) is being retired in favour of `create_deploy({ ..., redeploy: true })`.
+
+---
+
 ### POST /stacks/new — Deploy an app stack
 
 **Status: Live**
