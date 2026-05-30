@@ -88,10 +88,13 @@ describe('LoginCallbackPage', () => {
   // ---- AUTH-004 (cookie-exchange) flow ----
 
   it('AUTH-004: ?signed_in=1 → POSTs /auth/exchange with credentials:include + uses returned token', async () => {
-    const fetchSpy = vi.fn(() => Promise.resolve(new Response(JSON.stringify({ token: 'xyz' }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    })))
+    const fetchSpy = vi.fn(
+      (_input: RequestInfo | URL, _init?: RequestInit) =>
+        Promise.resolve(new Response(JSON.stringify({ token: 'xyz' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })),
+    )
     ;(globalThis as any).fetch = fetchSpy
     ;(api.fetchMe as any).mockResolvedValue({ ok: true })
 
@@ -99,10 +102,10 @@ describe('LoginCallbackPage', () => {
     await waitFor(() => expect(screen.getByTestId('app-landed')).toBeTruthy())
 
     expect(fetchSpy).toHaveBeenCalledTimes(1)
-    const call = fetchSpy.mock.calls[0]
-    expect(String(call[0])).toMatch(/\/auth\/exchange$/)
-    expect((call[1] as RequestInit).method).toBe('POST')
-    expect((call[1] as RequestInit).credentials).toBe('include')
+    const [url, init] = fetchSpy.mock.calls[0] as [RequestInfo | URL, RequestInit]
+    expect(String(url)).toMatch(/\/auth\/exchange$/)
+    expect(init.method).toBe('POST')
+    expect(init.credentials).toBe('include')
     expect(api.setToken).toHaveBeenCalledWith('xyz')
   })
 
@@ -143,7 +146,9 @@ describe('LoginCallbackPage', () => {
 
   it('AUTH-004: signed_in=1 + legacy session_token both present → legacy wins (idempotent fallback)', async () => {
     ;(api.fetchMe as any).mockResolvedValue({ ok: true })
-    const fetchSpy = vi.fn()
+    const fetchSpy = vi.fn((_input: RequestInfo | URL, _init?: RequestInit) =>
+      Promise.resolve(new Response('{}', { status: 200 })),
+    )
     ;(globalThis as any).fetch = fetchSpy
 
     renderCallback('?signed_in=1&session_token=legacy123')
