@@ -8,7 +8,10 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { copyToClipboard, displayName, isUnnamed } from './Common'
+import { render } from '@testing-library/react'
+import { copyToClipboard, displayName, isUnnamed, ResourceIcon } from './Common'
+import { RESOURCE_TYPES } from '../api/types'
+import { CREDENTIALED_RESOURCE_TYPES } from '../api'
 
 describe('displayName / isUnnamed — mandatory-name fallback', () => {
   it('returns the name verbatim when present', () => {
@@ -38,6 +41,62 @@ describe('displayName / isUnnamed — mandatory-name fallback', () => {
 
   it('trims surrounding whitespace from real names', () => {
     expect(displayName('  spaced  ', 'postgres')).toBe('spaced')
+  })
+})
+
+// Registry-iterating regression: every wire `resource_type` must have a
+// real icon class on ResourceIcon AND an explicit decision (in or out) in
+// CREDENTIALED_RESOURCE_TYPES. The bug we're guarding: when /vector/new
+// shipped on 2026-05-20, the dashboard's typed surface forgot to add
+// 'vector' to ResourceType — the icon rendered as `undefined res-name-ico`
+// and the detail page silently skipped the credentials fetch, so vector
+// users could never see their connection_url. Iterating the registry (vs
+// hand-typing a list of cases) means a future POST /foo/new added to
+// RESOURCE_TYPES auto-fails the icon test until the map is updated.
+describe('ResourceIcon — every ResourceType has a non-empty icon class', () => {
+  for (const type of RESOURCE_TYPES) {
+    it(`renders a real ico-* class for resource_type="${type}"`, () => {
+      const { container } = render(<ResourceIcon type={type} />)
+      const span = container.querySelector('span')
+      expect(span).not.toBeNull()
+      const cls = span?.getAttribute('class') ?? ''
+      // Must include a registered ico-* prefix — `undefined` slips
+      // through when the map entry is missing, so guard explicitly.
+      expect(cls).not.toContain('undefined')
+      expect(/\bico-[a-z]{2,}\b/.test(cls)).toBe(true)
+    })
+  }
+})
+
+describe('CREDENTIALED_RESOURCE_TYPES — coverage check', () => {
+  it('every wire resource_type has an explicit in/out decision', () => {
+    // The set is small enough that an inverted list is the readable form.
+    // If a new ResourceType is added, this test forces the author to make
+    // an explicit decision: either add it to CREDENTIALED_RESOURCE_TYPES
+    // (db-shaped resources where /credentials returns connection_url) or
+    // update NON_CREDENTIALED below (webhook/storage/queue/deploy where
+    // /credentials 400s — see BugBash P3-02).
+    const NON_CREDENTIALED: ReadonlySet<string> = new Set([
+      'queue',
+      'storage',
+      'webhook',
+      'deploy',
+    ])
+    for (const type of RESOURCE_TYPES) {
+      const isCredentialed = CREDENTIALED_RESOURCE_TYPES.has(type)
+      const isNonCredentialed = NON_CREDENTIALED.has(type)
+      expect(
+        isCredentialed !== isNonCredentialed,
+        `resource_type="${type}" must appear in exactly one of CREDENTIALED_RESOURCE_TYPES or the test's NON_CREDENTIALED list`,
+      ).toBe(true)
+    }
+  })
+
+  it('vector is wired into the credentialed set (regression guard for 2026-05-30)', () => {
+    // Standalone marker: the bug surface was specifically vector being
+    // dropped. Leaving an explicit assertion makes a future revert
+    // surface in the test name, not just a count change.
+    expect(CREDENTIALED_RESOURCE_TYPES.has('vector')).toBe(true)
   })
 })
 

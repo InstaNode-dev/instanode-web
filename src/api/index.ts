@@ -622,8 +622,14 @@ type ResourceGetResp = { ok: boolean; item: any }
 // telemetry. Gating the fetch to these three types removes the noise
 // without changing behaviour for db/redis/mongo (the catch below still
 // guards genuine permission-hidden cases).
-const CREDENTIALED_RESOURCE_TYPES: ReadonlySet<ResourceType> = new Set<ResourceType>([
+export const CREDENTIALED_RESOURCE_TYPES: ReadonlySet<ResourceType> = new Set<ResourceType>([
   'postgres',
+  // 'vector' is wire-distinct from 'postgres' but uses the same Postgres
+  // credentials shape — `/api/v1/resources/:id/credentials` returns a
+  // working postgres:// URL. Without this entry, opening a vector
+  // resource's detail page never fetches the connection_url and the
+  // "Connection string" panel renders empty.
+  'vector',
   'redis',
   'mongodb',
 ])

@@ -11,14 +11,29 @@ export type Tier = 'anonymous' | 'free' | 'hobby' | 'hobby_plus' | 'pro' | 'team
 export type Role = 'owner' | 'admin' | 'developer' | 'viewer' | 'member'
 export type Env = 'production' | 'staging' | 'development' | string
 
-export type ResourceType =
-  | 'postgres'
-  | 'redis'
-  | 'mongodb'
-  | 'queue'
-  | 'storage'
-  | 'webhook'
-  | 'deploy'
+// RESOURCE_TYPES — runtime-iterable registry of every wire resource_type
+// the dashboard can receive on /api/v1/resources. Tests iterate this to
+// guarantee that every type has a ResourceIcon entry and an explicit
+// CREDENTIALED_RESOURCE_TYPES decision, so a future addition (e.g. a new
+// /something/new endpoint) cannot silently render an empty icon class or
+// drop the credentials fetch on the resource detail page.
+//
+// `vector` was added when POST /vector/new shipped on 2026-05-20 — it
+// provisions a real Postgres with the pgvector extension installed, so on
+// the wire it's a distinct resource_type even though the credentials
+// shape is identical to plain postgres.
+export const RESOURCE_TYPES = [
+  'postgres',
+  'vector',
+  'redis',
+  'mongodb',
+  'queue',
+  'storage',
+  'webhook',
+  'deploy',
+] as const
+
+export type ResourceType = (typeof RESOURCE_TYPES)[number]
 
 export type ResourceStatus = 'active' | 'paused' | 'expired' | 'tombstoned' | 'deleted' | 'reaped'
 

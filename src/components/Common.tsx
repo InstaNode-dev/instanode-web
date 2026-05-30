@@ -136,8 +136,14 @@ export function ScopePill({ scope }: { scope: 'read' | 'write' | 'agent' }) {
 
 // ------------- icons -------------
 export function ResourceIcon({ type, size = 22 }: { type: ResourceType; size?: number }) {
+  // Exhaustive map over ResourceType — TS will block a future addition to
+  // the union that forgets to wire an icon class here. `vector` reuses the
+  // Postgres glyph because pgvector is a Postgres extension; the wire
+  // distinction is preserved upstream so audit + storage scans can split
+  // it, but visually it belongs to the Postgres family.
   const map: Record<ResourceType, string> = {
     postgres: 'ico-pg',
+    vector: 'ico-pg',
     redis: 'ico-rd',
     mongodb: 'ico-mg',
     queue: 'ico-qu',
