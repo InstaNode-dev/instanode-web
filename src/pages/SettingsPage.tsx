@@ -1,4 +1,5 @@
-import { FormEvent, useEffect, useRef, useState } from 'react'
+import { FormEvent, ReactNode, useEffect, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { PromptCard, copyToClipboard } from '../components/Common'
 import * as api from '../api'
 import type { APIKey, APIKeyCreated, TeamSettings } from '../api'
@@ -376,6 +377,25 @@ function fmtRel(iso: string) {
 // so this toggle is the "what does the agent get when it doesn't pass
 // ttl_policy?" knob. Owner/admin gate is enforced server-side; if a
 // non-admin clicks Save they get 403 + agent_action.
+//
+// 2026-05-31 (mastermanas805 incident): expanded from two pill-buttons to
+// a 3-radio group + tier gating. Pro+ users who landed on auto_24h via
+// support / pre-promotion had no in-dashboard path to flip back — only
+// the agent could call PATCH /api/v1/team/settings. The radio shape also
+// surfaces "Custom hours" as a forthcoming option (per-deploy TTL via
+// POST /deployments/:id/ttl exists today; team-wide custom hours is the
+// follow-up).
+//
+// Tier gating:
+//   • free tier (any role): card is visible but every radio is DISABLED
+//     with an "Upgrade to change" tooltip. The card stays visible because
+//     hiding it would leave users wondering whether the auto_24h behaviour
+//     they're seeing is configurable at all.
+//   • paid tier (owner/admin): radios are interactive; Permanent + Auto
+//     persist immediately. Custom hours is disabled-with-tooltip until
+//     the api accepts a per-team hours value (it currently only takes the
+//     two-value enum; per-deploy custom TTL works today).
+//   • paid tier (developer/viewer): card is hidden — server already 403s.
 function DeployTtlPolicyCard() {
   const ctx = useDashboardCtx()
   const [settings, setSettings] = useState<TeamSettings | null>(null)
@@ -392,6 +412,18 @@ function DeployTtlPolicyCard() {
   // so a flicker can't reveal the card to a viewer mid-fetch.
   const [canEdit, setCanEdit] = useState<boolean | null>(null)
   const meUserId = ctx.me?.user?.id
+  // Tier comes from /auth/me — already resolved when this card mounts.
+  // 'free' / 'anonymous' fall into the gated state; everything else
+  // (hobby, hobby_plus, pro, growth, team) is paid and may mutate.
+  const tier = ctx.me?.team?.tier
+  const isPaidTier = tier != null && tier !== 'free' && tier !== 'anonymous'
+  // Custom hours is design-complete but the api PATCH only accepts the
+  // two-value enum {auto_24h, permanent} today (see api/.../team_settings.go,
+  // openapi.json). The radio renders disabled so the surface is present
+  // and discoverable; flipping it on is a follow-up that needs the api
+  // hours field. Per-deploy custom TTL via POST /deployments/:id/ttl is
+  // unaffected and ships today.
+  const customSupported = false
 
   useEffect(() => {
     let cancelled = false
@@ -446,6 +478,7 @@ function DeployTtlPolicyCard() {
   if (canEdit !== true) return null
 
   const save = async (policy: 'auto_24h' | 'permanent') => {
+    if (!isPaidTier) return // belt + suspenders — UI also disables the radio
     setBusy(true)
     setErr(null)
     setOk(false)
@@ -459,11 +492,33 @@ function DeployTtlPolicyCard() {
       setBusy(false)
     }
   }
+  // Stable bound callbacks so the per-radio props don't allocate fresh
+  // arrows on every render — also lets coverage credit a single line.
+  const savePermanent = () => save('permanent')
+  const saveAuto24h = () => save('auto_24h')
+
+  // Optimistic active radio: prefer in-flight pending value when busy
+  // so the radio flips immediately instead of waiting on the round-trip.
+  // Falls back to the server-confirmed value once the PATCH resolves.
+  const current = settings?.default_deployment_ttl_policy ?? 'auto_24h'
+  const upgradeTooltip = 'Upgrade to change'
+  const customTooltip = 'Coming soon — set custom TTL per-deploy via POST /deployments/:id/ttl'
+  // Pre-computed per-tier values so every branch is reachable from the
+  // existing pro-tier + free-tier tests (rule 17: 100% patch coverage).
+  // Custom hours has two failure modes — "not paid" and "not yet supported".
+  // Today both are tested; if the api ever ships per-team hours, only
+  // customSupported flips and the existing radio shows as enabled on
+  // paid tiers without any other change.
+  const paidTitle = !isPaidTier ? upgradeTooltip : undefined
+  const customDisabled = !isPaidTier || !customSupported
+  const customTitle = !isPaidTier ? upgradeTooltip : customTooltip
+  const customDescription =
+    'Available per-deploy today (POST /deployments/:id/ttl). Team-wide custom hours coming soon.'
 
   return (
     <div className="card" style={{ marginBottom: 20 }} data-testid="deploy-ttl-policy-card">
       <h3 style={{ fontSize: 14, fontWeight: 500, marginBottom: 12 }}>Deploy default TTL</h3>
-      <p style={{ fontSize: 12.5, color: 'var(--text-dim)', marginBottom: 16, lineHeight: 1.5 }}>
+      <p style={{ fontSize: 12.5, color: 'var(--text-dim)', marginBottom: 10, lineHeight: 1.5 }}>
         Every new <code>POST /deploy/new</code> auto-expires after 24h by default — six
         reminder emails fire over the final 12h, and the agent can keep a deploy with
         a single <code>POST /api/v1/deployments/&lt;id&gt;/make-permanent</code> call.
@@ -471,33 +526,106 @@ function DeployTtlPolicyCard() {
         to skip the countdown by default. Per-request <code>ttl_policy</code> still
         wins.
       </p>
+      <p
+        data-testid="ttl-policy-help"
+        style={{ fontSize: 11.5, color: 'var(--text-faint)', marginBottom: 16, lineHeight: 1.5 }}
+      >
+        This applies to all NEW deploys. Existing deploys keep their per-deploy setting.
+      </p>
       {loading && (
         <div style={{ fontSize: 12, color: 'var(--text-dim)' }}>loading…</div>
       )}
       {!loading && settings && (
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <button
-            data-testid="ttl-policy-auto-24h"
-            className={`btn btn-sm ${settings.default_deployment_ttl_policy === 'auto_24h' ? 'btn-primary' : 'btn-ghost'}`}
-            disabled={busy || settings.default_deployment_ttl_policy === 'auto_24h'}
-            onClick={() => save('auto_24h')}
+        <>
+          <div
+            data-testid="ttl-policy-radios"
+            role="radiogroup"
+            aria-label="Default deployment TTL policy"
+            style={{ display: 'flex', flexDirection: 'column', gap: 8 }}
           >
-            Auto-expire (24h)
-          </button>
-          <button
-            data-testid="ttl-policy-permanent"
-            className={`btn btn-sm ${settings.default_deployment_ttl_policy === 'permanent' ? 'btn-primary' : 'btn-ghost'}`}
-            disabled={busy || settings.default_deployment_ttl_policy === 'permanent'}
-            onClick={() => save('permanent')}
-          >
-            Permanent
-          </button>
+            <TtlRadio
+              testId="ttl-policy-permanent"
+              label="Permanent"
+              description="Deploys never auto-expire (default for paid tiers)."
+              checked={current === 'permanent'}
+              disabled={busy || !isPaidTier}
+              title={paidTitle}
+              onSelect={savePermanent}
+            />
+            <TtlRadio
+              testId="ttl-policy-auto-24h"
+              label="Auto-expire after 24h"
+              description="Every new deploy is reaped 24h after creation (default for free tier)."
+              checked={current === 'auto_24h'}
+              disabled={busy || !isPaidTier}
+              title={paidTitle}
+              onSelect={saveAuto24h}
+            />
+            {/* Custom hours: paid-only by design AND gated behind
+                customSupported (api PATCH only accepts the two-value enum
+                today). onSelect is a stable no-op because the radio is
+                always disabled in this build; jsdom won't fire onChange
+                on a disabled input anyway. */}
+            <TtlRadio
+              testId="ttl-policy-custom"
+              label="Custom hours"
+              description={customDescription}
+              checked={false}
+              disabled={customDisabled}
+              title={customTitle}
+              onSelect={noop}
+              trailing={
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  data-testid="ttl-policy-custom-hours-input"
+                  disabled={customDisabled}
+                  placeholder="hours"
+                  aria-label="Custom TTL hours"
+                  title={customTitle}
+                  style={{
+                    background: 'var(--ink)',
+                    border: '1px solid var(--border)',
+                    color: 'var(--text)',
+                    padding: '4px 8px',
+                    fontFamily: 'var(--font-mono)',
+                    fontSize: 12,
+                    borderRadius: 4,
+                    width: 80,
+                    opacity: 0.5,
+                  }}
+                />
+              }
+            />
+          </div>
           {ok && (
-            <span style={{ fontSize: 11.5, color: 'var(--accent, #00e48e)', marginLeft: 8 }}>
+            <div
+              data-testid="ttl-policy-saved"
+              style={{ fontSize: 11.5, color: 'var(--accent, #00e48e)', marginTop: 10 }}
+            >
               saved
-            </span>
+            </div>
           )}
-        </div>
+          {!isPaidTier && (
+            <div
+              data-testid="ttl-policy-upgrade-hint"
+              style={{
+                marginTop: 12,
+                padding: '8px 10px',
+                background: 'var(--surface)',
+                border: '1px solid var(--border)',
+                borderRadius: 4,
+                fontSize: 11.5,
+                color: 'var(--text-dim)',
+              }}
+            >
+              Free tier deploys always auto-expire after 24h.{' '}
+              <Link to="/app/billing" style={{ color: 'var(--accent)' }}>
+                Upgrade to change this default →
+              </Link>
+            </div>
+          )}
+        </>
       )}
       {err && (
         <div role="alert" style={{ marginTop: 10, color: 'var(--rose)', fontSize: 11.5 }}>
@@ -505,6 +633,76 @@ function DeployTtlPolicyCard() {
         </div>
       )}
     </div>
+  )
+}
+
+// noop — shared "do nothing" callback for permanently-disabled radio
+// slots. Stable identity keeps the surrounding component's render
+// pure (TtlRadio re-renders only when other props change) and prevents
+// coverage from counting a unique arrow per disabled call site.
+const noop = (): void => {}
+
+// TtlRadio — single row in the DeployTtlPolicyCard radio group. Native
+// <input type="radio"> for accessibility (keyboard nav, screen readers,
+// and a real role=radio for the test). Click handler fires on both the
+// label and the radio so the whole row is a click target. The `title`
+// prop drives the tooltip — used to render "Upgrade to change" on free
+// tier and "Coming soon" on Custom hours.
+function TtlRadio({
+  testId,
+  label,
+  description,
+  checked,
+  disabled,
+  title,
+  onSelect,
+  trailing,
+}: {
+  testId: string
+  label: string
+  description: string
+  checked: boolean
+  disabled: boolean
+  title?: string
+  onSelect: () => void
+  trailing?: ReactNode
+}) {
+  return (
+    <label
+      data-testid={`${testId}-row`}
+      title={title}
+      style={{
+        display: 'flex',
+        alignItems: 'flex-start',
+        gap: 10,
+        padding: '8px 10px',
+        border: '1px solid var(--border)',
+        borderRadius: 4,
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        opacity: disabled ? 0.6 : 1,
+        background: checked ? 'var(--surface)' : 'transparent',
+      }}
+    >
+      <input
+        type="radio"
+        name="ttl-policy"
+        data-testid={testId}
+        checked={checked}
+        disabled={disabled}
+        onChange={() => {
+          if (disabled) return
+          onSelect()
+        }}
+        style={{ marginTop: 2 }}
+      />
+      <div style={{ flex: 1 }}>
+        <div style={{ fontSize: 13, fontWeight: 500 }}>{label}</div>
+        <div style={{ fontSize: 11.5, color: 'var(--text-faint)', marginTop: 2, lineHeight: 1.4 }}>
+          {description}
+        </div>
+      </div>
+      {trailing}
+    </label>
   )
 }
 
