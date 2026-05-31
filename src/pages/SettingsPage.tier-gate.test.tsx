@@ -119,6 +119,29 @@ describe('DeployTtlPolicyCard — paid tier (pro, owner)', () => {
     await waitFor(() => expect(screen.getByTestId('ttl-policy-saved')).toBeTruthy())
   })
 
+  it('saves "Auto-expire after 24h" when the user flips back from permanent', async () => {
+    ctxOverride.tier = 'pro'
+    // Start in permanent, then flip to auto_24h — covers save('auto_24h').
+    m.getTeamSettings.mockResolvedValue({
+      ok: true,
+      settings: { default_deployment_ttl_policy: 'permanent' },
+    })
+    m.updateTeamSettings.mockResolvedValue({
+      ok: true,
+      settings: { default_deployment_ttl_policy: 'auto_24h' },
+    })
+    renderPage()
+    await waitFor(() => expect(screen.getByTestId('ttl-policy-auto-24h')).toBeTruthy())
+    const auto = screen.getByTestId('ttl-policy-auto-24h') as HTMLInputElement
+    expect(auto.checked).toBe(false)
+    fireEvent.click(auto)
+    await waitFor(() =>
+      expect(m.updateTeamSettings).toHaveBeenCalledWith({
+        default_deployment_ttl_policy: 'auto_24h',
+      }),
+    )
+  })
+
   it('keeps the static help text visible', async () => {
     ctxOverride.tier = 'pro'
     renderPage()

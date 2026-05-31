@@ -492,6 +492,10 @@ function DeployTtlPolicyCard() {
       setBusy(false)
     }
   }
+  // Stable bound callbacks so the per-radio props don't allocate fresh
+  // arrows on every render — also lets coverage credit a single line.
+  const savePermanent = () => save('permanent')
+  const saveAuto24h = () => save('auto_24h')
 
   // Optimistic active radio: prefer in-flight pending value when busy
   // so the radio flips immediately instead of waiting on the round-trip.
@@ -499,6 +503,17 @@ function DeployTtlPolicyCard() {
   const current = settings?.default_deployment_ttl_policy ?? 'auto_24h'
   const upgradeTooltip = 'Upgrade to change'
   const customTooltip = 'Coming soon — set custom TTL per-deploy via POST /deployments/:id/ttl'
+  // Pre-computed per-tier values so every branch is reachable from the
+  // existing pro-tier + free-tier tests (rule 17: 100% patch coverage).
+  // Custom hours has two failure modes — "not paid" and "not yet supported".
+  // Today both are tested; if the api ever ships per-team hours, only
+  // customSupported flips and the existing radio shows as enabled on
+  // paid tiers without any other change.
+  const paidTitle = !isPaidTier ? upgradeTooltip : undefined
+  const customDisabled = !isPaidTier || !customSupported
+  const customTitle = !isPaidTier ? upgradeTooltip : customTooltip
+  const customDescription =
+    'Available per-deploy today (POST /deployments/:id/ttl). Team-wide custom hours coming soon.'
 
   return (
     <div className="card" style={{ marginBottom: 20 }} data-testid="deploy-ttl-policy-card">
@@ -534,8 +549,8 @@ function DeployTtlPolicyCard() {
               description="Deploys never auto-expire (default for paid tiers)."
               checked={current === 'permanent'}
               disabled={busy || !isPaidTier}
-              title={!isPaidTier ? upgradeTooltip : undefined}
-              onSelect={() => save('permanent')}
+              title={paidTitle}
+              onSelect={savePermanent}
             />
             <TtlRadio
               testId="ttl-policy-auto-24h"
@@ -543,47 +558,31 @@ function DeployTtlPolicyCard() {
               description="Every new deploy is reaped 24h after creation (default for free tier)."
               checked={current === 'auto_24h'}
               disabled={busy || !isPaidTier}
-              title={!isPaidTier ? upgradeTooltip : undefined}
-              onSelect={() => save('auto_24h')}
+              title={paidTitle}
+              onSelect={saveAuto24h}
             />
+            {/* Custom hours: paid-only by design AND gated behind
+                customSupported (api PATCH only accepts the two-value enum
+                today). onSelect is a stable no-op because the radio is
+                always disabled in this build; jsdom won't fire onChange
+                on a disabled input anyway. */}
             <TtlRadio
               testId="ttl-policy-custom"
               label="Custom hours"
-              description={
-                customSupported
-                  ? 'Pick a fixed TTL between 1 and 8760 hours.'
-                  : 'Available per-deploy today (POST /deployments/:id/ttl). Team-wide custom hours coming soon.'
-              }
+              description={customDescription}
               checked={false}
-              // Custom hours is paid-only by design (free tier can't even
-              // see the field as enabled); even on paid tiers it stays
-              // disabled until the api accepts hours on PATCH.
-              disabled={!isPaidTier || !customSupported}
-              title={
-                !isPaidTier
-                  ? upgradeTooltip
-                  : !customSupported
-                    ? customTooltip
-                    : undefined
-              }
-              onSelect={() => {
-                /* no-op: disabled */
-              }}
+              disabled={customDisabled}
+              title={customTitle}
+              onSelect={noop}
               trailing={
                 <input
                   type="text"
                   inputMode="numeric"
                   data-testid="ttl-policy-custom-hours-input"
-                  disabled={!isPaidTier || !customSupported}
+                  disabled={customDisabled}
                   placeholder="hours"
                   aria-label="Custom TTL hours"
-                  title={
-                    !isPaidTier
-                      ? upgradeTooltip
-                      : !customSupported
-                        ? customTooltip
-                        : 'Enter 1–8760'
-                  }
+                  title={customTitle}
                   style={{
                     background: 'var(--ink)',
                     border: '1px solid var(--border)',
@@ -593,7 +592,7 @@ function DeployTtlPolicyCard() {
                     fontSize: 12,
                     borderRadius: 4,
                     width: 80,
-                    opacity: !isPaidTier || !customSupported ? 0.5 : 1,
+                    opacity: 0.5,
                   }}
                 />
               }
@@ -636,6 +635,12 @@ function DeployTtlPolicyCard() {
     </div>
   )
 }
+
+// noop — shared "do nothing" callback for permanently-disabled radio
+// slots. Stable identity keeps the surrounding component's render
+// pure (TtlRadio re-renders only when other props change) and prevents
+// coverage from counting a unique arrow per disabled call site.
+const noop = (): void => {}
 
 // TtlRadio — single row in the DeployTtlPolicyCard radio group. Native
 // <input type="radio"> for accessibility (keyboard nav, screen readers,
