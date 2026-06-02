@@ -98,7 +98,7 @@ on `/api/v1/capabilities` for agent introspection.
 - **Anonymous**: free, 24h TTL, the limits above.
 - **Hobby**: $9/mo. 1 GB Postgres, 50 MB Redis, 100 MB Mongo, 512 MB storage, 1 app deploy. No TTL.
 - **Pro**: $49/mo. 10 GB Postgres, 512 MB Redis, 5 GB Mongo, 50 GB storage, 10 apps.
-- **Team**: $199/mo. Unlimited everything (Postgres / Redis / Mongo / queues / storage / deployments / vault entries), 50 custom domains, 90-day backups with self-serve restore, RBAC + audit log, SSO/SAML, 99.9% SLA. Self-serve assisted-Razorpay path is rolling out — for now contact support@instanode.dev for onboarding.
+- **Team**: $199/mo. Unlimited everything (Postgres / Redis / Mongo / queues / storage / deployments / vault entries), 50 custom domains, 90-day backups with self-serve restore, RBAC + audit log. SSO/SAML and a 99.9% SLA are coming soon (not yet available). Self-serve assisted-Razorpay path is rolling out — for now contact support@instanode.dev for onboarding.
 
 ## Conventions an LLM should follow when scripting against the platform
 

@@ -209,14 +209,14 @@ const PLANS: Plan[] = [
     // on the $199/mo AOV path.
     id: 'team',
     name: 'Team',
-    tagline: 'For the engineering org. Dedicated infra + SLA + SSO.',
+    tagline: 'For the engineering org. Dedicated infra, RBAC + audit, with SSO & SLA on the way.',
     price: '$199',
     freq: '/ mo',
     features: [
       'unlimited Postgres · Redis · MongoDB',
       'unlimited deployments · 50 custom domains',
       '90-day backups · self-serve restore · RBAC + audit',
-      'SSO/SAML · 99.9% SLA',
+      'SSO/SAML · 99.9% SLA (coming soon)',
     ],
     cta: {
       label: 'Start team →',

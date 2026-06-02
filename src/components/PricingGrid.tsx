@@ -186,8 +186,9 @@ export const PRICING_GRID_TIERS: TierDefinition[] = [
       { text: 'unlimited deployments · 50 custom domains' },
       { text: 'unlimited vault entries · multi-env' },
       { text: '90-day backups · self-serve restore' },
-      { text: 'RBAC + audit log · SSO / SAML' },
-      { text: '99.9% SLA' },
+      { text: 'RBAC + audit log' },
+      { text: 'SSO / SAML (coming soon)' },
+      { text: '99.9% SLA (coming soon)' },
     ],
   },
 ]
