@@ -210,6 +210,12 @@ export function AppShell() {
               <div className="org-info">
                 <div className="org-name" data-testid="org-name">{teamSlug}</div>
                 <div className="org-env">
+                  <span
+                    className="env-label"
+                    title="Environment tag. New resources & deployments are recorded with this environment (defaults to 'development'). Vault secrets are stored per-environment; resource & deployment lists are not yet filtered by env."
+                  >
+                    env
+                  </span>
                   <EnvSwitcher value={ctx.env} options={ctx.envs} />
                   <span className="switch-hint">{tier}</span>
                 </div>
@@ -501,6 +507,8 @@ function EnvSwitcher({ value, options }: { value: string; options: string[] }) {
     <select
       data-testid="env-switcher"
       className="env-pill prod"
+      aria-label="Environment — the tag recorded on resources and deployments you create (defaults to development)"
+      title="Sets the environment recorded on resources & deployments you create (defaults to 'development'; pick 'production' for live workloads, or '+ new env…' to add one like staging). Vault secrets are stored per-environment; resource & deployment list views are not yet filtered by env."
       value={value}
       onChange={(e) => {
         if (e.target.value === '__new__') setCreating(true)

@@ -312,6 +312,7 @@ input, textarea, select { font-family: inherit; }
 .env-pill.dev     { background: rgba(108,206,255,0.08); color: var(--blue); border-color: rgba(108,206,255,0.2); }
 .env-pill.staging { background: rgba(255,192,105,0.08); color: var(--amber); border-color: rgba(255,192,105,0.2); }
 .org .switch-hint { font-size: 9.5px; color: var(--text-faint); font-family: var(--font-mono); }
+.org-env .env-label { font-size: 9.5px; color: var(--text-faint); font-family: var(--font-mono); text-transform: lowercase; cursor: help; }
 
 .nav-section {
   font-family: var(--font-mono);
