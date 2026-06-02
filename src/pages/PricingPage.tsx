@@ -162,8 +162,10 @@ const ROWS: Row[] = [
   { label: 'Vault entries', values: [{ mark: 'dash' }, '20', '200', UNLIMITED] },
   { label: 'Vault envs',    values: [{ mark: 'dash' }, 'production only', 'multi-env', 'multi-env'] },
   { label: 'Backups',       values: [{ mark: 'dash' }, '7-day · no restore', '30-day · 1-click restore', '90-day · self-serve restore'] },
-  { label: 'SSO / SAML', values: [{ mark: 'dash' }, { mark: 'dash' }, { mark: 'dash' }, { mark: 'check' }] },
-  { label: '99.9% SLA',  values: [{ mark: 'dash' }, { mark: 'dash' }, { mark: 'dash' }, { mark: 'check' }] }
+  // SSO/SAML + SLA have no backend yet — shown as not-yet-available everywhere
+  // (gap analysis 2026-06-03), consistent with PricingGrid + llms.txt "coming soon".
+  { label: 'SSO / SAML (coming soon)', values: [{ mark: 'dash' }, { mark: 'dash' }, { mark: 'dash' }, { mark: 'dash' }] },
+  { label: '99.9% SLA (coming soon)',  values: [{ mark: 'dash' }, { mark: 'dash' }, { mark: 'dash' }, { mark: 'dash' }] }
 ]
 
 const FAQ: { q: string; a: string }[] = [

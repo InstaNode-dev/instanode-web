@@ -97,11 +97,15 @@ describe('MarketingPage — claim consistency (T18 P1-4 / P1-6)', () => {
     const text = container.textContent ?? ''
     // Headline says "Seven services. One bundle."
     expect(text).toMatch(/Seven services\. One bundle\./)
-    // MCP tools card must NOT say "Six tools registered" (the dropped-
-    // webhook regression). It must say "Seven" and list webhook.
-    expect(text).not.toMatch(/Six tools registered/)
-    expect(text).toMatch(/Seven tools registered/)
+    // MCP tools card lists the seven provisioning tools (must still list
+    // webhook — anti-regression for the dropped-webhook bug) AND, per the
+    // 2026-06-03 gap fix, also surfaces the stack/deployment management tools
+    // (the MCP server registers more than seven; "Seven tools registered" was
+    // an understatement).
+    expect(text).not.toMatch(/Six provisioning tools/)
+    expect(text).toMatch(/Seven provisioning tools/)
     expect(text).toMatch(/webhook/)
+    expect(text).toMatch(/list_deployments/)
   })
 
   it("Deploy service card claims a build window consistent with content/llms.txt (~60s, not '<10s')", () => {
