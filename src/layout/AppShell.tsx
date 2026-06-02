@@ -210,6 +210,7 @@ export function AppShell() {
               <div className="org-info">
                 <div className="org-name" data-testid="org-name">{teamSlug}</div>
                 <div className="org-env">
+                  <span className="env-label" title="The environment your resources & deployments are scoped to (defaults to development).">env</span>
                   <EnvSwitcher value={ctx.env} options={ctx.envs} />
                   <span className="switch-hint">{tier}</span>
                 </div>
@@ -501,6 +502,13 @@ function EnvSwitcher({ value, options }: { value: string; options: string[] }) {
     <select
       data-testid="env-switcher"
       className="env-pill prod"
+      aria-label="Environment — scopes which resources and deployments you see and create"
+      title={
+        'Environment. Resources and deployments are scoped per environment so ' +
+        'experiments never touch production. New provisions default to ' +
+        '"development" (the lowest-stakes bucket); switch to "production" or ' +
+        '"staging" to view or create there, or pick "+ new env…" to add your own.'
+      }
       value={value}
       onChange={(e) => {
         if (e.target.value === '__new__') setCreating(true)
