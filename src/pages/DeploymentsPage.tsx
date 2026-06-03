@@ -86,14 +86,14 @@ export function DeploymentsPage() {
   }, [items, statusFilter, sort])
 
   // Source of truth: GET /api/v1/deployments (single-container apps via
-  // POST /deploy/new). The env switcher in the sidebar drives the ?env=
-  // query param; switching envs triggers a refetch via the dep array.
+  // POST /deploy/new). No env filter — the global env switcher is hidden
+  // (multi-env UX unfinished), so deployments from every env are listed.
   useEffect(() => {
     let cancelled = false
     setErr(null)
     setLoading(true)
     api
-      .listDeployments(ctx.env)
+      .listDeployments()
       .then((r) => {
         if (cancelled) return
         setItems(r.items)
@@ -115,7 +115,7 @@ export function DeploymentsPage() {
     return () => {
       cancelled = true
     }
-  }, [ctx.env])
+  }, [])
 
   return (
     <>

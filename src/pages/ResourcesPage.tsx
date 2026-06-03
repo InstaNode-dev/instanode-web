@@ -36,7 +36,9 @@ export function ResourcesPage() {
     let alive = true
     setLoading(true)
     setErr(null)
-    api.listResources(ctx.env)
+    // No env filter — the global env switcher is hidden (multi-env UX
+    // unfinished), so resources from every env are listed.
+    api.listResources()
       .then((r) => {
         if (!alive) return
         setItems(r.items)
@@ -48,7 +50,7 @@ export function ResourcesPage() {
         setLoading(false)
       })
     return () => { alive = false }
-  }, [ctx.env])
+  }, [])
 
   const filtered = useMemo(
     () => items.filter((r) => type === 'all' || r.resource_type === type),

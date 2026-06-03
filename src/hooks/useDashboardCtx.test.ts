@@ -53,12 +53,24 @@ describe('useDashboardCtx', () => {
     await waitFor(() => expect(result.current.me).not.toBeNull())
     expect(result.current.me?.user.email).toBe('a@b.com')
     await waitFor(() => expect(result.current.billing?.status).toBe('active'))
-    // production filter → 1 of the 2 resources; deployments 1; vault 1.
-    expect(result.current.counts.resources).toBe(1)
+    // No env filter (global switcher removed) → both resources count; the
+    // sidebar lists all envs. Deployments 1; vault 1 (still per-env).
+    expect(result.current.counts.resources).toBe(2)
     expect(result.current.counts.deployments).toBe(1)
     expect(result.current.counts.vault).toBe(1)
-    // env merged from resource list.
+    // env names still merged from the resource list (for VaultPage tabs).
     expect(result.current.envs).toContain('staging')
+  })
+
+  it('deployments count falls back to 0 when listDeployments rejects (catch arm)', async () => {
+    listDeployments.mockRejectedValue(new Error('deployments down'))
+    const mod = await load()
+    const { result } = renderHook(() => mod.useDashboardCtx())
+    await waitFor(() => expect(result.current.me).not.toBeNull())
+    // refreshCounts swallows the deployments failure → count 0, and the other
+    // counts (resources/vault) still resolve.
+    await waitFor(() => expect(result.current.counts.resources).toBe(2))
+    expect(result.current.counts.deployments).toBe(0)
   })
 
   it('does NOT bootstrap when there is no token', async () => {
@@ -87,8 +99,9 @@ describe('useDashboardCtx', () => {
     expect(result.current.env).toBe('staging')
     expect(localStorage.getItem('instanode.env')).toBe('staging')
     await waitFor(() => expect(listResources).toHaveBeenCalled())
-    // staging filter → 1 resource.
-    await waitFor(() => expect(result.current.counts.resources).toBe(1))
+    // setEnv still re-fetches (vault is per-env), but resources count spans
+    // all envs now (switcher removed) → both mock resources count.
+    await waitFor(() => expect(result.current.counts.resources).toBe(2))
   })
 
   it('setEnv is a no-op when the env is unchanged', async () => {

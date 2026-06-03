@@ -123,11 +123,13 @@ export function OverviewPage() {
   useEffect(() => {
     let alive = true
     Promise.all([
-      api.listResources(ctx.env),
+      // No env filter — the global env switcher is hidden (multi-env UX
+      // unfinished), so the overview shows resources/deployments across all envs.
+      api.listResources(),
       api.fetchActivity(),
       // Deployments are a separate table — fail-soft to [] so a deployments
       // outage doesn't blank the resources/activity tiles.
-      api.listDeployments(ctx.env).catch(() => ({ ok: true as const, items: [], total: 0 })),
+      api.listDeployments().catch(() => ({ ok: true as const, items: [], total: 0 })),
     ]).then(([r, a, d]) => {
       if (!alive) return
       setResources(r.items)
@@ -138,7 +140,7 @@ export function OverviewPage() {
     return () => {
       alive = false
     }
-  }, [ctx.env])
+  }, [])
 
   // computed stats — no /overview endpoint exists, derived client-side.
   //
@@ -172,14 +174,10 @@ export function OverviewPage() {
   const recent = [...resources].sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at)).slice(0, 4)
 
   const now = Date.now()
-  // T15 P2-1: env-scoped count, MUST match useDashboardCtx.refreshCounts()
-  // and the AppShell sidebar badge. The backend does NOT (yet) honor an
-  // `env` filter on /api/v1/resources — the response carries every env —
-  // so both surfaces have to do the env filter client-side. Source of
-  // truth for "how many resources are in this env": this expression and
-  // the sidebar's. Re-derived on every render so envSwitcher changes
-  // update the tile instantly.
-  const envScopedResources = resources.filter((r) => (r.env ?? 'production') === ctx.env)
+  // The resources tile counts every env (the global env switcher is hidden —
+  // multi-env UX unfinished), matching useDashboardCtx.refreshCounts() and the
+  // AppShell sidebar badge, both of which now list all envs.
+  const envScopedResources = resources
   const envScopedCount = envScopedResources.length
   const newThisWeek = envScopedResources.filter((r) => now - +new Date(r.created_at) <= SEVEN_DAYS_MS).length
   // Deployments are a separate table (GET /api/v1/deployments) — never rows in
