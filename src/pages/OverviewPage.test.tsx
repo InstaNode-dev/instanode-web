@@ -369,15 +369,12 @@ describe('OverviewPage — Recently active', () => {
     })
   })
 
-  // T15 P2-1 regression guard: the "resources" stat tile MUST count only
-  // resources in the current env. The previous bug had the tile reading
-  // `resources.length` (all envs) while the sidebar badge used the
-  // env-scoped `ctx.counts.resources` from refreshCounts — so users saw
-  // "8" on the tile and "5" in the rail and couldn't tell which was real.
-  // The fix derives `envScopedCount` client-side from the same fetched
-  // resource list, applying the same `r.env ?? 'production' === ctx.env`
-  // filter the sidebar uses.
-  it('resources stat tile counts only resources in the current env (matches sidebar)', async () => {
+  // 2026-06-03: the global env switcher was removed (multi-env UX unfinished),
+  // so the "resources" stat tile now counts resources across ALL envs — and
+  // must still match the sidebar badge, which also lists every env. (This
+  // supersedes the old T15 P2-1 env-scoped-count guard: with no way to switch
+  // env in the chrome, hiding non-current-env resources would strand them.)
+  it('resources stat tile counts resources across all envs (matches sidebar, switcher removed)', async () => {
     const now = new Date().toISOString()
     ;(api.listResources as any).mockResolvedValueOnce({
       ok: true,
@@ -421,14 +418,14 @@ describe('OverviewPage — Recently active', () => {
     await waitFor(
       () => {
         const resourcesTile = container.querySelectorAll('.stat')[0] as HTMLElement
-        // Expect the env-scoped count "2", NOT the all-envs "3".
-        expect(resourcesTile.textContent).toMatch(/\b2\b/)
+        // All-envs count "3" (2 production + 1 staging) — env filtering removed.
+        expect(resourcesTile.textContent).toMatch(/\b3\b/)
       },
       { timeout: 3000 },
     )
     const resourcesTile = container.querySelectorAll('.stat')[0] as HTMLElement
     expect(resourcesTile.textContent).toContain('resources')
-    expect(resourcesTile.textContent).not.toMatch(/\b3\b/)
+    expect(resourcesTile.textContent).not.toMatch(/\b2\b/)
   })
 })
 
