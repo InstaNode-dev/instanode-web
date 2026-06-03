@@ -1,7 +1,7 @@
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
 import { Brand, ExpiryWarningBanner, ScopePill, useExpiryTick } from '../components/Common'
 import { useEffect, useState, type ReactNode } from 'react'
-import { addEnv, setEnv, useDashboardCtx, type DashboardCtx } from '../hooks/useDashboardCtx'
+import { useDashboardCtx, type DashboardCtx } from '../hooks/useDashboardCtx'
 import * as api from '../api'
 import type { TeamSummary } from '../api'
 import { UserMenu } from './UserMenu'
@@ -53,9 +53,9 @@ function computeMeta(routeKey: string, pathname: string, ctx: DashboardCtx): Pag
 function computeCrumb(routeKey: string, pathname: string, ctx: DashboardCtx): string {
   switch (routeKey) {
     case '/':
-      return ctx.env
+      return 'overview'
     case '/resources':
-      return `${ctx.env} · ${ctx.counts.resources} active`
+      return `${ctx.counts.resources} active`
     case '/resources/:id': {
       // Try to resolve resource_type from the loaded resource list (the
       // detail page id appears in the URL). Fall back to em-dash if we
@@ -66,11 +66,11 @@ function computeCrumb(routeKey: string, pathname: string, ctx: DashboardCtx): st
       return `resources / ${kind}`
     }
     case '/deployments':
-      return `${ctx.env} · ${ctx.counts.deployments} active`
+      return `${ctx.counts.deployments} active`
     case '/deployments/:id':
       return 'deployments / live'
     case '/vault':
-      return `${ctx.env} · ${ctx.counts.vault} entries`
+      return `${ctx.counts.vault} entries`
     case '/team':
       return 'members & invites'
     case '/billing':
@@ -209,8 +209,11 @@ export function AppShell() {
               <div className="av">{teamInitial}</div>
               <div className="org-info">
                 <div className="org-name" data-testid="org-name">{teamSlug}</div>
+                {/* Global env switcher intentionally removed (2026-06-03): the
+                    multi-environment UX is unfinished, so it's hidden to avoid
+                    surfacing a half-built capability. Per-env vault tabs live
+                    on VaultPage where isolation is real. */}
                 <div className="org-env">
-                  <EnvSwitcher value={ctx.env} options={ctx.envs} />
                   <span className="switch-hint">{tier}</span>
                 </div>
               </div>
@@ -466,57 +469,4 @@ function routeIdToKey(_id: string, pathname: string): string {
   if (/^\/resources\/[^/]+$/.test(stripped)) return '/resources/:id'
   if (/^\/deployments\/[^/]+$/.test(stripped)) return '/deployments/:id'
   return stripped
-}
-
-// ──────────────────────────────────────────────────────────────────────────
-// EnvSwitcher — pill-shaped <select> wired to the dashboard ctx. Selecting
-// "+ new env" opens a tiny inline input that creates an env locally; the
-// next API call carries the new env in the query string.
-function EnvSwitcher({ value, options }: { value: string; options: string[] }) {
-  const [creating, setCreating] = useState(false)
-  const [draft, setDraft] = useState('')
-  if (creating) {
-    return (
-      <span className="env-pill prod" style={{ display: 'inline-flex', gap: 4, padding: '2px 6px' }}>
-        <input
-          autoFocus
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onBlur={() => { if (draft.trim()) addEnv(draft); setCreating(false); setDraft('') }}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && draft.trim()) { addEnv(draft); setCreating(false); setDraft('') }
-            if (e.key === 'Escape') { setCreating(false); setDraft('') }
-          }}
-          placeholder="staging"
-          data-testid="env-create-input"
-          style={{
-            background: 'transparent', border: 0, outline: 'none', color: 'var(--accent)',
-            font: 'inherit', width: 80, fontFamily: 'var(--font-mono)', fontSize: 11,
-          }}
-        />
-      </span>
-    )
-  }
-  return (
-    <select
-      data-testid="env-switcher"
-      className="env-pill prod"
-      value={value}
-      onChange={(e) => {
-        if (e.target.value === '__new__') setCreating(true)
-        else setEnv(e.target.value)
-      }}
-      style={{
-        appearance: 'none', WebkitAppearance: 'none', cursor: 'pointer',
-        border: '1px solid var(--accent-glow)', background: 'var(--accent-soft)',
-        color: 'var(--accent)', fontFamily: 'var(--font-mono)', fontSize: 11,
-        padding: '2px 8px', borderRadius: 4,
-      }}
-    >
-      {options.map((o) => (
-        <option key={o} value={o}>{o}</option>
-      ))}
-      <option value="__new__" style={{ color: 'var(--violet)' }}>+ new env…</option>
-    </select>
-  )
 }
