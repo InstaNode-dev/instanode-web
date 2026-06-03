@@ -2,17 +2,20 @@
 // state": the signed-in user, their team, the active env, and the live
 // resource/vault counts shown in the sidebar.
 //
-// Env scope — IMPORTANT:
-//   The backend does NOT yet honor a multi-env filter on resources/stacks.
-//   The only surface where `env` is genuinely backed by per-env data is
-//   VaultPage (vault_secrets.env is real). Everywhere else, `env` is a
-//   cosmetic display value snapshotted at provision time and surfacing
-//   filter chips would imply a backend capability that doesn't exist yet
-//   (env promotion is the §10.17 Pro-tier feature still in development).
+// Env scope — IMPORTANT (2026-06-03):
+//   The backend DOES support per-env filtering (GET /api/v1/resources?env=,
+//   /deployments?env=, and real per-env vault isolation). But the broader
+//   multi-environment UX (choosing env at create time, env promotion — the
+//   §10.17 Pro-tier feature) is unfinished, so the GLOBAL env switcher has
+//   been removed from the chrome to avoid surfacing a half-built capability.
 //
-//   Keep `env` / `envs` / `setEnv` / `addEnv` here for VaultPage and for
-//   the sidebar's vault subtitle. Do NOT add new env-filter call sites
-//   without also wiring a real server-side filter behind them.
+//   Consequence: Resources / Deployments / Overview deliberately fetch
+//   WITHOUT an env filter (all envs visible) so nothing is hidden now that
+//   the user can't switch env globally. The ONLY surface that still scopes
+//   by env is VaultPage, which has its OWN env tabs and where per-env
+//   isolation is genuinely finished. `env` / `envs` / `setEnv` / `addEnv`
+//   remain here solely for VaultPage. Do NOT re-add a global env switcher or
+//   new env-filter call sites until the multi-env UX is finished.
 
 import { useEffect, useSyncExternalStore } from 'react'
 import * as api from '../api'
@@ -105,7 +108,8 @@ export function setEnv(next: string) {
 //
 //   Fix: align the JS regex with the api regex, enforce the 32-char
 //   cap up front, and return early if validation fails. The caller
-//   (EnvSwitcher) already gates `addEnv` behind a non-empty draft so
+//   (VaultPage's new-env input — the global EnvSwitcher was removed
+//   2026-06-03) already gates `addEnv` behind a non-empty draft so
 //   no UI plumbing changes are required.
 const ENV_REGEX = /^[a-z0-9-]{1,32}$/
 const ENV_MAX_LEN = 32
@@ -149,24 +153,26 @@ async function refreshCounts() {
     // are NOT rows in the `resources` list (resource_type === 'deploy' never
     // appears there), so the sidebar deployments count must be sourced from
     // api.listDeployments(), not a filter over `resources`.
+    // Resources + deployments are fetched WITHOUT an env filter: the global
+    // env switcher is hidden (multi-env UX unfinished), so the sidebar counts
+    // must reflect every env or they'd undercount. Vault stays per-env (real).
     const [r, v, d] = await Promise.all([
       api.listResources().catch(() => ({ items: [], total: 0 })),
       api.listVault(state.env).catch(() => ({ entries: [] })),
-      api.listDeployments(state.env).catch(() => ({ ok: true as const, items: [], total: 0 })),
+      api.listDeployments().catch(() => ({ ok: true as const, items: [], total: 0 })),
     ])
-    // Merge envs from resources too — surfaces real env names.
+    // Merge envs from resources too — surfaces real env names for VaultPage tabs.
     const fromAPI = new Set(state.envs)
     for (const it of (r as any).items ?? []) if (it.env) fromAPI.add(it.env)
     const envs = Array.from(fromAPI)
 
     const items = ((r as any).items ?? []) as Resource[]
-    const filtered = items.filter((x) => (x.env ?? 'production') === state.env)
     state = {
       ...state,
       envs,
       resources: items,
       counts: {
-        resources: filtered.length,
+        resources: items.length,
         deployments: ((d as any).items ?? []).length,
         vault: ((v as any).entries ?? []).length,
         team: 1, // no /team/members endpoint; placeholder

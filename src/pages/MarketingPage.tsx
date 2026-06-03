@@ -209,14 +209,14 @@ const PLANS: Plan[] = [
     // on the $199/mo AOV path.
     id: 'team',
     name: 'Team',
-    tagline: 'For the engineering org. Dedicated infra + SLA + SSO.',
+    tagline: 'For the engineering org. Dedicated infra, RBAC + audit, with SSO & SLA on the way.',
     price: '$199',
     freq: '/ mo',
     features: [
       'unlimited Postgres · Redis · MongoDB',
       'unlimited deployments · 50 custom domains',
       '90-day backups · self-serve restore · RBAC + audit',
-      'SSO/SAML · 99.9% SLA',
+      'SSO/SAML · 99.9% SLA (coming soon)',
     ],
     cta: {
       label: 'Start team →',
@@ -691,7 +691,7 @@ export function MarketingPage() {
                     SERVICES array). The earlier "Six tools" copy dropped
                     webhook — a real MCP tool — and contradicted the same
                     page. */}
-                <p>Seven tools registered: <code>postgres</code>, <code>redis</code>, <code>mongo</code>, <code>queue</code>, <code>storage</code>, <code>webhook</code>, <code>deploy</code>.</p>
+                <p>Seven provisioning tools: <code>postgres</code>, <code>redis</code>, <code>mongo</code>, <code>queue</code>, <code>storage</code>, <code>webhook</code>, <code>deploy</code> — plus stack &amp; deployment management (<code>create_stack</code>, <code>list_stacks</code>, <code>update_stack_env</code>, <code>list_deployments</code>, <code>get_deployment</code>, <code>redeploy</code>, <code>delete_deployment</code>, …).</p>
               </div>
             </div>
 
@@ -756,9 +756,14 @@ export function MarketingPage() {
           </div>
           <div className="mkt-footer-bottom">
             <span>© 2026 instanode, inc.</span>
+            {/* Neutral link to the live status page. Previously hardcoded
+                "All systems normal" — a static string that would claim
+                all-clear even during an incident (gap analysis 2026-06-03).
+                The real per-component status lives on /status (StatusPage,
+                wired to GET /api/v1/status). */}
             <a href="https://status.instanode.dev" className="mkt-status-badge">
               <span className="dot" aria-hidden="true" />
-              All systems normal
+              System status
             </a>
           </div>
         </div>
