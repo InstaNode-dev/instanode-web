@@ -65,10 +65,12 @@ function renderPage() {
 }
 
 describe('ResourcesPage render', () => {
-  it('renders a resource row from listResources scoped to the env', async () => {
+  it('renders a resource row from listResources across all envs (global env switcher removed)', async () => {
     renderPage()
     await waitFor(() => expect(screen.getByTestId('resource-row-name-res1')).toBeTruthy())
-    expect(listResources).toHaveBeenCalledWith('production')
+    // No env arg — the global env switcher is hidden (multi-env UX unfinished),
+    // so the page lists resources across all envs.
+    expect(listResources).toHaveBeenCalledWith()
     expect(screen.getByText('orders-db')).toBeTruthy()
   })
 
