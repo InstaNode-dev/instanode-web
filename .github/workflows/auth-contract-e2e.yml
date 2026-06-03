@@ -39,6 +39,11 @@ on:
         description: 'Override E2E_WEB_ORIGIN'
         required: false
         default: 'https://instanode.dev'
+      run_roundtrip:
+        description: 'Also run the cookie-exchange ROUND-TRIP spec (needs a NON-prod api + E2E_JWT_SECRET secret)'
+        type: boolean
+        required: false
+        default: false
   repository_dispatch:
     types: [auth-contract-e2e-from-api]
 
@@ -116,5 +121,86 @@ jobs:
           path: |
             test-results/
             playwright-report-auth-contract/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  # ── Cookie-exchange ROUND-TRIP (manual / staging only) ───────────────────
+  #
+  # The Layer-1 smoke above probes the CORS envelope with NO cookie. This job
+  # runs the full round-trip spec (e2e/auth-roundtrip.spec.ts): provision →
+  # claim → plant the bridge cookie → cross-origin exchange → Bearer
+  # /auth/me 200. That needs a NON-prod api it can mint a bridge cookie for
+  # (E2E_JWT_SECRET = the api's JWT_SECRET) + a provisioning backend.
+  #
+  # WHY workflow_dispatch-only (not on every PR): instanode-web CI cannot
+  # build/boot the api binary (cross-repo), and we never put the prod
+  # JWT_SECRET in this repo's CI. The AUTHORITATIVE pre-merge round-trip gate
+  # lives in the api repo's Layer-2 docker-compose workflow (which builds the
+  # api from PR source + has the stack-local secret). This job is the
+  # instanode-web-side companion an operator points at a staging/compose api
+  # on demand. The spec self-skips loudly when the secret is absent or the
+  # backend returns 503, so a misfire reports as skipped, never a false red.
+  auth-roundtrip:
+    name: Cookie-exchange round-trip (staging/compose, on demand)
+    if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.run_roundtrip == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      # Route dispatch inputs through env: + validate (workflow-injection
+      # hygiene — same pattern as the smoke job above). The round-trip MUST
+      # NOT target prod (planting a bridge cookie needs the stack JWT_SECRET).
+      RAW_API_URL: ${{ github.event.inputs.api_url || '' }}
+      RAW_WEB_ORIGIN: ${{ github.event.inputs.web_origin || '' }}
+      # E2E_JWT_SECRET is the api's JWT_SECRET for the TARGET (staging/compose)
+      # api — provided as a repo/environment secret by the operator who runs
+      # this. Never the prod secret.
+      E2E_JWT_SECRET: ${{ secrets.E2E_JWT_SECRET }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Validate + resolve round-trip targets
+        run: |
+          set -euo pipefail
+          api="${RAW_API_URL:-}"
+          web="${RAW_WEB_ORIGIN:-http://localhost:5173}"
+          if [ -z "$api" ]; then
+            echo "::error::run_roundtrip requires a non-empty api_url pointing at a staging/compose api (NOT prod)."
+            exit 1
+          fi
+          # Hard refuse the prod api — the round-trip would need the prod
+          # JWT_SECRET, which must never enter this repo's CI.
+          case "$api" in
+            https://api.instanode.dev|https://api.instanode.dev/)
+              echo "::error::round-trip cannot target prod api (api.instanode.dev). Point it at a staging/compose api."
+              exit 1 ;;
+          esac
+          api="${api%/}"
+          web="${web%/}"
+          echo "E2E_API_URL=$api" >> "$GITHUB_ENV"
+          echo "E2E_WEB_ORIGIN=$web" >> "$GITHUB_ENV"
+          echo "Resolved round-trip E2E_API_URL=$api E2E_WEB_ORIGIN=$web"
+
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+
+      - name: Run cookie-exchange round-trip
+        # Spec self-skips (loudly) when E2E_JWT_SECRET is empty or the
+        # provisioning backend returns 503 — so a missing secret reports as
+        # skipped, not a hard failure.
+        run: npx playwright test --config=playwright.auth-roundtrip.config.ts
+
+      - name: Upload round-trip trace on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: auth-roundtrip-trace-${{ github.run_id }}
+          path: |
+            test-results/
+            playwright-report-auth-roundtrip/
           if-no-files-found: ignore
           retention-days: 14
