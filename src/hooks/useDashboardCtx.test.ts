@@ -62,6 +62,17 @@ describe('useDashboardCtx', () => {
     expect(result.current.envs).toContain('staging')
   })
 
+  it('deployments count falls back to 0 when listDeployments rejects (catch arm)', async () => {
+    listDeployments.mockRejectedValue(new Error('deployments down'))
+    const mod = await load()
+    const { result } = renderHook(() => mod.useDashboardCtx())
+    await waitFor(() => expect(result.current.me).not.toBeNull())
+    // refreshCounts swallows the deployments failure → count 0, and the other
+    // counts (resources/vault) still resolve.
+    await waitFor(() => expect(result.current.counts.resources).toBe(2))
+    expect(result.current.counts.deployments).toBe(0)
+  })
+
   it('does NOT bootstrap when there is no token', async () => {
     getToken.mockReturnValue('')
     const mod = await load()

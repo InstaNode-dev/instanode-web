@@ -38,7 +38,7 @@ vi.mock('../hooks/useDashboardCtx', async () => {
       meLoading: false,
       env: 'development',
       envs: ['development', 'production'],
-      counts: { resources: 0, deployments: 0, vault: 0, team: 1 },
+      counts: { resources: 3, deployments: 2, vault: 5, team: 1 },
       resources: [],
       billing: null,
       billingLoading: false,
@@ -50,9 +50,9 @@ import { AppShell } from './AppShell'
 
 afterEach(() => cleanup())
 
-function renderShell() {
+function renderShell(path = '/app') {
   return render(
-    <MemoryRouter initialEntries={['/app']}>
+    <MemoryRouter initialEntries={[path]}>
       <AppShell />
     </MemoryRouter>,
   )
@@ -69,5 +69,24 @@ describe('AppShell — global env switcher is hidden (2026-06-03)', () => {
     renderShell()
     expect(screen.getByTestId('org')).toBeTruthy()
     expect(screen.getByTestId('org-name')).toBeTruthy()
+  })
+})
+
+describe('AppShell — breadcrumbs no longer show env (count-only after switcher removal)', () => {
+  it('resources crumb shows the count, not the env', () => {
+    renderShell('/app/resources')
+    expect(screen.getAllByText('3 active').length).toBeGreaterThan(0)
+    // env name must not leak into the crumb anymore.
+    expect(screen.queryByText(/development · /)).toBeNull()
+  })
+
+  it('deployments crumb shows the count, not the env', () => {
+    renderShell('/app/deployments')
+    expect(screen.getAllByText('2 active').length).toBeGreaterThan(0)
+  })
+
+  it('vault crumb shows the entry count, not the env', () => {
+    renderShell('/app/vault')
+    expect(screen.getAllByText('5 entries').length).toBeGreaterThan(0)
   })
 })
