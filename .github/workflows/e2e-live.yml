@@ -97,6 +97,13 @@ jobs:
         if: env.RUN_LIVE == '1'
         env:
           E2E_LIVE: '1'
+          # Optional: the api JWT_SECRET (staging). Enables the auth bearer legs
+          # in live-auth.spec.ts (/auth/me valid+expired, logout-revocation) that
+          # mint a session JWT locally — the Brevo-free account path
+          # (TEST-ACCOUNTS-AND-NR-SYNTHETICS-PLAN.md §1.1). Absent → those legs
+          # self-skip loudly; the contract-only legs (OAuth state-replay, CORS,
+          # CLI canonical host, magic-link start, tampered-token) still run.
+          E2E_JWT_SECRET: ${{ secrets.E2E_JWT_SECRET }}
         run: npm run test:e2e:live
 
       # Reaper ALWAYS runs (even on test failure/cancel) so a leaked resource
