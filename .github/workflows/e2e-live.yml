@@ -1,0 +1,119 @@
+# WS1 — real-backend (LIVE) E2E against a STAGING api.
+#
+# Plan: docs/sessions/2026-06-04/OBSERVABILITY-AND-INTELLIGENCE-PLAN.md, WS1.
+#
+# WHY this is a SEPARATE, MANUAL/SCHEDULED job (never on pull_request):
+#   - LIVE specs create REAL backend resources (DBs/caches/deploys) and reap
+#     them (rule 24). The per-PR gate must NEVER depend on a reachable backend.
+#   - It targets a STAGING api only. Prod is opt-in and requires the backend
+#     skip-cohort guards (separate api/worker PR — quota/churn/billing-charge
+#     must no-op for test-cohort teams) to be live first. Until then this job
+#     refuses any prod-looking target.
+#
+# WHAT it runs:
+#   - playwright.live.config.ts (testMatch live-*.spec.ts) with E2E_LIVE=1.
+#   - The reaper (npm run reap:live) in an `if: always()` teardown so any
+#     resource the run leaked (crash/timeout) is still deleted out-of-process.
+#
+# Triggers:
+#   - workflow_dispatch (operator runs it on demand, supplies the staging api).
+#   - schedule (nightly) — only fires if E2E_LIVE_STAGING_API_URL repo var is
+#     set; otherwise the job no-ops with a clear message (no false red).
+#
+# Required for a real run:
+#   - vars.E2E_LIVE_STAGING_API_URL — the staging api base (e.g.
+#     https://staging-api.instanode.dev). NEVER api.instanode.dev (prod).
+
+name: E2E LIVE (staging, manual/scheduled)
+
+on:
+  workflow_dispatch:
+    inputs:
+      api_url:
+        description: 'Staging api base URL (NOT prod). Falls back to vars.E2E_LIVE_STAGING_API_URL.'
+        required: false
+        default: ''
+  schedule:
+    # Nightly 03:17 UTC. No-ops cleanly when the staging api var is unset.
+    - cron: '17 3 * * *'
+
+concurrency:
+  # One LIVE run at a time — they create real resources; overlapping runs
+  # could contend on fingerprint-dedup or interleave ledger writes.
+  group: e2e-live-${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  e2e-live-staging:
+    name: LIVE smoke against staging api + reap
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      # Route the (possibly attacker-influenced) dispatch input through env: +
+      # validate before use — workflow-injection hygiene, same pattern as
+      # auth-contract-e2e.yml. Repo var is the scheduled-run default.
+      RAW_API_URL: ${{ github.event.inputs.api_url || vars.E2E_LIVE_STAGING_API_URL || '' }}
+      E2E_LIVE_RUN_ID: ${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Validate + resolve staging target
+        # Refuse prod and any non-https target. The LIVE harness must only ever
+        # point at a staging api until the backend skip-cohort guards ship.
+        run: |
+          set -euo pipefail
+          api="${RAW_API_URL:-}"
+          if [ -z "$api" ]; then
+            echo "::notice::No staging api configured (vars.E2E_LIVE_STAGING_API_URL unset and no input). Skipping LIVE run."
+            echo "RUN_LIVE=0" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          case "$api" in
+            https://api.instanode.dev|https://api.instanode.dev/)
+              echo "::error::LIVE E2E must NOT target prod (api.instanode.dev). Point it at a staging api."
+              exit 1 ;;
+            https://*) ;;
+            *) echo "::error::E2E_API_URL '$api' must be an https staging URL."; exit 1 ;;
+          esac
+          api="${api%/}"
+          echo "E2E_API_URL=$api" >> "$GITHUB_ENV"
+          echo "RUN_LIVE=1" >> "$GITHUB_ENV"
+          echo "Resolved LIVE E2E_API_URL=$api"
+
+      - name: Install deps
+        if: env.RUN_LIVE == '1'
+        run: npm ci
+
+      - name: Install Chromium
+        if: env.RUN_LIVE == '1'
+        run: npx playwright install --with-deps chromium
+
+      - name: Run LIVE E2E
+        if: env.RUN_LIVE == '1'
+        env:
+          E2E_LIVE: '1'
+        run: npm run test:e2e:live
+
+      # Reaper ALWAYS runs (even on test failure/cancel) so a leaked resource
+      # is deleted out-of-process from the on-disk ledger (rule 24). Fails the
+      # job if any entity could not be reaped, surfacing the leak loudly.
+      - name: Reap cohort resources (teardown)
+        if: always() && env.RUN_LIVE == '1'
+        run: npm run reap:live
+
+      - name: Upload LIVE trace + ledger on failure
+        if: failure() && env.RUN_LIVE == '1'
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-live-trace-${{ github.run_id }}
+          path: |
+            test-results/
+            playwright-report-live/
+            e2e/.cleanup-ledger.json
+          if-no-files-found: ignore
+          retention-days: 14
