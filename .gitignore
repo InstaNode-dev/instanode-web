@@ -5,7 +5,11 @@ dist/
 !.env.example
 .DS_Store
 playwright-report/
+playwright-report-live/
 test-results/
+
+# WS1 LIVE E2E cleanup ledger (runtime artifact — the entities to reap)
+e2e/.cleanup-ledger.json
 
 # Cloned from InstaNode-dev/content by scripts/fetch-content.mjs before
 # every build. Contents are inlined into the bundle by Vite — never

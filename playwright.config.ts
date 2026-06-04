@@ -10,6 +10,12 @@ const live = process.env.E2E_LIVE === '1';
 
 export default defineConfig({
   testDir: './e2e',
+  // The mocked per-PR suite excludes the LIVE real-backend specs — those run
+  // only under playwright.live.config.ts (E2E_LIVE=1, manual/scheduled). They
+  // self-skip anyway, but keeping them out of the default config means the
+  // per-PR gate never boots a browser for a spec that always skips here, and
+  // the two suites stay cleanly separated.
+  testIgnore: ['live-*.spec.ts'],
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
