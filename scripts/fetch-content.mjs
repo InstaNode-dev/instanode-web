@@ -66,7 +66,14 @@ const SYNC_FILES = [
     // Markers MUST be kept in sync with the assertions in
     // src/lib/llmsContract.test.ts — see rule 18 (registry-iterating
     // regression test) and rule 22 (contract changes touch all surfaces).
-    requireMarkers: ['redeploy=true', '"redeployed":'],
+    //
+    // TEAM-GATE (2026-06-04 CEO directive): the 'not yet a self-serve tier'
+    // marker guards the Team-tier gating copy. If an upstream content-repo
+    // sync ever drops the gating (reverting Team to a public self-serve
+    // tier), this PRESERVES the committed public/llms.txt so the build can't
+    // silently re-market Team as buyable. The content repo currently carries
+    // the same wording, so the guard is a no-op today.
+    requireMarkers: ['redeploy=true', '"redeployed":', 'not yet a self-serve tier'],
   },
 ]
 
