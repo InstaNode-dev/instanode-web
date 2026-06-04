@@ -85,24 +85,27 @@ const TIERS: {
     ctaHrefYearly: '/app/checkout?plan=pro&frequency=yearly',
     highlighted: true,
   },
-  // Team tier — launched 2026-05-20 (DOC-REALITY-DELTA sweep). Limits are
-  // unlimited across the board; the upsell vs Pro is dedicated infra +
-  // 90-day backup retention + SLA + RBAC + SAML. Per api/plans.yaml:375
-  // ($199/mo, $1990/yr). Razorpay plan IDs are configured server-side.
+  // Team tier — $199/mo, unlimited across the board; the upsell vs Pro is
+  // dedicated infra + 90-day backup retention + SLA + RBAC + SAML. Per
+  // api/plans.yaml:375 ($199/mo, $1990/yr).
   {
     key: 'team',
     name: 'Team',
     monthly: { price: '$199', sub: '/ mo' },
     // team_yearly: $1990/yr ≈ $165.83/mo (~17% off $199 x 12).
     yearly: { price: '$165.83', sub: '/ mo billed yearly', saveLabel: 'save $398/yr' },
-    cta: 'Start team →',
-    // Team checkout is self-serve as of api#168 + dashboard #106 (Razorpay
-    // plan IDs configured server-side). DOG-10: previous mailto CTA leaked
-    // mid-funnel conversions on the $199/mo AOV path; checkout now matches
-    // the Hobby/Pro pattern so the marketing "Self-serve at every tier"
-    // promise above the comparison table is honored.
-    ctaHrefMonthly: '/app/checkout?plan=team&frequency=monthly',
-    ctaHrefYearly: '/app/checkout?plan=team&frequency=yearly',
+    cta: 'Contact sales →',
+    // TEAM-GATE (2026-06-04 CEO directive): Team is NOT self-serve and must
+    // not route to /app/checkout until its unlimited-resource delivery is
+    // proven built. This DELIBERATELY REVERSES DOG-10 (2026-05-29), which
+    // had flipped Team's CTA from a contact-sales mailto to a self-serve
+    // /app/checkout?plan=team link. DOG-10's "Self-serve at every tier"
+    // rationale is overridden: Team is sales-assisted only for now. Do NOT
+    // re-point this at /app/checkout. Ref:
+    // docs/sessions/2026-06-04/TEAM-PLAN-GATE-AND-BUILD.md.
+    // mailto on both cycles — there is no self-serve checkout for Team yet,
+    // so the yearly toggle reuses the same contact-sales action.
+    ctaHrefMonthly: 'mailto:sales@instanode.dev?subject=Team%20plan%20enquiry',
   },
 ]
 

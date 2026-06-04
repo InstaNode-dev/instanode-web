@@ -91,40 +91,49 @@ describe('ChangePlanModal — target tier rendering', () => {
     expect(screen.queryByTestId('change-plan-target-hobby')).toBeNull()
   })
 
-  it('exposes hobby_plus / pro / team as upgrade targets for a hobby user', () => {
+  it('exposes hobby_plus / pro as upgrade targets for a hobby user — but NOT team (TEAM-GATE 2026-06-04)', () => {
     // FIX-R9 (W11): hobby_plus is now a real plan in api/plans.yaml ($19/mo)
     // and must show up between Hobby and Pro in the upgrade picker.
+    // TEAM-GATE (2026-06-04 CEO directive): `team` is NO LONGER a self-serve
+    // in-app upgrade target — Team ($199 "unlimited") is not rolled out. A
+    // user wanting Team goes through sales (the no-upgrades / support exit),
+    // not this radio. Do NOT re-add the team assertion.
     render(<ChangePlanModal currentTier="hobby" onClose={() => {}} />)
     expect(screen.queryByTestId('change-plan-target-hobby_plus')).toBeTruthy()
     expect(screen.queryByTestId('change-plan-target-pro')).toBeTruthy()
-    expect(screen.queryByTestId('change-plan-target-team')).toBeTruthy()
+    expect(screen.queryByTestId('change-plan-target-team')).toBeNull()
   })
 
-  it('hides growth from the upgrade picker (FIX-190 — no real self-serve growth row)', () => {
+  it('hides growth AND team from the upgrade picker (sales-only tiers)', () => {
     // Growth is operator-only / sales-only — there is no real growth row
-    // reachable via this modal. Asserted on a hobby user (where every
-    // higher tier would otherwise have shown) and on the no-upgrade team
-    // ceiling (covered separately below).
+    // reachable via this modal. Team is sales-gated per the 2026-06-04 CEO
+    // directive (TEAM-GATE) until its unlimited-resource delivery is built.
     render(<ChangePlanModal currentTier="hobby" onClose={() => {}} />)
     expect(screen.queryByTestId('change-plan-target-growth')).toBeNull()
+    expect(screen.queryByTestId('change-plan-target-team')).toBeNull()
   })
 
-  it('hides hobby/hobby_plus as downgrades for a pro user — only team remains', () => {
+  it('shows the no-upgrades empty state for a pro user (only Team is above, and Team is sales-gated)', () => {
+    // TEAM-GATE (2026-06-04): a Pro user's only tier up is Team, which is no
+    // longer self-serve. With team removed from SELECTABLE_TIERS, the modal
+    // has zero valid upgrade targets and falls through to the "highest plan
+    // available through self-serve — contact support" empty state. This
+    // REVERSES the prior "only team remains" assertion.
     render(<ChangePlanModal currentTier="pro" onClose={() => {}} />)
-    expect(screen.queryByTestId('change-plan-target-hobby')).toBeNull()
-    expect(screen.queryByTestId('change-plan-target-hobby_plus')).toBeNull()
-    expect(screen.queryByTestId('change-plan-target-growth')).toBeNull()
-    expect(screen.queryByTestId('change-plan-target-team')).toBeTruthy()
+    expect(screen.queryByTestId('change-plan-target-team')).toBeNull()
+    expect(screen.getByTestId('change-plan-no-upgrades')).toBeTruthy()
+    expect((screen.getByTestId('change-plan-confirm') as HTMLButtonElement).disabled).toBe(true)
   })
 
-  it('shows pro + team but hides hobby as downgrade for a hobby_plus user', () => {
-    // FIX-R9: hobby_plus users upgrading should see Pro and Team only —
-    // hobby is below them and growth is not self-serve.
+  it('shows pro but hides hobby/team for a hobby_plus user (Team is sales-gated)', () => {
+    // FIX-R9: hobby_plus users upgrading should see Pro — hobby is below
+    // them, growth is not self-serve, and Team is sales-gated (TEAM-GATE
+    // 2026-06-04). Pro is the only self-serve upgrade.
     render(<ChangePlanModal currentTier="hobby_plus" onClose={() => {}} />)
     expect(screen.queryByTestId('change-plan-target-hobby')).toBeNull()
     expect(screen.queryByTestId('change-plan-target-hobby_plus')).toBeNull()
     expect(screen.queryByTestId('change-plan-target-pro')).toBeTruthy()
-    expect(screen.queryByTestId('change-plan-target-team')).toBeTruthy()
+    expect(screen.queryByTestId('change-plan-target-team')).toBeNull()
   })
 
   it('renders the no-upgrades empty state with a support link for team users', () => {
@@ -140,19 +149,31 @@ describe('ChangePlanModal — target tier rendering', () => {
     expect(link.href).toContain('mailto:support@instanode.dev')
   })
 
-  it('preselects defaultTargetTier when it is a valid upgrade', () => {
-    render(<ChangePlanModal currentTier="hobby" defaultTargetTier="team" onClose={() => {}} />)
-    const team = screen.getByTestId('change-plan-target-team') as HTMLInputElement
-    expect(team.checked).toBe(true)
+  it('preselects defaultTargetTier when it is a valid (self-serve) upgrade', () => {
+    render(<ChangePlanModal currentTier="hobby" defaultTargetTier="pro" onClose={() => {}} />)
+    const pro = screen.getByTestId('change-plan-target-pro') as HTMLInputElement
+    expect(pro.checked).toBe(true)
   })
 
-  it('drops defaultTargetTier when it would be a downgrade and picks the lowest upgrade', () => {
-    // Pro user with a defaultTargetTier of hobby → the upgrade list is just
-    // ['team'], and the modal should preselect team rather than honour the
-    // (illegal) hobby suggestion.
+  it('drops a sales-gated defaultTargetTier=team and falls back to a valid self-serve upgrade (TEAM-GATE)', () => {
+    // TEAM-GATE (2026-06-04): a caller (e.g. BillingPage NEXT_CHANGE_PLAN_TIER)
+    // may still pass defaultTargetTier="team", but team is no longer a
+    // selectable self-serve upgrade. The modal must drop it and preselect the
+    // lowest valid upgrade instead of honouring the now-gated team suggestion.
+    render(<ChangePlanModal currentTier="hobby" defaultTargetTier="team" onClose={() => {}} />)
+    expect(screen.queryByTestId('change-plan-target-team')).toBeNull()
+    // Lowest valid upgrade above Hobby is Hobby Plus.
+    const hobbyPlus = screen.getByTestId('change-plan-target-hobby_plus') as HTMLInputElement
+    expect(hobbyPlus.checked).toBe(true)
+  })
+
+  it('shows the no-upgrades empty state for a pro user even with a defaultTargetTier (TEAM-GATE)', () => {
+    // Pro user with any defaultTargetTier → the only tier above is Team,
+    // which is sales-gated, so there are zero valid self-serve upgrades and
+    // the modal renders the contact-support empty state.
     render(<ChangePlanModal currentTier="pro" defaultTargetTier="hobby" onClose={() => {}} />)
-    const team = screen.getByTestId('change-plan-target-team') as HTMLInputElement
-    expect(team.checked).toBe(true)
+    expect(screen.getByTestId('change-plan-no-upgrades')).toBeTruthy()
+    expect(screen.queryByTestId('change-plan-target-team')).toBeNull()
   })
 })
 

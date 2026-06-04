@@ -140,14 +140,11 @@ describe('PricingPage — four public tier cards present (M11 regression guard)'
     expect(hobbyPlusCells.length).toBe(0)
   })
 
-  it('paid-tier CTAs are clickable links (not disabled spans) for hobby / pro / team', () => {
+  it('paid-tier CTAs are clickable links for hobby / pro / team', () => {
     renderPage()
-    // 2026-05-20 DOC-REALITY-DELTA: Team tier launched. DOG-10 (2026-05-29):
-    // Team CTA flipped from mailto: to self-serve /app/checkout?plan=team
-    // now that api#168 + dashboard #106 enabled the Razorpay flow. plans.yaml
-    // has team at $199/mo with every limit -1 (unlimited). If Team flips back
-    // to "coming soon", it'll be a disabled span and this test fails — the
-    // regression guard.
+    // Hobby/Pro are self-serve (/app/checkout). Team is a clickable
+    // contact-sales mailto link (TEAM-GATE 2026-06-04) — still an <a>
+    // with an href, just not a checkout one (asserted below).
     for (const tier of ['hobby', 'pro', 'team']) {
       const cta = screen.getByTestId(`pricing-cta-${tier}`)
       // <a> with href, not <span aria-disabled>.
@@ -156,20 +153,28 @@ describe('PricingPage — four public tier cards present (M11 regression guard)'
     }
   })
 
-  it('Team CTA points to /app/checkout?plan=team (DOG-10 self-serve, no mailto) — monthly default', () => {
+  it('Team CTA does NOT route to /app/checkout — it is contact-sales (TEAM-GATE 2026-06-04)', () => {
+    // TEAM-GATE (2026-06-04 CEO directive): this DELIBERATELY REVERSES
+    // DOG-10 (2026-05-29), which had pointed Team at /app/checkout?plan=team.
+    // Team ($199 "unlimited") is NOT rolled out and must not be sold
+    // self-serve until its unlimited-resource delivery is proven built.
+    // The CTA is a sales-assisted mailto, NOT a checkout link. If a future
+    // change re-points Team at /app/checkout, this test fails — that is the
+    // regression guard. Ref docs/sessions/2026-06-04/TEAM-PLAN-GATE-AND-BUILD.md.
     renderPage()
-    // DOG-10 (2026-05-29): Team self-serve via /app/checkout?plan=team.
-    // Default is monthly; the yearly path is asserted via the dedicated
-    // ?frequency=yearly URL-param test below.
     const cta = screen.getByTestId('pricing-cta-team')
     const href = cta.getAttribute('href') ?? ''
-    expect(href).not.toMatch(/^mailto:/)
-    expect(href).toContain('/app/checkout')
-    expect(href).toContain('plan=team')
-    expect(href).toContain('frequency=monthly')
+    expect(href).not.toContain('/app/checkout')
+    expect(href).not.toContain('plan=team')
+    expect(href.startsWith('mailto:')).toBe(true)
+    // Label surfaces a contact-sales / coming-soon affordance, not "Start team".
+    expect((cta.textContent ?? '').toLowerCase()).toContain('contact sales')
   })
 
-  it('Team CTA carries frequency=yearly when ?frequency=yearly URL param is set (DOG-10)', () => {
+  it('Team CTA stays contact-sales even when ?frequency=yearly is set (no checkout on yearly)', () => {
+    // The yearly toggle must not unlock a self-serve Team checkout. The
+    // Team card has no yearly checkout variant, so the CTA falls back to
+    // the same contact-sales mailto on both cycles.
     render(
       <MemoryRouter initialEntries={['/pricing?frequency=yearly']}>
         <PricingPage />
@@ -177,15 +182,15 @@ describe('PricingPage — four public tier cards present (M11 regression guard)'
     )
     const cta = screen.getByTestId('pricing-cta-team')
     const href = cta.getAttribute('href') ?? ''
-    expect(href).not.toMatch(/^mailto:/)
-    expect(href).toContain('/app/checkout?plan=team&frequency=yearly')
+    expect(href).not.toContain('/app/checkout')
+    expect(href.startsWith('mailto:')).toBe(true)
   })
 
-  it('Team tier shows $199/mo (DOC-REALITY-DELTA 2026-05-20 launch)', () => {
+  it('Team tier shows $199/mo', () => {
     renderPage()
-    // Team launched per plans.yaml:375 ($199/mo, $1990/yr). Marketing
-    // surface must mirror the registry. Yearly CTA reuses mailto: until
-    // assisted-Razorpay flow ships.
+    // Team price still displays on the comparison surface ($199/mo per
+    // plans.yaml:375) — the gate removes the self-serve buy path, not the
+    // tier's visibility.
     const body = document.body.textContent ?? ''
     expect(body).toContain('$199')
   })

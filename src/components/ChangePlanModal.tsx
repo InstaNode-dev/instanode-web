@@ -53,7 +53,15 @@ const TIER_LABEL: Record<ChangePlanTier, string> = {
 // the $19/mo step between Hobby and Pro), drop growth — there is no real
 // growth row available through self-serve upgrade yet. Customers who need
 // growth-tier dedicated infra go through support / sales, not this modal.
-const SELECTABLE_TIERS: ChangePlanTier[] = ['hobby', 'hobby_plus', 'pro', 'team']
+//
+// TEAM-GATE (2026-06-04 CEO directive): `team` is REMOVED from the selectable
+// set — Team ($199 "unlimited") is not rolled out and must not be offered as
+// a self-serve in-app upgrade until its unlimited-resource delivery is proven
+// built. A Pro/Growth user whose only path up is Team now falls through to the
+// modal's "no upgrades — contact support" empty state, which is the honest,
+// sales-assisted exit. Do NOT re-add 'team' here. Ref:
+// docs/sessions/2026-06-04/TEAM-PLAN-GATE-AND-BUILD.md.
+const SELECTABLE_TIERS: ChangePlanTier[] = ['hobby', 'hobby_plus', 'pro']
 
 export interface ChangePlanModalProps {
   /** The team's current tier — read from useDashboardCtx().me.team.tier on

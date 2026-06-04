@@ -59,6 +59,18 @@ const CONTRACT_MARKERS: DocsMarker[] = [
     file: 'public/llms-full.txt',
     mustContain: ['redeploy=true', '"redeployed":', 'no_matching_deployment'],
   },
+  {
+    // TEAM-GATE (2026-06-04 CEO directive): Team is NOT self-serve and must
+    // not be described as a public self-serve tier until its unlimited-
+    // resource delivery is proven built. Pin the gating wording so a docs
+    // revert (or a content-repo sync that still lists Team as self-serve)
+    // fails CI. Mirrors the requireMarkers guard in fetch-content.mjs and
+    // the PricingPage/ChangePlanModal source changes in this PR.
+    // Ref: docs/sessions/2026-06-04/TEAM-PLAN-GATE-AND-BUILD.md.
+    field: 'Team tier is sales-assisted, NOT self-serve (CEO gate 2026-06-04)',
+    file: 'public/llms.txt',
+    mustContain: ['not yet a self-serve tier'],
+  },
 ]
 
 describe('agent docs contract — POST /deploy/new redeploy=true', () => {
