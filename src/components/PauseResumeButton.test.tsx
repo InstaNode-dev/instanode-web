@@ -106,7 +106,7 @@ describe('PauseResumeButton — modal flow', () => {
     expect(api.resumeResource).not.toHaveBeenCalled()
   })
 
-  it('confirming on an active resource calls api.pauseResource(id)', async () => {
+  it('confirming on an active resource calls api.pauseResource(token)', async () => {
     const onUpdated = vi.fn()
     ;(api.pauseResource as any).mockResolvedValue({
       ok: true,
@@ -116,7 +116,9 @@ describe('PauseResumeButton — modal flow', () => {
     fireEvent.click(screen.getByTestId('pause-resume-button'))
     fireEvent.click(screen.getByTestId('pause-resume-confirm'))
     await waitFor(() => {
-      expect(api.pauseResource).toHaveBeenCalledWith('res_abc123')
+      // Must address by TOKEN (the api resolves :id against the token column);
+      // passing the UUID id 404'd in prod (live-ui pause/resume journey, 2026-06-06).
+      expect(api.pauseResource).toHaveBeenCalledWith('tok_abc123')
     })
     expect(api.resumeResource).not.toHaveBeenCalled()
     await waitFor(() => {
@@ -126,7 +128,7 @@ describe('PauseResumeButton — modal flow', () => {
     })
   })
 
-  it('confirming on a paused resource calls api.resumeResource(id)', async () => {
+  it('confirming on a paused resource calls api.resumeResource(token)', async () => {
     const onUpdated = vi.fn()
     const paused: Resource = { ...baseResource, status: 'paused' }
     ;(api.resumeResource as any).mockResolvedValue({
@@ -137,7 +139,8 @@ describe('PauseResumeButton — modal flow', () => {
     fireEvent.click(screen.getByTestId('pause-resume-button'))
     fireEvent.click(screen.getByTestId('pause-resume-confirm'))
     await waitFor(() => {
-      expect(api.resumeResource).toHaveBeenCalledWith('res_abc123')
+      // Address by TOKEN, not the UUID id (see the pause test above).
+      expect(api.resumeResource).toHaveBeenCalledWith('tok_abc123')
     })
     expect(api.pauseResource).not.toHaveBeenCalled()
     await waitFor(() => {

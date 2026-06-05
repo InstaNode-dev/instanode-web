@@ -1,0 +1,177 @@
+# Real-backend UI SMOKE on the PR path (Wave 2 — close the "UI PRs merge having
+# touched the real api only via a cookieless CORS preflight" gap).
+#
+# Design ref: docs/ci/01-CI-INTEGRATION-DESIGN.md (Wave 2): "A real-backend UI
+# smoke must gate the PR (or post-merge-pre-deploy), not run only on a 30-min
+# schedule." This runs a SMALL, tagged subset (@pr-smoke) of the Wave 3
+# real-backend UI journeys against PROD via a minted, cohort-scoped, reaped
+# account — so EVERY web PR exercises the actual dashboard against the real api
+# and catches the login-broke class (a backend field/enum/status rename that
+# compiles + passes mocked Playwright but breaks the real /app) BEFORE merge.
+#
+# The @pr-smoke subset (3 journeys, ~40s):
+#   #1 auth round-trip   — /app renders authed (not /login); /auth/me data loads.
+#   #2 provision render  — a seeded resource lists + its detail/metrics render.
+#   #3 deploy row        — a created deploy's row + detail logs + make-permanent.
+# The FULL journey suite stays on the 30-min schedule (e2e-prod.yml).
+#
+# WHY this is safe to run against prod (same invariants as e2e-prod.yml):
+#   - The mint endpoint creates an is_test_cohort=true account; the live worker
+#     skip-guards neuter billing/churn/email/quota for it (no charge, no quota
+#     burn, no "we miss you" email, no churn of a real customer).
+#   - The account + every resource it creates is reaped: this job DELETEs the
+#     minted account AND runs the per-run ledger reaper (npm run reap:live) in an
+#     `if: always()` teardown; the reaper exits non-zero on any leak (rule 24).
+#   - cohort.ts assertSafeApiTarget() only allows a prod target for a sanctioned
+#     minted run; a stray invocation can never hammer prod.
+#
+# FORK / SECRET-LESS SAFETY (why this never hard-fails a PR that can't reach
+# secrets): GitHub does NOT expose repo secrets to pull_request runs from forks.
+# The gate step below no-ops the job cleanly (::notice::) when E2E_ACCOUNT_TOKEN
+# is empty, so a fork PR (or a PR opened before the secret exists) goes GREEN
+# without running — it is "required only when secrets are available". For
+# same-repo branch PRs (where secrets ARE present) it runs for real and gates the
+# merge. (Same posture as e2e-prod.yml's gate.)
+
+name: E2E PR smoke (real-backend UI, minted account)
+
+on:
+  pull_request:
+    # Only when the dashboard surface or the live-UI harness changes — a docs-only
+    # or marketing-copy PR doesn't need to spend a prod mint+reap cycle. (The
+    # full schedule still covers everything every 30 min.)
+    paths:
+      - 'src/**'
+      - 'e2e/**'
+      - 'playwright.live.config.ts'
+      - 'vite.config.ts'
+      - 'package.json'
+      - '.github/workflows/e2e-pr-smoke.yml'
+
+concurrency:
+  # One PR-smoke run per branch; cancel superseded runs (a new push obsoletes the
+  # old). Distinct group from e2e-prod so a scheduled prod run isn't cancelled.
+  group: e2e-pr-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  pr-smoke:
+    name: UI real-backend smoke (@pr-smoke) via minted account + reap
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      E2E_API_URL: https://api.instanode.dev
+      E2E_LIVE_RUN_ID: ${{ github.run_id }}
+      E2E_ACCOUNT_TOKEN: ${{ secrets.E2E_ACCOUNT_TOKEN }}
+    steps:
+      - name: Gate on configured mint token (no-op cleanly on fork / secret-less PR)
+        run: |
+          set -euo pipefail
+          if [ -z "${E2E_ACCOUNT_TOKEN:-}" ]; then
+            echo "::notice::secrets.E2E_ACCOUNT_TOKEN not available (fork PR or unconfigured) — skipping UI PR smoke (no-op, GREEN)."
+            echo "RUN=0" >> "$GITHUB_ENV"
+          else
+            echo "RUN=1" >> "$GITHUB_ENV"
+          fi
+
+      - uses: actions/checkout@v6
+        if: env.RUN == '1'
+
+      - uses: actions/setup-node@v6
+        if: env.RUN == '1'
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install deps
+        if: env.RUN == '1'
+        run: npm ci
+
+      - name: Install Chromium
+        if: env.RUN == '1'
+        run: npx playwright install --with-deps chromium
+
+      - name: Mint ephemeral cohort account (pro — deploy headroom for #3)
+        id: mint
+        if: env.RUN == '1'
+        run: |
+          set -euo pipefail
+          resp="$(curl -sS -w '\n%{http_code}' \
+            -X POST "${E2E_API_URL}/internal/e2e/account" \
+            -H "X-E2E-Token: ${E2E_ACCOUNT_TOKEN}" \
+            -H 'Content-Type: application/json' \
+            -d '{"tier":"pro","with_resources":true}')"
+          code="$(printf '%s' "$resp" | tail -n1)"
+          body="$(printf '%s' "$resp" | sed '$d')"
+          if [ "$code" != "200" ]; then
+            echo "::error::mint endpoint returned HTTP $code (expected 200). Body: $body"
+            exit 1
+          fi
+          jwt="$(printf '%s' "$body"   | jq -r '.session_jwt // empty')"
+          team="$(printf '%s' "$body"  | jq -r '.team_id // empty')"
+          email="$(printf '%s' "$body" | jq -r '.email // empty')"
+          tier="$(printf '%s' "$body"  | jq -r '.tier // empty')"
+          if [ -z "$jwt" ] || [ -z "$team" ]; then
+            echo "::error::mint response missing session_jwt or team_id. Body: $body"
+            exit 1
+          fi
+          echo "::add-mask::$jwt"
+          echo "::add-mask::$team"
+          {
+            echo "MINTED_SESSION_JWT=$jwt"
+            echo "MINTED_TEAM_ID=$team"
+            echo "MINTED_EMAIL=$email"
+            echo "MINTED_TIER=$tier"
+          } >> "$GITHUB_ENV"
+          echo "minted=1" >> "$GITHUB_OUTPUT"
+          echo "Minted cohort account (tier=$tier) for the PR UI smoke — session + team_id masked."
+
+      - name: Run @pr-smoke UI journeys against prod
+        if: env.RUN == '1' && steps.mint.outputs.minted == '1'
+        env:
+          E2E_LIVE: '1'
+          # The minted PRO account drives the authed UI legs (cohort.ts
+          # mintedSession / factory mintUser). The factory mints per-test, but
+          # exporting the workflow-minted session here makes assertSafeApiTarget
+          # treat the prod target as sanctioned even for the anon login leg.
+          E2E_SESSION_JWT: ${{ env.MINTED_SESSION_JWT }}
+          E2E_TEAM_ID: ${{ env.MINTED_TEAM_ID }}
+          E2E_ACCOUNT_EMAIL: ${{ env.MINTED_EMAIL }}
+          E2E_ACCOUNT_TIER: ${{ env.MINTED_TIER }}
+          # Fingerprint bypass for any anon provision the smoke touches.
+          E2E_TEST_TOKEN: ${{ secrets.E2E_TEST_TOKEN }}
+        run: npm run test:e2e:live:pr-smoke
+
+      - name: Reap the workflow-minted account (teardown)
+        if: always() && env.RUN == '1' && env.MINTED_TEAM_ID != ''
+        run: |
+          set -euo pipefail
+          code="$(curl -sS -o /dev/null -w '%{http_code}' \
+            -X DELETE "${E2E_API_URL}/internal/e2e/account/${MINTED_TEAM_ID}" \
+            -H "X-E2E-Token: ${E2E_ACCOUNT_TOKEN}")"
+          case "$code" in
+            200|202|204|404|410) echo "Reaped workflow-minted account (HTTP $code)." ;;
+            *) echo "::error::DELETE minted account returned HTTP $code — possible leak."; exit 1 ;;
+          esac
+
+      - name: Reap per-test cohort resources from ledger (teardown)
+        # The factory mints a fresh account PER test and reaps it inline + via the
+        # ledger; this sweep is the no-leak backstop. Exits non-zero on any leak,
+        # failing the job loudly (rule 24).
+        if: always() && env.RUN == '1'
+        run: npm run reap:live
+
+      - name: Upload trace on failure
+        if: failure() && env.RUN == '1'
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-pr-smoke-trace-${{ github.run_id }}
+          path: |
+            test-results/
+            playwright-report-live/
+            e2e/.cleanup-ledger.json
+          if-no-files-found: ignore
+          retention-days: 7

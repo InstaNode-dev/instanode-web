@@ -127,10 +127,14 @@ const LIVE_FLOWS: LiveFlow[] = (
     'PATCH /stacks/:slug/env',
 
     // §1.K Deploy single-app + lifecycle — claim-deploy + W-DEPLOY (live-writes)
+    // + live-ui (build-log SSE)
     'POST /deploy/new',
     'GET /api/v1/deployments',
     'GET /api/v1/deployments/:id',
     'GET /api/v1/deployments/:id/events',
+    // Build-log SSE stream — driven through the DeployDetailPage Logs tab in the
+    // live-ui deploy journey (the LiveBuild panel's cross-origin SSE to prod).
+    'GET /deploy/:id/logs',
     'DELETE /api/v1/deployments/:id',
     'DELETE /api/v1/deployments/:id/confirm-deletion',
     'PATCH /api/v1/deployments/:id',
