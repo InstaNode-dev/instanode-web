@@ -361,6 +361,7 @@ test.describe('LIVE — Batch A read flows (W-OBS / W-RES / W-VAULT / W-APIKEYS 
           series.length > 0 && Array.isArray(series[0]),
           `metrics must carry at least one named time-series array; got ${JSON.stringify(m).slice(0, 200)}.`,
         ).toBe(true)
+        expect(m.window_seconds, 'metrics must echo the resolved window_seconds').toBeTruthy()
         expect(m.data_source, 'metrics must declare a data_source').toBeTruthy()
       }
 
