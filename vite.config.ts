@@ -58,6 +58,25 @@ export default defineConfig({
     port: 5173,
     proxy,
   },
+  // preview.proxy — only used by the Wave 3 real-backend UI journeys
+  // (playwright.live.config.ts boots `vite preview`). The prod api's CORS
+  // allowlist returns access-control-allow-origin ONLY for https://instanode.dev
+  // (the AUTH-004 contract), so a browser on the preview origin (localhost:4173)
+  // would get its own fetches CORS-blocked ("Failed to fetch"). Proxying api
+  // paths through the preview server makes every browser request SAME-ORIGIN
+  // (no preflight, no CORS) — exactly how the dev server works — so the SPA (with
+  // a relative '' api base) talks to the REAL backend faithfully. Gated on
+  // E2E_LIVE_PROXY_TARGET so a normal `npm run preview` is unaffected.
+  preview: process.env.E2E_LIVE_PROXY_TARGET
+    ? {
+        port: 4173,
+        proxy: Object.fromEntries(
+          ['/api', '/auth', '/claim', '/start', '/db', '/cache', '/nosql', '/queue', '/storage', '/webhook', '/deploy', '/stacks', '/vector', '/.well-known', '/openapi.json', '/healthz', '/readyz', '/livez'].map(
+            (p) => [p, { target: process.env.E2E_LIVE_PROXY_TARGET as string, changeOrigin: true }],
+          ),
+        ),
+      }
+    : undefined,
   test: {
     globals: true,
     environment: 'jsdom',

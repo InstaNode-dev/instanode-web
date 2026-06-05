@@ -31,6 +31,7 @@ import { coveredRoutes as authCovered } from './live-auth.coverage'
 import { coveredRoutes as claimDeployCovered } from './live-claim-deploy.coverage'
 import { coveredRoutes as anonProvisionCovered } from './live-anon-provision.coverage'
 import { coveredRoutes as provisionSmokeCovered } from './live-provision-smoke.coverage'
+import { coveredRoutes as uiJourneysCovered } from './live-ui.coverage'
 import { PROD_COVERAGE_MANIFEST, type ProdCoverageFlow } from './prod-coverage-manifest'
 
 // Each live-*.spec.ts re-exports its sibling's `coveredRoutes`; we union the
@@ -44,6 +45,10 @@ const SPEC_MANIFESTS: ReadonlyArray<{ spec: string; covered: readonly string[] }
   { spec: 'live-claim-deploy.spec.ts', covered: claimDeployCovered },
   { spec: 'live-anon-provision.spec.ts', covered: anonProvisionCovered },
   { spec: 'live-provision-smoke.spec.ts', covered: provisionSmokeCovered },
+  // Wave 3 — real-backend UI journeys (live-ui-*.spec.ts) covered set, mapped in
+  // live-ui.coverage.ts. Drives the routes THROUGH THE BROWSER (or via api for
+  // the agent-driven mutations the read-only dashboard delegates).
+  { spec: 'live-ui-*.spec.ts', covered: uiJourneysCovered },
 ]
 
 /** Union of every route covered by some live-*.spec.ts. */

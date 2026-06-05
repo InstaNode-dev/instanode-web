@@ -18,6 +18,7 @@
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:live": "playwright test --config=playwright.live.config.ts",
+    "test:e2e:live:pr-smoke": "playwright test --config=playwright.live.config.ts --grep @pr-smoke",
     "reap:live": "node e2e/reap-cohort.ts",
     "deploy:pages": "npm run build && echo 'Built to dist/. dist/404.html is the SPA shell (written by prerender.mjs Step 4.7). Push to main to deploy.'"
   },

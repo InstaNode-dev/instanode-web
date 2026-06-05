@@ -110,9 +110,16 @@ export function PauseResumeButton({
     setBusy(true)
     setErr(null)
     try {
-      const r = isPaused
-        ? await api.resumeResource(resource.id)
-        : await api.pauseResource(resource.id)
+      // Address the resource by its public TOKEN, not the internal UUID `id`.
+      // The agent API resolves /api/v1/resources/:id/{pause,resume} against the
+      // TOKEN column (the same as getResource / rotate / delete), so passing the
+      // UUID `id` here 404'd ("Resource not found") for EVERY resource — token
+      // and id differ on real resources — silently breaking pause/resume through
+      // the dashboard. Surfaced 2026-06-06 by the live-ui pause/resume journey
+      // (the only real-backend exercise of this path). Use resource.token, with
+      // a defensive fall-back to id for any legacy row missing a token.
+      const ref = resource.token || resource.id
+      const r = isPaused ? await api.resumeResource(ref) : await api.pauseResource(ref)
       onUpdated(r.resource)
       setOpen(false)
     } catch (e: any) {
