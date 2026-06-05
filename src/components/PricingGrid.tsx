@@ -168,10 +168,11 @@ export const PRICING_GRID_TIERS: TierDefinition[] = [
     upgradesTo: 'team',
   },
   {
-    // Team — launched 2026-05-20 (DOC-REALITY-DELTA sweep). plans.yaml:375
-    // has team at $199/mo, $1990/yr, every limit -1 (unlimited).
-    // CTA goes via buildCtaLabel('team') → "Contact sales" until the
-    // assisted-Razorpay self-serve flow ships.
+    // Team — $199/mo, $1990/yr. strict-80% margin redesign (2026-06-05):
+    // every Team limit is now a finite plans.yaml cap (was -1/unlimited).
+    // Above these caps = Enterprise (contact sales). CTA goes via
+    // buildCtaLabel('team') → "Contact sales" until the assisted-Razorpay
+    // self-serve flow ships.
     key: 'team',
     label: 'Team',
     monthly: { price: '$199', sub: '/mo' },
@@ -182,11 +183,12 @@ export const PRICING_GRID_TIERS: TierDefinition[] = [
       yearlyTotal: '$1990/yr',
     },
     features: [
-      { text: 'unlimited Postgres · Redis · MongoDB · queues · storage' },
-      { text: 'unlimited deployments · 50 custom domains' },
-      { text: 'unlimited vault entries · multi-env' },
+      { text: '50 GB Postgres · 1.5 GB Redis · 40 GB MongoDB' },
+      { text: '40 GB queues · 300 GB object storage' },
+      { text: '100 deployments · 50 custom domains' },
+      { text: '1 000 vault entries · multi-env' },
       { text: '90-day backups · self-serve restore' },
-      { text: 'RBAC + audit log' },
+      { text: 'RBAC + audit log · need more? contact sales' },
       { text: 'SSO / SAML (coming soon)' },
       { text: '99.9% SLA (coming soon)' },
     ],

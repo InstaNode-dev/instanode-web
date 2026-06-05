@@ -200,23 +200,25 @@ const PLANS: Plan[] = [
     cta: { label: 'Start pro →', href: ROUTES.signin, variant: 'primary' },
   },
   {
-    // Team tier — launched 2026-05-20 (DOC-REALITY-DELTA sweep).
-    // plans.yaml:375 has team at $199/mo, every limit -1 (unlimited).
-    // DOG-1: CTA is self-serve via /app/checkout?plan=team (Razorpay plan IDs
-    // are configured server-side as of api#168 + dashboard #106). Previous
-    // mailto Team CTA contradicted the "Self-serve at every tier. No sales
-    // call." H2 directly above this tile and leaked mid-funnel conversions
-    // on the $199/mo AOV path.
+    // Team tier — $199/mo. strict-80% margin redesign (2026-06-05): every
+    // Team limit is now a finite plans.yaml cap (was -1/unlimited). Above
+    // these caps = Enterprise (contact sales).
+    // NOTE (pre-existing, out of scope here): this CTA still points at the
+    // self-serve /app/checkout?plan=team path, which the server-side Team
+    // gate rejects with 400 tier_not_yet_available. The PricingPage Team CTA
+    // already uses a contact-sales mailto. This MarketingPage CTA should be
+    // reconciled with the gate in a follow-up (not changed here — the
+    // strict-margin task is explicitly copy-only and must not touch the gate).
     id: 'team',
     name: 'Team',
     tagline: 'For the engineering org. Dedicated infra, RBAC + audit, with SSO & SLA on the way.',
     price: '$199',
     freq: '/ mo',
     features: [
-      'unlimited Postgres · Redis · MongoDB',
-      'unlimited deployments · 50 custom domains',
+      '50 GB Postgres · 1.5 GB Redis · 40 GB MongoDB',
+      '100 deployments · 50 custom domains',
       '90-day backups · self-serve restore · RBAC + audit',
-      'SSO/SAML · 99.9% SLA (coming soon)',
+      'Need more? Enterprise — contact sales',
     ],
     cta: {
       label: 'Start team →',
