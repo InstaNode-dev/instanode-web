@@ -1,0 +1,192 @@
+# Real-backend (LIVE) E2E against PRODUCTION (api.instanode.dev) using an
+# ephemeral, cohort-scoped account minted on the fly. This is the prod sibling
+# of e2e-live.yml (which targets STAGING) — DO NOT delete that one.
+#
+# Plan: docs/sessions/2026-06-04 TEST-ACCOUNTS-AND-NR-SYNTHETICS-PLAN.md.
+#
+# WHY this is safe to run against prod (and e2e-live.yml is not):
+#   - The api guards a mint endpoint (PR #260) that creates an account with
+#     is_test_cohort=true. The live worker skip-guards neuter
+#     billing/churn/email/quota for that team, so a LIVE run can never charge a
+#     card, burn a real quota budget, send a "we miss you" email, or churn a
+#     real customer.
+#   - The account + every resource it creates is reaped: this job DELETEs the
+#     minted account (DELETE /internal/e2e/account/{team_id}) AND runs the
+#     per-run ledger reaper (npm run reap:live) in an `if: always()` teardown.
+#     The reaper exits non-zero on any leak, failing the job loudly (rule 24).
+#   - cohort.ts assertSafeApiTarget() ALLOWS a prod E2E_API_URL only when a mint
+#     token / minted session is present (a sanctioned run); an un-tokened prod
+#     target is still refused, so a stray invocation can never hammer prod.
+#
+# HOW it mints/runs/reaps:
+#   1. MINT  — POST https://api.instanode.dev/internal/e2e/account with header
+#              X-E2E-Token: $E2E_ACCOUNT_TOKEN and body {"tier":"pro"} →
+#              {team_id, user_id, email, tier, session_jwt, expires_at}. The
+#              session_jwt + team_id are masked and exported to later steps.
+#   2. RUN   — E2E_LIVE=1 E2E_API_URL=https://api.instanode.dev
+#              E2E_SESSION_JWT=<minted> npx playwright test
+#              --config=playwright.live.config.ts. The authed legs use the
+#              minted account (cohort.ts mintedSession()); anon legs run as-is.
+#   3. REAP  — (always) DELETE the minted account, then npm run reap:live to
+#              sweep any spec-created resources from the on-disk ledger.
+#
+# Triggers:
+#   - workflow_dispatch (operator on demand).
+#   - schedule every 30 min (continuous prod integration signal).
+#   - repository_dispatch type `e2e-prod-from-deploy` (post-deploy hook the api
+#     repo can fire after a prod rollout).
+#
+# Guard: if secrets.E2E_ACCOUNT_TOKEN is empty (not yet configured) the job
+# no-ops cleanly with a ::notice:: — it NEVER reds when unconfigured. The
+# workflow ships before the secret exists and goes green only once the operator
+# sets E2E_ACCOUNT_TOKEN and the api mint endpoint is deployed.
+
+name: E2E LIVE (prod, minted account)
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    # Every 30 minutes — continuous prod integration signal.
+    - cron: '*/30 * * * *'
+  repository_dispatch:
+    types: [e2e-prod-from-deploy]
+
+concurrency:
+  # One prod LIVE run at a time: they mint a real cohort account + create real
+  # resources; overlapping runs could interleave ledger writes / dedup state.
+  group: e2e-prod-${{ github.workflow }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  e2e-prod:
+    name: LIVE against prod via minted account + reap
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      # Fixed prod target — this workflow is prod-only by design.
+      E2E_API_URL: https://api.instanode.dev
+      E2E_LIVE_RUN_ID: ${{ github.run_id }}
+      # The mint-endpoint guard token. Empty until the operator configures it →
+      # the gate step below no-ops the job cleanly.
+      E2E_ACCOUNT_TOKEN: ${{ secrets.E2E_ACCOUNT_TOKEN }}
+    steps:
+      - name: Gate on configured mint token
+        # No token configured → no-op cleanly (never a false red). Sets RUN=0
+        # so every later step is skipped.
+        run: |
+          set -euo pipefail
+          if [ -z "${E2E_ACCOUNT_TOKEN:-}" ]; then
+            echo "::notice::secrets.E2E_ACCOUNT_TOKEN not configured — skipping prod LIVE E2E (no-op)."
+            echo "RUN=0" >> "$GITHUB_ENV"
+          else
+            echo "RUN=1" >> "$GITHUB_ENV"
+          fi
+
+      - uses: actions/checkout@v6
+        if: env.RUN == '1'
+
+      - uses: actions/setup-node@v6
+        if: env.RUN == '1'
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install deps
+        if: env.RUN == '1'
+        run: npm ci
+
+      - name: Install Chromium
+        if: env.RUN == '1'
+        run: npx playwright install --with-deps chromium
+
+      - name: Mint ephemeral cohort account
+        id: mint
+        if: env.RUN == '1'
+        # POST the guarded mint endpoint → capture session_jwt + team_id, mask
+        # them, and export to later steps. Fails the job (non-2xx) so a broken
+        # mint endpoint surfaces immediately rather than running un-authed.
+        run: |
+          set -euo pipefail
+          resp="$(curl -sS -w '\n%{http_code}' \
+            -X POST "${E2E_API_URL}/internal/e2e/account" \
+            -H "X-E2E-Token: ${E2E_ACCOUNT_TOKEN}" \
+            -H 'Content-Type: application/json' \
+            -d '{"tier":"pro"}')"
+          code="$(printf '%s' "$resp" | tail -n1)"
+          body="$(printf '%s' "$resp" | sed '$d')"
+          if [ "$code" != "200" ]; then
+            echo "::error::mint endpoint returned HTTP $code (expected 200). Body: $body"
+            exit 1
+          fi
+          jwt="$(printf '%s' "$body"   | jq -r '.session_jwt // empty')"
+          team="$(printf '%s' "$body"  | jq -r '.team_id // empty')"
+          email="$(printf '%s' "$body" | jq -r '.email // empty')"
+          tier="$(printf '%s' "$body"  | jq -r '.tier // empty')"
+          if [ -z "$jwt" ] || [ -z "$team" ]; then
+            echo "::error::mint response missing session_jwt or team_id. Body: $body"
+            exit 1
+          fi
+          # Mask the secrets so they never appear in logs.
+          echo "::add-mask::$jwt"
+          echo "::add-mask::$team"
+          # session_jwt + team_id are secret-ish → env only (not step outputs).
+          # team_id is also a non-secret output for the reap step's `if`.
+          {
+            echo "MINTED_SESSION_JWT=$jwt"
+            echo "MINTED_TEAM_ID=$team"
+            echo "MINTED_EMAIL=$email"
+            echo "MINTED_TIER=$tier"
+          } >> "$GITHUB_ENV"
+          echo "minted=1" >> "$GITHUB_OUTPUT"
+          echo "Minted cohort account (tier=$tier) — session + team_id masked."
+
+      - name: Run LIVE E2E against prod (minted account)
+        if: env.RUN == '1' && steps.mint.outputs.minted == '1'
+        env:
+          E2E_LIVE: '1'
+          # The minted account drives the authed legs (cohort.ts mintedSession);
+          # anon legs run as-is. assertSafeApiTarget() permits the prod target
+          # because E2E_SESSION_JWT is present (a sanctioned run).
+          E2E_SESSION_JWT: ${{ env.MINTED_SESSION_JWT }}
+          E2E_TEAM_ID: ${{ env.MINTED_TEAM_ID }}
+          E2E_ACCOUNT_EMAIL: ${{ env.MINTED_EMAIL }}
+          E2E_ACCOUNT_TIER: ${{ env.MINTED_TIER }}
+        run: npm run test:e2e:live
+
+      - name: Reap minted account (teardown)
+        # ALWAYS runs (even on test failure/cancel) so the minted account + its
+        # resources are deleted out-of-band. Idempotent: 404 == already gone.
+        if: always() && env.RUN == '1' && env.MINTED_TEAM_ID != ''
+        run: |
+          set -euo pipefail
+          code="$(curl -sS -o /dev/null -w '%{http_code}' \
+            -X DELETE "${E2E_API_URL}/internal/e2e/account/${MINTED_TEAM_ID}" \
+            -H "X-E2E-Token: ${E2E_ACCOUNT_TOKEN}")"
+          case "$code" in
+            200|202|204|404|410)
+              echo "Reaped minted account (HTTP $code)." ;;
+            *)
+              echo "::error::DELETE minted account returned HTTP $code — possible leak."
+              exit 1 ;;
+          esac
+
+      - name: Reap cohort resources from ledger (teardown)
+        # The per-run ledger reaper sweeps any resource a spec created. Exits
+        # non-zero on any leak, failing the job loudly (rule 24).
+        if: always() && env.RUN == '1'
+        run: npm run reap:live
+
+      - name: Upload LIVE trace + ledger on failure
+        if: failure() && env.RUN == '1'
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-prod-trace-${{ github.run_id }}
+          path: |
+            test-results/
+            playwright-report-live/
+            e2e/.cleanup-ledger.json
+          if-no-files-found: ignore
+          retention-days: 14

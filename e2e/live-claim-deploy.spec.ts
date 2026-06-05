@@ -52,7 +52,7 @@ import { gzipSync } from 'node:zlib'
 
 import { expect, test, type APIRequestContext } from '@playwright/test'
 
-import { cohortEmail, cohortName, COHORT_MARKER, isCohortBranded } from './cohort'
+import { cohortEmail, cohortName, COHORT_MARKER, isCohortBranded, assertSafeApiTarget } from './cohort'
 import {
   recordEntity,
   loadLedger,
@@ -230,6 +230,12 @@ test.describe('LIVE — W3 claim/conversion + deploy-lifecycle + env-switcher (c
     LIVE && !API_URL,
     'E2E_LIVE=1 but E2E_API_URL/AGENT_API_URL is unset — no backend to target.',
   )
+
+  // Prod-target safety (item 3): refuse an un-sanctioned prod target; allow it
+  // only for a minted-account run (E2E_ACCOUNT_TOKEN/E2E_SESSION_JWT present).
+  // The claim/conversion + env-switcher legs create real claimed cohort teams
+  // (reaped via the ledger); the deploy-lifecycle leg self-skips on prod.
+  if (LIVE && API_URL) assertSafeApiTarget(API_URL)
 
   // Backstop reaper (rule 24): even if a leg throws before its inline reap,
   // afterAll reaps every still-ledgered entity; reap-cohort.ts re-runs the same
