@@ -541,9 +541,21 @@ test.describe('LIVE — Batch B write flows (W-ONBOARD / W-WEBHOOK / W-TEAM / W-
       const resp = await authedGet(request, '/api/v1/team/summary', minted!.token)
       expect(resp.status(), 'GET /api/v1/team/summary should be 200').toBe(STATUS_OK)
       const body = await bodyJSON(resp)
-      // The summary is a cached aggregate (declare caching layer per the rule).
-      // Field set is forward-compatible; assert it returns a JSON object body.
-      expect(typeof body, 'team summary must return a JSON object body').toBe('object')
+      // Real prod shape (team_summary.go): { ok, freshness_seconds, as_of, tier,
+      // counts: { resources:{total,...}, deployments, members, vault_keys } }.
+      // The summary is a 5-min cached aggregate (declare caching layer per the
+      // rule); assert the stable envelope + the counts object.
+      expect(body.ok, 'team summary ok flag').toBe(true)
+      expect(body.tier, 'team summary must echo the team tier').toBeTruthy()
+      const counts = (body.counts ?? {}) as Record<string, unknown>
+      expect(
+        counts.resources != null && typeof counts.resources === 'object',
+        `team summary must carry a counts.resources object; got ${JSON.stringify(body).slice(0, 200)}.`,
+      ).toBe(true)
+      expect(
+        typeof counts.members,
+        `team summary counts.members must be a number; got ${typeof counts.members}.`,
+      ).toBe('number')
     })
 
     test('GET/PATCH /api/v1/team/settings — TTL policy round-trip', async ({ request }) => {
