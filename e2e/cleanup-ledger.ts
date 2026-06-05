@@ -26,6 +26,14 @@ export type CohortEntityKind =
   | 'deployment'
   | 'team'
   | 'storage-prefix'
+  // A multi-service stack created via POST /stacks/new (Batch C W-STACKS /
+  // W-STACKS-ADV). Reaped via DELETE /stacks/:slug — but a PAID team's plain
+  // DELETE enters the two-step email-confirmed flow (202 pending), which on
+  // prod never resolves because the Brevo sender is unvalidated. So the reaper
+  // sends the X-Skip-Email-Confirmation header for this kind to force immediate
+  // destruction (the SAME header the spec's inline reap uses). The account
+  // cascade (DELETE /internal/e2e/account) is the backstop.
+  | 'stack'
   // A SECONDARY ephemeral cohort account minted via POST /internal/e2e/account
   // (Batch B W-TEAM member-mgmt isolation). It is NOT reapable by a team-scoped
   // bearer DELETE — there is no DELETE /api/v1/team/:id route, and DELETE
@@ -115,6 +123,11 @@ function deletePath(entity: CohortEntity): string {
       return `/api/v1/resources/${entity.id}`
     case 'deployment':
       return `/api/v1/deployments/${entity.id}`
+    case 'stack':
+      // Stacks delete by slug (NOT under /api/v1). The skip-email header is
+      // attached in reapEntities so a paid team's two-step flow doesn't strand
+      // the row behind an undeliverable confirmation email.
+      return `/stacks/${entity.id}`
     case 'team':
       return `/api/v1/team/${entity.id}`
     case 'e2e-account':
@@ -156,6 +169,15 @@ export async function reapEntities(
       if (mintToken) headers[E2E_ACCOUNT_TOKEN_HEADER] = mintToken
     } else if (entity.token) {
       headers.Authorization = `Bearer ${entity.token}`
+    }
+    if (entity.kind === 'stack') {
+      // Force immediate destruction — a paid team's DELETE /stacks/:slug would
+      // otherwise enter the two-step email-confirmed flow (202 pending), which
+      // never resolves on prod (Brevo sender unvalidated). The 202 would then be
+      // mis-counted as a failed reap (not 2xx/404). The skip-email header makes
+      // teardown synchronous + idempotent. Constant per the no-hardcoded-strings
+      // rule (mirrors deletion_confirm.go SkipEmailConfirmationHeader).
+      headers['X-Skip-Email-Confirmation'] = 'yes'
     }
     try {
       const resp = await request.fetch(`${entity.apiUrl.replace(/\/$/, '')}${path}`, {
