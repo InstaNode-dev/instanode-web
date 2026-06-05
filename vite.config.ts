@@ -61,8 +61,12 @@ export default defineConfig({
     globals: true,
     environment: 'jsdom',
     setupFiles: ['./src/test-setup.ts'],
-    include: ['src/**/*.{test,spec}.{ts,tsx}'],
-    exclude: ['e2e/**', 'node_modules/**', 'dist/**'],
+    // src unit/component suites + the e2e/ vitest-only guards (e.g.
+    // prod-coverage-donebar.test.ts — a STATIC, network-free drift check that
+    // must run in the normal gate). Playwright specs (e2e/*.spec.ts) are NOT
+    // matched (they need the @playwright/test runtime) and are excluded below.
+    include: ['src/**/*.{test,spec}.{ts,tsx}', 'e2e/**/*.test.ts'],
+    exclude: ['e2e/**/*.spec.ts', 'node_modules/**', 'dist/**'],
     passWithNoTests: true,
   },
 });

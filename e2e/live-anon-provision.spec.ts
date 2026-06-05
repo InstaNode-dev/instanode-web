@@ -380,3 +380,8 @@ test.describe('LIVE — every anonymous provision flow → backend-assert → re
     })
   }
 })
+
+// Covered-route manifest (rule 18), defined in the playwright-free sibling so the
+// vitest prod-coverage done-bar guard can union it without the @playwright/test
+// runtime. One route per PROVISION_FLOWS entry + the authed reap (matrix §1.B).
+export { coveredRoutes } from './live-anon-provision.coverage'

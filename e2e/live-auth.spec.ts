@@ -699,3 +699,9 @@ test.describe('LIVE — auth/login seams (W1: OAuth, logout-revocation, CLI, /au
 // that wants to assert this file's CohortEntity usage compiles against the ledger
 // contract without importing the spec body.
 export type { CohortEntity }
+
+// Covered-route manifest (rule 18), defined in the playwright-free sibling so the
+// vitest prod-coverage done-bar guard can union it without the @playwright/test
+// runtime. The spec tags legs by W1 leg-ID; the sibling maps them to route
+// strings (matrix §0.2 / §1.D).
+export { coveredRoutes } from './live-auth.coverage'
