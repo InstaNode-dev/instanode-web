@@ -10,6 +10,12 @@ const live = process.env.E2E_LIVE === '1';
 
 export default defineConfig({
   testDir: './e2e',
+  // Playwright owns *.spec.ts only. Vitest-only guards live as e2e/*.test.ts
+  // (e.g. prod-coverage-donebar.test.ts) and must NOT be picked up by the
+  // Playwright runner — they use vitest's describe/it and crash under the
+  // Playwright runtime. The default testMatch also globs *.test.ts, so we pin it
+  // to *.spec.ts here.
+  testMatch: ['**/*.spec.ts'],
   // The mocked per-PR suite excludes the LIVE real-backend specs — those run
   // only under playwright.live.config.ts (E2E_LIVE=1, manual/scheduled). They
   // self-skip anyway, but keeping them out of the default config means the
