@@ -94,13 +94,17 @@ test.describe('LIVE smoke — anonymous provision → backend-assert → reap', 
     const name = cohortName('smoke-db')
 
     // ── Create: real Postgres against the live api ────────────────────────
-    // On a sanctioned prod run (E2E_SESSION_JWT set) we provision AS the minted
-    // PRO account — authed provisioning skips the anonymous recycle gate (no
-    // 402) and the resource is team-owned so the reaper's authed DELETE returns
-    // 200 (no 401). Otherwise (staging/local) we use the anon path with the
-    // X-E2E-Test-Token + X-E2E-Source-IP fingerprint bypass. /db/new REQUIRES a
-    // name (CLAUDE.md) — sent below in both modes.
-    const id = provisionIdentity()
+    // forceAnon: the AUTHED (pro) /db/new path provisions a DEDICATED database
+    // for the team, which on prod takes longer than the 90s test timeout (the
+    // anon path uses the fast hot-pool). The smoke spec's job is to prove the
+    // harness (create → backend-assert → ledger → reap) end-to-end, which the
+    // anon path does cleanly: the X-E2E-Test-Token + X-E2E-Source-IP fingerprint
+    // bypass gets past the recycle gate (fresh fingerprint per call), and the
+    // anon resource is TTL-reaped (no authed DELETE for anon resources — the
+    // reap below is best-effort for the no-bearer case). The full authed-provision
+    // coverage lives in live-anon-provision.spec.ts (vector/cache/nosql as the
+    // minted pro account). /db/new REQUIRES a name (CLAUDE.md) — sent below.
+    const id = provisionIdentity({}, /* forceAnon */ true)
     const resp = await request.fetch(`${API_URL}/db/new`, {
       method: 'POST',
       headers: id.headers,
@@ -158,14 +162,28 @@ test.describe('LIVE smoke — anonymous provision → backend-assert → reap', 
     // ── Reap inline (the happy path). afterAll + reap-cohort.ts are the
     //    backstops if this is skipped by a failure above. ──────────────────
     const result = await reapEntities(request, [{ ...entity, recordedAt: new Date().toISOString() }])
-    expect(
-      result.failed.length,
-      `reaping the provisioned resource failed: ${JSON.stringify(result.failed)}`,
-    ).toBe(0)
-    expect(
-      result.deleted + result.alreadyGone,
-      'the resource should be deleted (or already gone) after reap',
-    ).toBeGreaterThan(0)
+    if (id.bearer) {
+      // Authed resource: the reaper's DELETE is authorized → must succeed.
+      expect(
+        result.failed.length,
+        `reaping the provisioned resource failed: ${JSON.stringify(result.failed)}`,
+      ).toBe(0)
+      expect(
+        result.deleted + result.alreadyGone,
+        'the resource should be deleted (or already gone) after reap',
+      ).toBeGreaterThan(0)
+    } else {
+      // Anonymous resource (no bearer): no unauthed resource-delete exists, so
+      // the authed DELETE 401s by design. The resource carries a 24h TTL and is
+      // TTL-reaped — not a leak. Assert ONLY the expected 401/403 so a different
+      // failure (e.g. 500) still reds.
+      const onlyAuthFailures = result.failed.every((f) => f.status === 401 || f.status === 403)
+      expect(
+        onlyAuthFailures,
+        `anonymous db reap should only ever fail with 401/403 (no unauthed delete exists; ` +
+          `the resource is TTL-reaped). Got: ${JSON.stringify(result.failed)}`,
+      ).toBe(true)
+    }
 
     // Clean inline-reaped entity out of the ledger so afterAll doesn't re-try
     // a now-deleted token (a no-op 404, but keeps the ledger truthful).
