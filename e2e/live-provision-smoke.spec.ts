@@ -23,7 +23,7 @@
 
 import { expect, test, type APIRequestContext } from '@playwright/test'
 
-import { cohortName, COHORT_MARKER, assertSafeApiTarget } from './cohort'
+import { cohortName, COHORT_MARKER, assertSafeApiTarget, anonProvisionHeaders } from './cohort'
 import {
   recordEntity,
   loadLedger,
@@ -44,13 +44,6 @@ interface DbProvision {
   name: string
   connection_url: string
   tier: string
-}
-
-// Unique source IP per call so the per-fingerprint dedup cap (5/day) doesn't
-// hand back an EXISTING token — mirrors auth-roundtrip.spec.ts uniqueIP().
-function uniqueIP(): string {
-  const b = () => Math.floor(Math.random() * 254) + 1
-  return `10.${b()}.${b()}.${b()}`
 }
 
 test.describe('LIVE smoke — anonymous provision → backend-assert → reap', () => {
@@ -101,9 +94,12 @@ test.describe('LIVE smoke — anonymous provision → backend-assert → reap', 
     const name = cohortName('smoke-db')
 
     // ── Create: real anonymous Postgres against the live api ──────────────
+    // anonProvisionHeaders() carries the X-E2E-Test-Token fingerprint-bypass when
+    // E2E_TEST_TOKEN is set (prod ignores X-Forwarded-For) + a unique XFF
+    // elsewhere. /db/new REQUIRES a name (CLAUDE.md) — already sent below.
     const resp = await request.fetch(`${API_URL}/db/new`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Forwarded-For': uniqueIP() },
+      headers: anonProvisionHeaders(),
       data: JSON.stringify({ name }),
       failOnStatusCode: false,
     })
