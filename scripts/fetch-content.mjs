@@ -73,7 +73,14 @@ const SYNC_FILES = [
     // tier), this PRESERVES the committed public/llms.txt so the build can't
     // silently re-market Team as buyable. The content repo currently carries
     // the same wording, so the guard is a no-op today.
-    requireMarkers: ['redeploy=true', '"redeployed":', 'not yet a self-serve tier'],
+    //
+    // task #56 (2026-06-05): the '**Enterprise**' marker guards the Enterprise
+    // contact-us wall. If the instanode-web PR lands before the content-repo
+    // PR, an upstream sync would otherwise overwrite public/llms.txt with a
+    // version missing the Enterprise line; this PRESERVES the committed local
+    // copy until content HEAD also carries it. Becomes a no-op once the
+    // content PR merges.
+    requireMarkers: ['redeploy=true', '"redeployed":', 'not yet a self-serve tier', '**Enterprise**'],
   },
 ]
 
