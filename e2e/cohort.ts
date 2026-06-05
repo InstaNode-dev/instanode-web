@@ -275,19 +275,21 @@ export const ANON_TIER = 'anonymous'
  *
  * `forceAnon` pins the anonymous fast-hot-pool path even when a minted session
  * exists. Used wherever the AUTHED prod provision is too slow / hangs to finish
- * inside the LIVE per-test timeout (playwright.live.config.ts, 90s):
- *   - DB & VECTOR: the authed (pro) /db/new & /vector/new paths provision a
- *     DEDICATED Postgres / pgvector Postgres for the team — slow on prod (15s
- *     warm, >90s cold). The anon path uses the fast (pgvector) hot-pool.
+ * inside the LIVE per-test timeout (playwright.live.config.ts):
+ *   - DB, VECTOR & NOSQL: the authed (pro) /db/new, /vector/new & /nosql/new
+ *     paths each provision a DEDICATED backing DB for the team (Postgres /
+ *     pgvector Postgres / MongoDB) — slow on prod (15s warm, >90s cold). The
+ *     anon path uses the fast hot-pool. These are ALL the dedicated-backing-DB
+ *     services; none may hit the slow authed-dedicated-provision path.
  *   - QUEUE: the authed /queue/new isolated per-tenant NATS path HANGS on prod
  *     until the operator seeds the NATS operator/sys NKeys (CLAUDE.md P1 known
  *     gap). The anon path returns fast with auth_mode=legacy_open.
  * In every forceAnon case the resulting anon resource is reaped by its 24h TTL
  * (no authed DELETE exists for anon resources); the spec treats a no-bearer
  * resource's reap as best-effort (TTL-backed) rather than asserting a 200 it can
- * never get. The genuinely-fast services (cache/nosql/storage/webhook) stay on
- * the authed-minted path so the authed/minted-account + authed-reap legs are
- * still exercised.
+ * never get. The genuinely-fast services (cache/storage/webhook) have NO
+ * dedicated backing DB and stay on the authed-minted path so the
+ * authed/minted-account + authed-reap legs are still exercised.
  */
 export function provisionIdentity(
   extra: Record<string, string> = {},
