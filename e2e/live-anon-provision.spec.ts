@@ -42,7 +42,7 @@
 
 import { expect, test, type APIRequestContext } from '@playwright/test'
 
-import { cohortName, COHORT_MARKER } from './cohort'
+import { cohortName, COHORT_MARKER, assertSafeApiTarget } from './cohort'
 import {
   recordEntity,
   loadLedger,
@@ -156,6 +156,10 @@ test.describe('LIVE — every anonymous provision flow → backend-assert → re
     LIVE && !API_URL,
     'E2E_LIVE=1 but E2E_API_URL/AGENT_API_URL is unset — no backend to target.',
   )
+
+  // Prod-target safety (item 3): refuse an un-sanctioned prod target; allow it
+  // only for a minted-account run (E2E_ACCOUNT_TOKEN/E2E_SESSION_JWT present).
+  if (LIVE && API_URL) assertSafeApiTarget(API_URL)
 
   // Backstop reaper (rule 24): even if a per-service test throws before its
   // inline reap, afterAll reaps every still-ledgered entity. The standalone

@@ -39,7 +39,7 @@ import { createHmac, randomUUID } from 'node:crypto'
 
 import { expect, test, type APIRequestContext } from '@playwright/test'
 
-import { cohortEmail, COHORT_MARKER } from './cohort'
+import { cohortEmail, COHORT_MARKER, assertSafeApiTarget, mintedSession } from './cohort'
 import {
   recordEntity,
   loadLedger,
@@ -183,6 +183,12 @@ test.describe('LIVE — auth/login seams (W1: OAuth, logout-revocation, CLI, /au
     LIVE && !API_URL,
     'E2E_LIVE=1 but E2E_API_URL/AGENT_API_URL is unset — no backend to target.',
   )
+
+  // Prod-target safety (item 3): a prod E2E_API_URL is only allowed for a
+  // sanctioned minted-account run (E2E_ACCOUNT_TOKEN / E2E_SESSION_JWT present);
+  // otherwise this throws and fails the suite loudly rather than provisioning
+  // against prod. Staging targets pass through unconditionally.
+  if (LIVE && API_URL) assertSafeApiTarget(API_URL)
 
   // Backstop reaper (rule 24): even if an account-minting leg throws before its
   // inline reap, afterAll reaps every still-ledgered entity; reap-cohort.ts
@@ -373,13 +379,36 @@ test.describe('LIVE — auth/login seams (W1: OAuth, logout-revocation, CLI, /au
     })
 
     test('valid synthetic bearer → 200 with the claimed user + a tier', async ({ request }) => {
+      // Prefer the workflow-minted account (item 2): when E2E_SESSION_JWT is set
+      // the bearer is a REAL cohort session against the (prod) api, so we assert
+      // against the minted identity + tier. Otherwise fall back to the
+      // self-minted (E2E_JWT_SECRET) claimed-team path (tier='free').
+      const minted = mintedSession()
       test.skip(
-        !JWT_SECRET,
-        'E2E_JWT_SECRET unset — cannot mint a valid session JWT. Set it (the api JWT_SECRET) ' +
-          'to run the A8 valid-bearer leg.',
+        !minted && !JWT_SECRET,
+        'Neither E2E_SESSION_JWT (workflow-minted account) nor E2E_JWT_SECRET set — ' +
+          'cannot obtain a valid session JWT to run the A8 valid-bearer leg.',
       )
-      const identity = await provisionAndClaim(request)
-      const { token } = mintSessionJWT(identity.userID, identity.teamID, identity.email)
+
+      let token: string
+      let expectedEmail: string
+      let expectedTier: string
+      let inlineReap: CohortEntity[] = []
+      if (minted) {
+        token = minted.token
+        expectedEmail = minted.email
+        expectedTier = minted.tier
+      } else {
+        const identity = await provisionAndClaim(request)
+        token = mintSessionJWT(identity.userID, identity.teamID, identity.email).token
+        expectedEmail = identity.email
+        // A freshly-claimed (unpaid) self-minted team is 'free'.
+        expectedTier = 'free'
+        inlineReap = [
+          { kind: 'resource', id: identity.resourceToken, apiUrl: API_URL, note: 'A8 valid leg', recordedAt: new Date().toISOString() },
+        ]
+      }
+
       const resp = await request.fetch(`${API_URL}/auth/me`, {
         method: 'GET',
         headers: { Authorization: `Bearer ${token}` },
@@ -387,34 +416,40 @@ test.describe('LIVE — auth/login seams (W1: OAuth, logout-revocation, CLI, /au
       })
       expect(
         resp.status(),
-        `GET /auth/me with a valid synthetic bearer must return 200; got ${resp.status()}. ` +
+        `GET /auth/me with a valid bearer must return 200; got ${resp.status()}. ` +
           `Body: ${await resp.text().catch(() => '<unreadable>')}`,
       ).toBe(STATUS_OK)
       const me = (await resp.json()) as Record<string, unknown>
-      // Right identity: the email must be the one we just claimed.
-      expect(
-        me.email,
-        `/auth/me returned 200 but email=${String(me.email)}, expected the claimed ${identity.email}.`,
-      ).toBe(identity.email)
-      // Right tier: a freshly-claimed (unpaid) team is 'free'. Assert a tier
-      // field is present and is the expected claimed-unpaid tier. (`tier` or
-      // `plan`/`plan_tier` depending on the /auth/me shape — accept any.)
+      // Right identity: the email must match the account behind the bearer. (The
+      // workflow may not export the email; only assert when we know it.)
+      if (expectedEmail) {
+        expect(
+          me.email,
+          `/auth/me returned 200 but email=${String(me.email)}, expected ${expectedEmail}.`,
+        ).toBe(expectedEmail)
+      }
+      // Right tier: a tier field must be present (`tier`/`plan`/`plan_tier`).
       const tier = (me.tier ?? me.plan ?? me.plan_tier) as string | undefined
       expect(
         tier,
         `/auth/me must surface the team's tier; got none in ${JSON.stringify(me)}.`,
       ).toBeTruthy()
-      expect(
-        tier,
-        `a freshly-claimed, unpaid team should be tier='free'; got '${tier}'.`,
-      ).toBe('free')
+      // And it must match the account behind the bearer when we know it
+      // (minted tier, or 'free' for the self-minted claimed team).
+      if (expectedTier) {
+        expect(
+          tier,
+          `/auth/me tier should be '${expectedTier}' for this account; got '${tier}'.`,
+        ).toBe(expectedTier)
+      }
 
-      // Reap inline (afterAll + reap-cohort.ts back this up).
-      const result = await reapEntities(request, [
-        { kind: 'resource', id: identity.resourceToken, apiUrl: API_URL, note: 'A8 valid leg', recordedAt: new Date().toISOString() },
-      ])
-      expect(result.failed.length, `reap failed: ${JSON.stringify(result.failed)}`).toBe(0)
-      clearLedger()
+      // Reap inline only what THIS leg created (the minted account is reaped
+      // out-of-band by the workflow's DELETE /internal/e2e/account step).
+      if (inlineReap.length > 0) {
+        const result = await reapEntities(request, inlineReap)
+        expect(result.failed.length, `reap failed: ${JSON.stringify(result.failed)}`).toBe(0)
+        clearLedger()
+      }
     })
   })
 
@@ -424,12 +459,27 @@ test.describe('LIVE — auth/login seams (W1: OAuth, logout-revocation, CLI, /au
   // the past incident missed: a "successful" login that a logout could not undo.
   test.describe('Logout revocation — reused bearer/jti after logout → 401 (A10)', () => {
     test('valid bearer 200 → logout → SAME bearer on /auth/me → 401', async ({ request }) => {
+      // Prefer the workflow-minted account's bearer (item 2). Revoking it is
+      // safe: A10 is the LAST authed leg (serial), and the workflow reaps the
+      // whole account out-of-band afterward, so a dead session is expected.
+      const minted = mintedSession()
       test.skip(
-        !JWT_SECRET,
-        'E2E_JWT_SECRET unset — cannot mint the session JWT to revoke. Set it to run A10.',
+        !minted && !JWT_SECRET,
+        'Neither E2E_SESSION_JWT nor E2E_JWT_SECRET set — cannot obtain a session JWT to revoke. ' +
+          'Set one to run A10.',
       )
-      const identity = await provisionAndClaim(request)
-      const { token } = mintSessionJWT(identity.userID, identity.teamID, identity.email)
+
+      let token: string
+      let inlineReap: CohortEntity[] = []
+      if (minted) {
+        token = minted.token
+      } else {
+        const identity = await provisionAndClaim(request)
+        token = mintSessionJWT(identity.userID, identity.teamID, identity.email).token
+        inlineReap = [
+          { kind: 'resource', id: identity.resourceToken, apiUrl: API_URL, note: 'A10 logout leg', recordedAt: new Date().toISOString() },
+        ]
+      }
 
       // 1) The bearer works pre-logout.
       const pre = await request.fetch(`${API_URL}/auth/me`, {
@@ -467,12 +517,13 @@ test.describe('LIVE — auth/login seams (W1: OAuth, logout-revocation, CLI, /au
           `2026-05-30 incident — a session that survives its own logout.`,
       ).toBe(STATUS_UNAUTHORIZED)
 
-      // Reap.
-      const result = await reapEntities(request, [
-        { kind: 'resource', id: identity.resourceToken, apiUrl: API_URL, note: 'A10 logout leg', recordedAt: new Date().toISOString() },
-      ])
-      expect(result.failed.length, `reap failed: ${JSON.stringify(result.failed)}`).toBe(0)
-      clearLedger()
+      // Reap only what THIS leg created (the minted account is reaped
+      // out-of-band by the workflow's DELETE /internal/e2e/account step).
+      if (inlineReap.length > 0) {
+        const result = await reapEntities(request, inlineReap)
+        expect(result.failed.length, `reap failed: ${JSON.stringify(result.failed)}`).toBe(0)
+        clearLedger()
+      }
     })
   })
 

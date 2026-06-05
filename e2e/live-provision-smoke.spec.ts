@@ -23,7 +23,7 @@
 
 import { expect, test, type APIRequestContext } from '@playwright/test'
 
-import { cohortName, COHORT_MARKER } from './cohort'
+import { cohortName, COHORT_MARKER, assertSafeApiTarget } from './cohort'
 import {
   recordEntity,
   loadLedger,
@@ -67,6 +67,10 @@ test.describe('LIVE smoke — anonymous provision → backend-assert → reap', 
     LIVE && !API_URL,
     'E2E_LIVE=1 but E2E_API_URL/AGENT_API_URL is unset — no backend to target.',
   )
+
+  // Prod-target safety (item 3): refuse an un-sanctioned prod target; allow it
+  // only for a minted-account run (E2E_ACCOUNT_TOKEN/E2E_SESSION_JWT present).
+  if (LIVE && API_URL) assertSafeApiTarget(API_URL)
 
   // Backstop reaper: even if the in-test cleanup below throws, afterAll reaps
   // every ledgered entity. The standalone reap-cohort.ts re-runs this same
