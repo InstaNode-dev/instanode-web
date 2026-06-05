@@ -36,7 +36,12 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
   workers: 1,
-  timeout: 90_000,
+  // 120s per test (was 90s). Secondary guard only: the PRIMARY fix is pinning
+  // every dedicated-backing-DB provision (db/vector/nosql) to the fast anon
+  // hot-pool via forceAnon (see e2e/cohort.ts + live-anon-provision.spec.ts) so
+  // no test depends on a slow authed-dedicated-provision finishing in time. The
+  // modest bump gives extra headroom for a cold hot-pool / network slowness.
+  timeout: 120_000,
   expect: { timeout: 20_000 },
 
   reporter: process.env.CI

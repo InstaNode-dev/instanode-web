@@ -80,11 +80,16 @@ interface ProvisionFlow {
   /** Optional extra per-service assertion on the parsed JSON body. */
   extra?: (body: Record<string, unknown>) => void
   /**
-   * Pin the anonymous bypass path even when a minted pro session exists. Only
-   * `queue` sets this: the authed /queue/new path attempts isolated per-tenant
-   * NATS provisioning which HANGS on prod (operator NKeys unseeded — CLAUDE.md
-   * P1). The anon path returns fast with auth_mode=legacy_open; the anon
-   * resource is TTL-reaped (no authed DELETE for anon resources).
+   * Pin the anonymous bypass path even when a minted pro session exists. Set by
+   * every service whose authed path is too slow / hangs to finish inside the
+   * per-test timeout:
+   *   - `vector` & `nosql`: the authed path provisions a DEDICATED backing DB
+   *     (pgvector Postgres / MongoDB) for the team — cold-provision > 90s on
+   *     prod. (`db` does the same in the smoke spec.)
+   *   - `queue`: the authed /queue/new path attempts isolated per-tenant NATS
+   *     provisioning which HANGS on prod (operator NKeys unseeded — CLAUDE.md P1).
+   * The anon path returns fast (hot-pool / legacy_open); the anon resource is
+   * TTL-reaped (no authed DELETE for anon resources).
    */
   forceAnon?: boolean
 }
@@ -97,29 +102,44 @@ interface ProvisionFlow {
 // Each flow runs as EITHER the minted PRO account (authed, exercises the
 // minted-account/authed-reap path) OR the anonymous fast-hot-pool path
 // (forceAnon). The deciding factor is whether the AUTHED prod provision is fast
-// enough to finish inside the 90s per-test timeout (playwright.live.config.ts):
+// enough to finish inside the per-test timeout (playwright.live.config.ts):
 //
-//   service  | path           | why
-//   ---------|----------------|----------------------------------------------
-//   db       | anon (forceAnon, in smoke spec) | authed = DEDICATED Postgres,
-//            |                | cold-provision > 90s on prod; anon = hot-pool (fast)
-//   vector   | anon (forceAnon)| authed = DEDICATED pgvector Postgres, same
-//            |                | slow dedicated-provision as db (15s warm, >90s
-//            |                | cold) → TIMED OUT the suite (run 26999448643).
-//            |                | anon = fast hot-pool; anon resource TTL-reaped.
-//   queue    | anon (forceAnon)| authed isolated-NATS path HANGS on prod (P1
-//            |                | NKeys gap); anon returns fast (legacy_open).
-//   cache    | authed-minted  | Redis provision is fast (no dedicated DB build);
-//            |                | KEEPS authed/minted-account + authed-reap coverage.
-//   nosql    | authed-minted  | Mongo provision is fast; KEEPS authed coverage.
-//   storage  | authed-minted  | DO Spaces tenant-prefix (no DB build) → fast;
-//            |                | KEEPS authed coverage.
-//   webhook  | authed-minted  | Redis-backed receiver, fast; KEEPS authed coverage.
+//   service  | path           | backing DB?  | why
+//   ---------|----------------|--------------|-------------------------------
+//   db       | ANON (forceAnon, in smoke spec) | DEDICATED Postgres | authed
+//            |                |              | cold-provision > 90s on prod;
+//            |                |              | anon = hot-pool (fast).
+//   vector   | ANON (forceAnon)| DEDICATED pgvector Postgres | same slow
+//            |                |              | dedicated-provision as db (15s
+//            |                |              | warm, >90s cold) → TIMED OUT the
+//            |                |              | suite (run 26999448643). anon =
+//            |                |              | fast hot-pool; TTL-reaped.
+//   nosql    | ANON (forceAnon)| DEDICATED Mongo | authed = DEDICATED MongoDB;
+//            |                |              | cold-provision > 90s on prod
+//            |                |              | (run 27000380873 timed out on
+//            |                |              | /nosql/new). anon = fast hot-pool;
+//            |                |              | TTL-reaped. The LAST dedicated-DB
+//            |                |              | service to move off the slow path.
+//   queue    | ANON (forceAnon)| none (NATS) | authed isolated-NATS path HANGS
+//            |                |              | on prod (P1 NKeys gap); anon
+//            |                |              | returns fast (legacy_open).
+//   cache    | authed-minted  | none (Redis) | Redis provision is fast (no
+//            |                |              | dedicated DB build); KEEPS authed/
+//            |                |              | minted-account + authed-reap.
+//   storage  | authed-minted  | none (Spaces)| DO Spaces tenant-prefix (no DB
+//            |                |              | build) → fast; KEEPS authed.
+//   webhook  | authed-minted  | none (Redis) | Redis-backed receiver, fast;
+//            |                |              | KEEPS authed coverage.
 //
-// Net: the two genuinely-slow DEDICATED-DB provisions (db, vector) and the
-// hanging queue path use the fast anon hot-pool so they can NEVER exceed the
-// timeout; cache/nosql/storage/webhook still exercise the authed/minted-account
-// (and authed-reap) path. That keeps both paths covered with zero flake.
+// Net: EVERY service whose authed path provisions a DEDICATED backing DB
+// (db, vector, nosql) — plus the hanging queue path — uses the fast anon
+// hot-pool so it can NEVER exceed the per-test timeout. The remaining services
+// (cache/storage/webhook) have NO dedicated backing DB, provision fast, and
+// stay on the authed/minted-account (and authed-reap) path so the
+// minted-account + authed-reap legs are still exercised on every run. The auth
+// specs, the claim flow, and the minted-account lifecycle continue to exercise
+// the on-the-fly minted account — "test accounts on the fly" coverage is
+// retained. Both paths covered, zero dedicated-DB-provision flake.
 const PROVISION_FLOWS: ProvisionFlow[] = [
   {
     label: 'vector',
@@ -147,6 +167,14 @@ const PROVISION_FLOWS: ProvisionFlow[] = [
     path: '/nosql/new',
     connKey: 'connection_url',
     connPattern: /^mongodb(\+srv)?:\/\//,
+    // Pin anon: the authed (pro) /nosql/new path provisions a DEDICATED MongoDB
+    // for the team — slow on prod (>90s cold), which timed out the suite at the
+    // per-test limit (flaky run 27000380873 failed on /nosql/new). The anon path
+    // uses the fast Mongo hot-pool and returns quickly; the anon resource is
+    // TTL-reaped (no authed DELETE for anon resources). Same treatment as /db/new
+    // and /vector/new — all three are dedicated-DB provisions. nosql was the LAST
+    // dedicated-DB service still on the slow authed path.
+    forceAnon: true,
   },
   {
     label: 'queue',

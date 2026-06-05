@@ -101,9 +101,11 @@ test.describe('LIVE smoke — anonymous provision → backend-assert → reap', 
     // anon path does cleanly: the X-E2E-Test-Token + X-E2E-Source-IP fingerprint
     // bypass gets past the recycle gate (fresh fingerprint per call), and the
     // anon resource is TTL-reaped (no authed DELETE for anon resources — the
-    // reap below is best-effort for the no-bearer case). The full authed-provision
-    // coverage lives in live-anon-provision.spec.ts (vector/cache/nosql as the
-    // minted pro account). /db/new REQUIRES a name (CLAUDE.md) — sent below.
+    // reap below is best-effort for the no-bearer case). The authed/minted-account
+    // (and authed-reap) coverage lives in live-anon-provision.spec.ts via the
+    // fast, no-dedicated-DB services (cache/storage/webhook); the dedicated-DB
+    // services (db/vector/nosql) all use the fast anon hot-pool there too.
+    // /db/new REQUIRES a name (CLAUDE.md) — sent below.
     const id = provisionIdentity({}, /* forceAnon */ true)
     const resp = await request.fetch(`${API_URL}/db/new`, {
       method: 'POST',
