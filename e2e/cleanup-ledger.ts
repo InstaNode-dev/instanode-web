@@ -21,7 +21,25 @@ import { dirname } from 'node:path'
 
 import type { APIRequestContext } from '@playwright/test'
 
-export type CohortEntityKind = 'resource' | 'deployment' | 'team' | 'storage-prefix'
+export type CohortEntityKind =
+  | 'resource'
+  | 'deployment'
+  | 'team'
+  | 'storage-prefix'
+  // A SECONDARY ephemeral cohort account minted via POST /internal/e2e/account
+  // (Batch B W-TEAM member-mgmt isolation). It is NOT reapable by a team-scoped
+  // bearer DELETE — there is no DELETE /api/v1/team/:id route, and DELETE
+  // /api/v1/team would purge the SECONDARY's own team only via its own bearer.
+  // The canonical reap is the guarded internal cascade DELETE
+  // /internal/e2e/account/:team_id with the mint token (E2E_ACCOUNT_TOKEN), the
+  // SAME path the workflow teardown uses for the primary account. So this kind
+  // gets a dedicated reap path that uses the token header, not a Bearer.
+  | 'e2e-account'
+
+// The header the api's internal e2e mint/reap surface honours
+// (internal_e2e_account.go e2eAccountTokenHeader). Named const per the
+// no-hardcoded-strings rule.
+export const E2E_ACCOUNT_TOKEN_HEADER = 'X-E2E-Token'
 
 export interface CohortEntity {
   /** What to delete. */
@@ -99,6 +117,11 @@ function deletePath(entity: CohortEntity): string {
       return `/api/v1/deployments/${entity.id}`
     case 'team':
       return `/api/v1/team/${entity.id}`
+    case 'e2e-account':
+      // Reaped via the guarded internal cascade (see kind doc above). The path
+      // carries the team_id; reapEntities sends the mint-token header instead of
+      // a Bearer for this kind.
+      return `/internal/e2e/account/${entity.id}`
     case 'storage-prefix':
       // Storage objects are tenant-prefix-scoped; deleting the owning resource
       // (recorded separately as kind:'resource') reaps the bucket prefix. This
@@ -123,7 +146,17 @@ export async function reapEntities(
     if (!path) continue // storage-prefix marker: reaped via its owning resource
     result.attempted++
     const headers: Record<string, string> = {}
-    if (entity.token) headers.Authorization = `Bearer ${entity.token}`
+    if (entity.kind === 'e2e-account') {
+      // The guarded internal cascade is authorized by the mint-token HEADER, not
+      // a Bearer. Pull it from the env (the workflow exports E2E_ACCOUNT_TOKEN).
+      // When absent, the inline reapSecondaryAccount already deleted it; a
+      // header-less DELETE here returns 404 (inert-by-default), counted as
+      // alreadyGone below — never a leak signal.
+      const mintToken = process.env.E2E_ACCOUNT_TOKEN
+      if (mintToken) headers[E2E_ACCOUNT_TOKEN_HEADER] = mintToken
+    } else if (entity.token) {
+      headers.Authorization = `Bearer ${entity.token}`
+    }
     try {
       const resp = await request.fetch(`${entity.apiUrl.replace(/\/$/, '')}${path}`, {
         method: 'DELETE',
