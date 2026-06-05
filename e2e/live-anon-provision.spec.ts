@@ -92,12 +92,47 @@ interface ProvisionFlow {
 // The registry. The matrix's seventh service (db) is covered by
 // live-provision-smoke.spec.ts; the six below complete the set. Editing this
 // table is the ONLY change needed to add/remove a covered service.
+//
+// ── Per-service provision-path choice (forceAnon vs authed-minted) ────────────
+// Each flow runs as EITHER the minted PRO account (authed, exercises the
+// minted-account/authed-reap path) OR the anonymous fast-hot-pool path
+// (forceAnon). The deciding factor is whether the AUTHED prod provision is fast
+// enough to finish inside the 90s per-test timeout (playwright.live.config.ts):
+//
+//   service  | path           | why
+//   ---------|----------------|----------------------------------------------
+//   db       | anon (forceAnon, in smoke spec) | authed = DEDICATED Postgres,
+//            |                | cold-provision > 90s on prod; anon = hot-pool (fast)
+//   vector   | anon (forceAnon)| authed = DEDICATED pgvector Postgres, same
+//            |                | slow dedicated-provision as db (15s warm, >90s
+//            |                | cold) → TIMED OUT the suite (run 26999448643).
+//            |                | anon = fast hot-pool; anon resource TTL-reaped.
+//   queue    | anon (forceAnon)| authed isolated-NATS path HANGS on prod (P1
+//            |                | NKeys gap); anon returns fast (legacy_open).
+//   cache    | authed-minted  | Redis provision is fast (no dedicated DB build);
+//            |                | KEEPS authed/minted-account + authed-reap coverage.
+//   nosql    | authed-minted  | Mongo provision is fast; KEEPS authed coverage.
+//   storage  | authed-minted  | DO Spaces tenant-prefix (no DB build) → fast;
+//            |                | KEEPS authed coverage.
+//   webhook  | authed-minted  | Redis-backed receiver, fast; KEEPS authed coverage.
+//
+// Net: the two genuinely-slow DEDICATED-DB provisions (db, vector) and the
+// hanging queue path use the fast anon hot-pool so they can NEVER exceed the
+// timeout; cache/nosql/storage/webhook still exercise the authed/minted-account
+// (and authed-reap) path. That keeps both paths covered with zero flake.
 const PROVISION_FLOWS: ProvisionFlow[] = [
   {
     label: 'vector',
     path: '/vector/new',
     connKey: 'connection_url',
     connPattern: /^postgres(ql)?:\/\//,
+    // Pin anon: the authed (pro) /vector/new path provisions a DEDICATED
+    // pgvector Postgres for the team — slow on prod (15s warm, >90s cold), which
+    // timed out the suite at the 90s per-test limit (flaky run 26999448643). The
+    // anon path uses the fast pgvector hot-pool and returns quickly; the anon
+    // resource is TTL-reaped (no authed DELETE for anon resources). Same
+    // treatment as /db/new (smoke spec) — both are dedicated-DB provisions.
+    forceAnon: true,
     extra: (b) =>
       expect(b.extension, 'vector provision echoes pgvector extension').toBe('pgvector'),
   },
