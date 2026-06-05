@@ -120,6 +120,12 @@ interface ClaimedIdentity {
   email: string
   /** The provisioned cache resource token — recorded + reaped (rule 24). */
   resourceToken: string
+  /**
+   * The REAL session token the claim minted (onboarding.go:537). A disposable
+   * bearer for this throwaway team — safe to revoke (A10) without touching the
+   * shared workflow-minted E2E_SESSION_JWT. Empty if the claim omitted it.
+   */
+  sessionToken: string
 }
 
 // Provision an anonymous cache → claim it into a REAL user/team (Brevo-free).
@@ -166,11 +172,21 @@ async function provisionAndClaim(
     `POST /claim should return ${STATUS_CREATED}; got ${claimResp.status()}. ` +
       `Body: ${await claimResp.text().catch(() => '<unreadable>')}`,
   ).toBe(STATUS_CREATED)
-  const claim = (await claimResp.json()) as { user_id: string; team_id: string }
+  const claim = (await claimResp.json()) as {
+    user_id: string
+    team_id: string
+    session_token?: string
+  }
   expect(claim.user_id, 'claim must return a user_id').toBeTruthy()
   expect(claim.team_id, 'claim must return a team_id').toBeTruthy()
 
-  return { userID: claim.user_id, teamID: claim.team_id, email, resourceToken: cache.token }
+  return {
+    userID: claim.user_id,
+    teamID: claim.team_id,
+    email,
+    resourceToken: cache.token,
+    sessionToken: String(claim.session_token ?? ''),
+  }
 }
 
 test.describe('LIVE — auth/login seams (W1: OAuth, logout-revocation, CLI, /auth/me, CORS, magic-link)', () => {
@@ -463,26 +479,40 @@ test.describe('LIVE — auth/login seams (W1: OAuth, logout-revocation, CLI, /au
   // the past incident missed: a "successful" login that a logout could not undo.
   test.describe('Logout revocation — reused bearer/jti after logout → 401 (A10)', () => {
     test('valid bearer 200 → logout → SAME bearer on /auth/me → 401', async ({ request }) => {
-      // Prefer the workflow-minted account's bearer (item 2). Revoking it is
-      // safe: A10 is the LAST authed leg (serial), and the workflow reaps the
-      // whole account out-of-band afterward, so a dead session is expected.
+      // CRITICAL: A10 REVOKES the bearer it tests, so it must NEVER revoke the
+      // shared workflow-minted E2E_SESSION_JWT — the claim/conversion, deploy,
+      // and provision-smoke specs (which run AFTER this one, serial+alphabetical)
+      // all provision/reap AS that minted session. Revoking it here would 401
+      // every later authed leg (the regression this run hit). So A10 always uses
+      // a DISPOSABLE bearer it owns:
+      //   - Prefer a throwaway claimed team: provisionAndClaim returns a real
+      //     session_token (onboarding.go:537) we can revoke harmlessly. Works on
+      //     prod via the anon fingerprint bypass — no E2E_JWT_SECRET needed.
+      //   - If the claim path can't mint a session_token, fall back to a
+      //     self-minted JWT (needs E2E_JWT_SECRET) for the claimed team.
+      // The minted account is reaped out-of-band by the workflow regardless.
       const minted = mintedSession()
+      const canClaim = !!process.env.E2E_TEST_TOKEN || !!minted
       test.skip(
-        !minted && !JWT_SECRET,
-        'Neither E2E_SESSION_JWT nor E2E_JWT_SECRET set — cannot obtain a session JWT to revoke. ' +
-          'Set one to run A10.',
+        !canClaim && !JWT_SECRET,
+        'No way to obtain a DISPOSABLE session to revoke: neither the anon claim path ' +
+          '(E2E_TEST_TOKEN / minted run) nor E2E_JWT_SECRET is available. A10 must never revoke ' +
+          'the shared E2E_SESSION_JWT, so it skips here. Set E2E_TEST_TOKEN or E2E_JWT_SECRET to run it.',
       )
 
       let token: string
       let inlineReap: CohortEntity[] = []
-      if (minted) {
-        token = minted.token
+      const identity = await provisionAndClaim(request)
+      inlineReap = [
+        { kind: 'resource', id: identity.resourceToken, apiUrl: API_URL, token: identity.sessionToken || undefined, note: 'A10 logout leg', recordedAt: new Date().toISOString() },
+      ]
+      if (identity.sessionToken) {
+        // The disposable claim session — safe to revoke (own throwaway team).
+        token = identity.sessionToken
       } else {
-        const identity = await provisionAndClaim(request)
+        // Claim omitted a session_token: self-mint one for the same team. This
+        // path needs E2E_JWT_SECRET; if absent the skip above already fired.
         token = mintSessionJWT(identity.userID, identity.teamID, identity.email).token
-        inlineReap = [
-          { kind: 'resource', id: identity.resourceToken, apiUrl: API_URL, note: 'A10 logout leg', recordedAt: new Date().toISOString() },
-        ]
       }
 
       // 1) The bearer works pre-logout.
@@ -493,9 +523,17 @@ test.describe('LIVE — auth/login seams (W1: OAuth, logout-revocation, CLI, /au
       })
       expect(
         pre.status(),
-        `pre-logout /auth/me with the minted bearer should be 200; got ${pre.status()}. ` +
+        `pre-logout /auth/me with the disposable bearer should be 200; got ${pre.status()}. ` +
           `If this is already 401 the jti isn't recognized and the revocation assertion below is meaningless.`,
       ).toBe(STATUS_OK)
+
+      // Reap the throwaway team's resource NOW, while its session is still valid
+      // — the logout below revokes the only bearer that authorizes the DELETE, so
+      // reaping afterward would 401 and leak the resource. (The minted account is
+      // reaped out-of-band by the workflow; this leg owns a SEPARATE claimed team.)
+      const reapResult = await reapEntities(request, inlineReap)
+      expect(reapResult.failed.length, `pre-logout reap failed: ${JSON.stringify(reapResult.failed)}`).toBe(0)
+      clearLedger()
 
       // 2) Logout — revokes the jti.
       const logout = await request.fetch(`${API_URL}/auth/logout`, {
@@ -520,14 +558,6 @@ test.describe('LIVE — auth/login seams (W1: OAuth, logout-revocation, CLI, /au
           `${post.status()}. A 200 here is the EXACT login/logout regression class from the ` +
           `2026-05-30 incident — a session that survives its own logout.`,
       ).toBe(STATUS_UNAUTHORIZED)
-
-      // Reap only what THIS leg created (the minted account is reaped
-      // out-of-band by the workflow's DELETE /internal/e2e/account step).
-      if (inlineReap.length > 0) {
-        const result = await reapEntities(request, inlineReap)
-        expect(result.failed.length, `reap failed: ${JSON.stringify(result.failed)}`).toBe(0)
-        clearLedger()
-      }
     })
   })
 
