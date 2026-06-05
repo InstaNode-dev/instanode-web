@@ -350,11 +350,18 @@ test.describe('LIVE — Batch A read flows (W-OBS / W-RES / W-VAULT / W-APIKEYS 
       if (metrics.status() === STATUS_OK) {
         const m = await bodyJSON(metrics)
         expect(m.ok, 'metrics ok flag').toBe(true)
+        // Real prod shape: { ok, data_source, metrics: { <metricName>: number[] , ... } }
+        // (metrics is an OBJECT keyed by series name, not a top-level array).
         expect(
-          Array.isArray(m.metrics),
-          `metrics must carry a metrics[] series; got ${JSON.stringify(m).slice(0, 200)}.`,
+          m.metrics != null && typeof m.metrics === 'object' && !Array.isArray(m.metrics),
+          `metrics must be an object keyed by metric name; got ${JSON.stringify(m).slice(0, 200)}.`,
         ).toBe(true)
-        expect(m.window_seconds, 'metrics must echo the resolved window_seconds').toBeTruthy()
+        const series = Object.values(m.metrics ?? {})
+        expect(
+          series.length > 0 && Array.isArray(series[0]),
+          `metrics must carry at least one named time-series array; got ${JSON.stringify(m).slice(0, 200)}.`,
+        ).toBe(true)
+        expect(m.data_source, 'metrics must declare a data_source').toBeTruthy()
       }
 
       // ── Explicit DELETE assertion (W-RES formalizes the authed reap) ─────────
