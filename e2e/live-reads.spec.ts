@@ -727,39 +727,8 @@ test.describe('LIVE — Batch A read flows (W-OBS / W-RES / W-VAULT / W-APIKEYS 
   })
 })
 
-// Exported so a future registry-iterating prod-coverage done-bar (matrix §4
-// Option B) can union manifests across live-*.spec.ts without a hand-typed list.
-export const coveredRoutes: string[] = [
-  'GET /livez',
-  'GET /healthz',
-  'GET /readyz',
-  'GET /openapi.json',
-  'GET /api/v1/capabilities',
-  'GET /api/v1/status',
-  'GET /.well-known/oauth-protected-resource',
-  'GET /api/v1/incidents',
-  'GET /llms.txt',
-  'GET /security.txt',
-  'GET /api/v1/whoami',
-  'GET /api/v1/resources',
-  'GET /api/v1/resources/:id',
-  'GET /api/v1/resources/:id/credentials',
-  'GET /api/v1/resources/:id/metrics',
-  'DELETE /api/v1/resources/:id',
-  'GET /api/v1/resources/families',
-  'GET /api/v1/resources/:id/family',
-  'GET /api/v1/resources/:id/backups',
-  'GET /api/v1/resources/:id/restores',
-  'PUT /api/v1/vault/:env/:key',
-  'GET /api/v1/vault/:env/:key',
-  'GET /api/v1/vault/:env',
-  'POST /api/v1/auth/api-keys',
-  'GET /api/v1/auth/api-keys',
-  'DELETE /api/v1/auth/api-keys/:id',
-  'GET /api/v1/billing',
-  'GET /api/v1/billing/invoices',
-  'GET /api/v1/billing/usage',
-  'GET /api/v1/usage/wall',
-  'GET /api/v1/audit',
-  'GET /api/v1/audit.csv',
-]
+// Re-exported from the playwright-free sibling so the vitest prod-coverage
+// done-bar guard (e2e/prod-coverage-donebar.test.ts) can union this spec's
+// covered-route manifest without importing the @playwright/test runtime
+// (rule 18 — registry-iterating, single source of the route list).
+export { coveredRoutes } from './live-reads.coverage'

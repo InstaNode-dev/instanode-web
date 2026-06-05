@@ -192,3 +192,8 @@ test.describe('LIVE smoke — anonymous provision → backend-assert → reap', 
     clearLedger()
   })
 })
+
+// Covered-route manifest (rule 18), defined in the playwright-free sibling so the
+// vitest prod-coverage done-bar guard can union it without the @playwright/test
+// runtime (matrix §1.B — POST /db/new).
+export { coveredRoutes } from './live-provision-smoke.coverage'

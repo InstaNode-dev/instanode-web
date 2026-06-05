@@ -72,6 +72,10 @@ import {
   PROD_API_HOST,
 } from './cohort'
 import { recordEntity, loadLedger, reapEntities, clearLedger } from './cleanup-ledger'
+// Single source of this spec's covered-route manifest (playwright-free sibling),
+// imported here so the in-file `coverage manifest` test has a local binding and
+// re-exported at EOF for the vitest prod-coverage done-bar guard (rule 18).
+import { coveredRoutes } from './live-stacks-lifecycle.coverage'
 
 const LIVE = process.env.E2E_LIVE === '1'
 const API_URL = (process.env.E2E_API_URL ?? process.env.AGENT_API_URL ?? '')
@@ -868,30 +872,7 @@ test.describe('LIVE — Batch C (W-STACKS / W-STACKS-ADV / W-LIFECYCLE / W-AUTH2
   })
 })
 
-// Exported so a future registry-iterating prod-coverage done-bar (matrix §4
-// Option B) can union manifests across live-*.spec.ts without a hand-typed list.
-export const coveredRoutes: string[] = [
-  // W-STACKS
-  'POST /stacks/new',
-  'GET /api/v1/stacks',
-  'GET /api/v1/stacks/:slug',
-  'GET /stacks/:slug',
-  'PATCH /stacks/:slug/env',
-  'DELETE /stacks/:slug',
-  'DELETE /api/v1/stacks/:slug/confirm-deletion',
-  // W-STACKS-ADV
-  'GET /api/v1/stacks/:slug/family',
-  'POST /api/v1/stacks/:slug/promote',
-  // W-LIFECYCLE
-  'POST /api/v1/resources/:id/pause',
-  'POST /api/v1/resources/:id/resume',
-  'POST /api/v1/resources/:id/rotate-credentials',
-  'POST /api/v1/resources/:id/backup',
-  'GET /api/v1/resources/:id/backups',
-  'GET /api/v1/resources/:id/restores',
-  // W-AUTH2
-  'POST /auth/email/start',
-  'POST /auth/github',
-  'GET /auth/me',
-  'POST /auth/logout',
-]
+// Re-export the imported manifest so the vitest prod-coverage done-bar guard can
+// union this spec's covered routes. Defined in ./live-stacks-lifecycle.coverage
+// (imported at the top); re-exported here as the spec's public surface (rule 18).
+export { coveredRoutes }

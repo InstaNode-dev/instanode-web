@@ -62,6 +62,10 @@ import {
   PROD_API_HOST,
 } from './cohort'
 import { recordEntity, loadLedger, reapEntities, clearLedger } from './cleanup-ledger'
+// Single source of this spec's covered-route manifest (playwright-free sibling),
+// imported here so the in-file `coverage manifest` test has a local binding and
+// re-exported at EOF for the vitest prod-coverage done-bar guard (rule 18).
+import { coveredRoutes } from './live-writes.coverage'
 
 const LIVE = process.env.E2E_LIVE === '1'
 const API_URL = (process.env.E2E_API_URL ?? process.env.AGENT_API_URL ?? '')
@@ -1072,38 +1076,7 @@ function extractUpgradeJWT(note: string): string {
   return tok
 }
 
-// Exported so a future registry-iterating prod-coverage done-bar (matrix §4
-// Option B) can union manifests across live-*.spec.ts without a hand-typed list.
-export const coveredRoutes: string[] = [
-  // W-ONBOARD
-  'GET /start',
-  'GET /claim/preview',
-  // W-WEBHOOK
-  'POST /webhook/new',
-  'POST /webhook/receive/:token',
-  'GET /api/v1/webhooks/:token/requests',
-  // W-TEAM
-  'PATCH /api/v1/team',
-  'GET /api/v1/team',
-  'GET /api/v1/team/summary',
-  'GET /api/v1/team/settings',
-  'PATCH /api/v1/team/settings',
-  'GET /api/v1/team/env-policy',
-  'PUT /api/v1/team/env-policy',
-  'GET /api/v1/team/members',
-  'GET /api/v1/team/invitations',
-  'POST /api/v1/team/members/invite',
-  'DELETE /api/v1/team/invitations/:id',
-  'POST /api/v1/team/members/leave',
-  'DELETE /api/v1/team/members/:user_id',
-  // W-DEPLOY
-  'POST /deploy/new',
-  'GET /api/v1/deployments',
-  'GET /api/v1/deployments/:id',
-  'GET /api/v1/deployments/:id/events',
-  'POST /api/v1/deployments/:id/make-permanent',
-  'POST /api/v1/deployments/:id/ttl',
-  'PATCH /api/v1/deployments/:id',
-  'DELETE /api/v1/deployments/:id',
-  'DELETE /api/v1/deployments/:id/confirm-deletion',
-]
+// Re-export the imported manifest so the vitest prod-coverage done-bar guard can
+// union this spec's covered routes. Defined in ./live-writes.coverage (imported
+// at the top); re-exported here as the spec's public surface (rule 18).
+export { coveredRoutes }

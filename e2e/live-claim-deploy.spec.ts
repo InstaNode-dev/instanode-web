@@ -747,3 +747,9 @@ function buildUstarTar(name: string, content: Buffer): Buffer {
 
 // Re-export for a potential future registry-iterating coverage test (rule 18).
 export type { CohortEntity }
+
+// Covered-route manifest (rule 18), defined in the playwright-free sibling so the
+// vitest prod-coverage done-bar guard can union it without the @playwright/test
+// runtime. The spec tags legs by W3 leg-ID; the sibling maps them to route
+// strings (matrix §0.2 / §1.C / §1.E / §1.K).
+export { coveredRoutes } from './live-claim-deploy.coverage'
