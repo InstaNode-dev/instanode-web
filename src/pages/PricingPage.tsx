@@ -16,7 +16,15 @@ import { copyToClipboard } from '../components/Common'
 // surface as Anonymous / Hobby / Pro / Team. Hobby Plus is still a real
 // paid tier in api/plans.yaml — it's reached via dashboard upsell flows
 // (quota_wall, custom_domain prompts), not the public pricing ladder.
-type TierKey = 'anonymous' | 'hobby' | 'pro' | 'team'
+//
+// 2026-06-05 (task #56): `enterprise` added as a NON-self-serve "contact us"
+// wall to the RIGHT of Team. It is NOT a tier in api/plans.yaml — no plan
+// row, no price, no checkout path. It is a GTM surface only: for anyone who
+// breaches Team's finite caps or needs dedicated/isolated infra, multi-region,
+// or compliance (SOC2/BAA/SSO/SLA/DPA). Every Enterprise cell renders
+// "Custom" / "Contact us", never a number and never the retired word
+// "unlimited".
+type TierKey = 'anonymous' | 'hobby' | 'pro' | 'team' | 'enterprise'
 
 // P2: monthly vs yearly pricing. The toggle on this page is purely
 // presentational — the CTA passes the chosen cycle through as
@@ -109,17 +117,40 @@ const TIERS: {
     // so the yearly toggle reuses the same contact-sales action.
     ctaHrefMonthly: 'mailto:sales@instanode.dev?subject=Team%20plan%20enquiry',
   },
+  // Enterprise (task #56, 2026-06-05) — the "contact us" wall above Team.
+  // NOT a self-serve tier: no price, no plans.yaml row, no checkout path.
+  // It's the GTM landing for anyone who breaches Team's finite caps or needs
+  // dedicated/isolated infra, multi-region, or compliance (SOC2/BAA/SSO/SLA/
+  // custom DPA). The headline reads "Custom" instead of a dollar figure; the
+  // CTA is a sales mailto matching Team's contact address (sales@instanode.dev),
+  // with an "Enterprise inquiry" subject. The yearly toggle reuses the same
+  // mailto — there is no annual/monthly distinction for a quote-based plan.
+  {
+    key: 'enterprise',
+    name: 'Enterprise',
+    monthly: { price: 'Custom', sub: "let's talk" },
+    cta: 'Contact us →',
+    ctaHrefMonthly: 'mailto:sales@instanode.dev?subject=Enterprise%20inquiry',
+  },
 ]
 
 type Cell =
   | string
   | { mark: 'check' | 'dash' }
   | { text: string; comingSoon?: boolean }
-// Row values are a 4-tuple in column order: Anonymous, Hobby, Pro, Team.
-// (Hobby Plus removed from the marketing matrix on 2026-05-15 — it lives
-// in plans.yaml + dashboard upsell flows only.) The order MUST stay in
+// Row values are a 5-tuple in column order: Anonymous, Hobby, Pro, Team,
+// Enterprise. (Hobby Plus removed from the marketing matrix on 2026-05-15 —
+// it lives in plans.yaml + dashboard upsell flows only. Enterprise added
+// 2026-06-05 as a contact-us wall — task #56.) The order MUST stay in
 // lock-step with the TIERS array above.
-type Row = { label: string; sub?: string; values: [Cell, Cell, Cell, Cell] }
+type Row = { label: string; sub?: string; values: [Cell, Cell, Cell, Cell, Cell] }
+
+// CUSTOM — Enterprise-column marker. Enterprise is a quote-based "contact us"
+// wall, NOT a self-serve tier, so every Enterprise cell reads "Custom" rather
+// than a number. We deliberately do NOT use the retired word "unlimited" here
+// (the strict-margin redesign retired it across the surface). Kept as a named
+// const so a future copy change touches one place, not every row.
+const CUSTOM: Cell = 'Custom'
 
 // strict-80% margin redesign (2026-06-05): Team is no longer "unlimited" —
 // every Team limit is now a finite plans.yaml cap rendered directly in the
@@ -127,52 +158,59 @@ type Row = { label: string; sub?: string; values: [Cell, Cell, Cell, Cell] }
 // needing MORE than the finite Team caps is routed to Enterprise (contact
 // sales), surfaced in the Team tier description + the section copy.
 
-// Each row has 4 cells: [Anonymous, Hobby, Pro, Team]. Numbers come from
-// api/plans.yaml. 2026-05-15: Hobby Plus column removed (the tier exists
-// for upsell flows but is not part of the public ladder); Pro storage
-// bumped per PRICING-AUDIT-2026-05-15.md (Postgres 5→10 GB, Redis
-// 256→512 MB, Mongo 2→5 GB, object 10→50 GB).
+// Each row has 5 cells: [Anonymous, Hobby, Pro, Team, Enterprise]. Numbers
+// come from api/plans.yaml for the four self-serve columns. 2026-05-15: Hobby
+// Plus column removed (the tier exists for upsell flows but is not part of the
+// public ladder); Pro storage bumped per PRICING-AUDIT-2026-05-15.md
+// (Postgres 5→10 GB, Redis 256→512 MB, Mongo 2→5 GB, object 10→50 GB).
 // strict-80% margin redesign (2026-06-05): every Team -1 ("unlimited")
 // replaced with the finite plans.yaml cap (Postgres 50 GB / 100 conn,
 // Redis 1.5 GB, Mongo 40 GB / 50 conn, Queue 40 GB, Vector 30 GB, Storage
 // 300 GB, Webhooks 100k, Deploy apps 100, Vault 1000). Pro queue trimmed
-// 10 GB → 5 GB in the same pass. Above Team = Enterprise (contact sales).
+// 10 GB → 5 GB in the same pass.
+// task #56 (2026-06-05): Enterprise column added on the right. It is a
+// "contact us" wall, NOT a plans.yaml tier — every Enterprise cell reads
+// CUSTOM ("Custom"), never a number and never "unlimited". For the
+// SSO/SAML + SLA rows (not-yet-shipped everywhere else) Enterprise reads
+// 'Contact us' since those are exactly the asks that route to sales.
 const ROWS: Row[] = [
-  { label: 'Postgres', values: ['10 MB / 2 conn / 24h TTL', '1 GB / 8 conn',     '10 GB / 20 conn', '50 GB / 100 conn'] },
-  { label: 'Redis',    values: ['5 MB / 24h TTL',           '50 MB',             '512 MB',          '1.5 GB'] },
-  { label: 'MongoDB',  values: ['5 MB / 2 conn / 24h TTL',  '100 MB / 5 conn',   '5 GB / 20 conn',  '40 GB / 50 conn'] },
+  { label: 'Postgres', values: ['10 MB / 2 conn / 24h TTL', '1 GB / 8 conn',     '10 GB / 20 conn', '50 GB / 100 conn', CUSTOM] },
+  { label: 'Redis',    values: ['5 MB / 24h TTL',           '50 MB',             '512 MB',          '1.5 GB',           CUSTOM] },
+  { label: 'MongoDB',  values: ['5 MB / 2 conn / 24h TTL',  '100 MB / 5 conn',   '5 GB / 20 conn',  '40 GB / 50 conn',  CUSTOM] },
   // FIX-G (2026-05-14): the column used to advertise "1 000 / 5 000 / 100k
   // msg/d" but there's no backing queue_messages_per_day field on the
   // plans.yaml side — quota enforcement is on queue_storage_mb. Numbers
   // mirror plans.yaml queue_storage_mb (anon=64 MB, hobby=2 GB, pro=5 GB,
   // team=40 GB) after the 2026-06-05 strict-margin trim.
-  { label: 'Queue',    sub: 'NATS storage', values: ['64 MB / 24h TTL', '2 GB', '5 GB', '40 GB'] },
+  { label: 'Queue',    sub: 'NATS storage', values: ['64 MB / 24h TTL', '2 GB', '5 GB', '40 GB', CUSTOM] },
   // Vector — plans.yaml vector_storage_mb: anon=10 MB, hobby=500 MB,
   // pro=10 GB, team=30 GB (strict-margin 2026-06-05).
-  { label: 'Vector',   sub: 'pgvector', values: ['10 MB / 24h TTL', '500 MB', '10 GB', '30 GB'] },
+  { label: 'Vector',   sub: 'pgvector', values: ['10 MB / 24h TTL', '500 MB', '10 GB', '30 GB', CUSTOM] },
   // Anonymous storage: plans.yaml storage_storage_mb=10 (anonymous tier).
   // PB04 P1 (2026-05-21): cell used to render '—' which contradicted the
   // shipped backend — anonymous /storage/new returns a real 10 MB bucket.
-  { label: 'Storage',  values: ['10 MB / 24h TTL',              '512 MB',           '50 GB',          '300 GB'] },
-  { label: 'Webhook stored', values: ['100',                   '1 000',            '10k',            '100k'] },
+  { label: 'Storage',  values: ['10 MB / 24h TTL',              '512 MB',           '50 GB',          '300 GB',           CUSTOM] },
+  { label: 'Webhook stored', values: ['100',                   '1 000',            '10k',            '100k',             CUSTOM] },
   // 2026-05-20: dropped "small / medium" pod-size adjectives — there is no
   // deployment_size field on api/internal/handlers/deploy.go. Numbers map
   // to plans.yaml deployments_apps (hobby=1, pro=10, team=100 finite).
-  { label: 'Deploy apps', values: [{ mark: 'dash' },           '1',                '10',             '100'] },
-  { label: 'Domains',  values: [{ mark: 'dash' }, '*.deployment.instanode.dev', 'custom domain', '50 custom domains'] },
+  { label: 'Deploy apps', values: [{ mark: 'dash' },           '1',                '10',             '100',              CUSTOM] },
+  { label: 'Domains',  values: [{ mark: 'dash' }, '*.deployment.instanode.dev', 'custom domain', '50 custom domains', CUSTOM] },
   // Multi-env workflows (stack promotion + vault copy across envs) is a
   // shipped Pro-tier feature: POST /api/v1/stacks/:slug/promote and
   // POST /api/v1/vault/copy are live (RETRO-2026-05-12 §10.17). Hobby is
   // single-env (production only).
-  { label: 'Multi-env workflows', sub: 'stack promotion + vault copy', values: [{ mark: 'dash' }, { mark: 'dash' }, 'dev / staging / prod', 'dev / staging / prod'] },
-  { label: 'RBAC + audit', values: [{ mark: 'dash' }, { mark: 'dash' }, { mark: 'dash' }, { mark: 'check' }] },
-  { label: 'Vault entries', values: [{ mark: 'dash' }, '20', '200', '1 000'] },
-  { label: 'Vault envs',    values: [{ mark: 'dash' }, 'production only', 'multi-env', 'multi-env'] },
-  { label: 'Backups',       values: [{ mark: 'dash' }, '7-day · no restore', '30-day · 1-click restore', '90-day · self-serve restore'] },
-  // SSO/SAML + SLA have no backend yet — shown as not-yet-available everywhere
-  // (gap analysis 2026-06-03), consistent with PricingGrid + llms.txt "coming soon".
-  { label: 'SSO / SAML (coming soon)', values: [{ mark: 'dash' }, { mark: 'dash' }, { mark: 'dash' }, { mark: 'dash' }] },
-  { label: '99.9% SLA (coming soon)',  values: [{ mark: 'dash' }, { mark: 'dash' }, { mark: 'dash' }, { mark: 'dash' }] }
+  { label: 'Multi-env workflows', sub: 'stack promotion + vault copy', values: [{ mark: 'dash' }, { mark: 'dash' }, 'dev / staging / prod', 'dev / staging / prod', CUSTOM] },
+  { label: 'RBAC + audit', values: [{ mark: 'dash' }, { mark: 'dash' }, { mark: 'dash' }, { mark: 'check' }, { mark: 'check' }] },
+  { label: 'Vault entries', values: [{ mark: 'dash' }, '20', '200', '1 000', CUSTOM] },
+  { label: 'Vault envs',    values: [{ mark: 'dash' }, 'production only', 'multi-env', 'multi-env', 'multi-env'] },
+  { label: 'Backups',       values: [{ mark: 'dash' }, '7-day · no restore', '30-day · 1-click restore', '90-day · self-serve restore', 'Custom retention'] },
+  // SSO/SAML + SLA have no backend yet — shown as not-yet-available on the
+  // self-serve tiers (gap analysis 2026-06-03), consistent with PricingGrid +
+  // llms.txt "coming soon". Enterprise reads 'Contact us' because these are
+  // exactly the compliance/SLA asks that route to sales today.
+  { label: 'SSO / SAML (coming soon)', values: [{ mark: 'dash' }, { mark: 'dash' }, { mark: 'dash' }, { mark: 'dash' }, 'Contact us'] },
+  { label: '99.9% SLA (coming soon)',  values: [{ mark: 'dash' }, { mark: 'dash' }, { mark: 'dash' }, { mark: 'dash' }, 'Contact us'] }
 ]
 
 const FAQ: { q: string; a: string }[] = [
@@ -264,7 +302,7 @@ export function PricingPage() {
   useEffect(() => {
     if (!requestedTier) return
     if (typeof document === 'undefined') return
-    const valid = ['anonymous', 'hobby', 'pro', 'team']
+    const valid = ['anonymous', 'hobby', 'pro', 'team', 'enterprise']
     if (!valid.includes(requestedTier)) return
     const t = window.setTimeout(() => {
       const el = document.getElementById(`pricing-tier-${requestedTier}`)
@@ -303,6 +341,7 @@ export function PricingPage() {
         <h2 id="compare-h" className="public-section-h">Compare tiers</h2>
         <p className="public-section-sub">
           All prices in USD. Limits enforced per team. Numbers come from <code className="pr-inline">plans.yaml</code>.
+          Need more than Team's caps — or dedicated infra, multi-region, or compliance? That's <strong>Enterprise</strong>: custom, contact us.
         </p>
 
         {/* P2: monthly / yearly toggle. Pure-presentational on the
@@ -442,6 +481,38 @@ export function PricingPage() {
               )
             })}
           </div>
+        </div>
+      </section>
+
+      {/* ---------- Enterprise "contact us" wall (task #56) ---------- */}
+      {/* Enterprise sits above Team but is NOT a self-serve tier — no price,
+          no plans.yaml row, no checkout. This callout restates who it's for
+          using the strict-margin redesign's trigger criteria and routes to the
+          same sales address Team uses. Kept tasteful: no invented features, no
+          dollar figure, no "unlimited". */}
+      <section
+        className="public-section"
+        id="pricing-tier-enterprise-callout"
+        aria-labelledby="enterprise-h"
+        data-testid="pricing-enterprise-callout"
+      >
+        <h2 id="enterprise-h" className="public-section-h">Enterprise</h2>
+        <p className="public-section-sub">
+          Outgrowing Team, or you need more than self-serve can offer? Let's talk.
+        </p>
+        <div className="pricing-enterprise-card" data-testid="pricing-enterprise-card">
+          <p className="pricing-enterprise-lead">
+            Need more than Team's limits, dedicated or isolated infra, multi-region, or
+            compliance — SOC2, BAA, SSO, an SLA, or a custom DPA? Enterprise is custom-scoped
+            to your team. No price tag, no checkout — a real conversation.
+          </p>
+          <a
+            href="mailto:sales@instanode.dev?subject=Enterprise%20inquiry"
+            className="pricing-cta pricing-cta--primary"
+            data-testid="pricing-enterprise-cta"
+          >
+            Contact us →
+          </a>
         </div>
       </section>
 
@@ -672,13 +743,12 @@ function PricingStyles() {
       }
       .pricing-row {
         display: grid;
-        /* P2-30: 1 feature col + 4 tier cols — the TIERS array has exactly
-           four entries (Anonymous, Hobby, Pro, Team). hobby_plus was
-           removed from the marketing matrix on 2026-05-15, but this
-           grid-template still had its stale 6-track (1 + 5) layout, so
-           every row rendered 5 cells into 6 tracks — leaving a dead empty
-           rightmost column and narrower-than-intended cells. */
-        grid-template-columns: 1.3fr 1fr 1fr 1fr 1fr;
+        /* 1 feature col + 5 tier cols. The TIERS array has exactly five
+           entries: Anonymous, Hobby, Pro, Team, Enterprise (added 2026-06-05,
+           task #56). hobby_plus stays out of the marketing matrix (upsell-only).
+           The Enterprise column carries short "Custom" / "Contact us" copy, so
+           it gets a slightly narrower track (0.9fr) than the numeric tiers. */
+        grid-template-columns: 1.3fr 1fr 1fr 1fr 1fr 0.9fr;
         align-items: stretch;
         border-bottom: 1px solid var(--border);
       }
@@ -813,6 +883,27 @@ function PricingStyles() {
         .pricing-row--head .pricing-cell { border-bottom: 1px solid var(--border); }
         .pricing-cell--feature { background: var(--elevated); }
       }
+
+      /* task #56: Enterprise "contact us" wall card */
+      .pricing-enterprise-card {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 24px;
+        flex-wrap: wrap;
+        border: 1px solid rgba(0,228,142,0.25);
+        border-radius: 14px;
+        padding: 22px 24px;
+        background: linear-gradient(135deg, rgba(0,228,142,0.06), rgba(0,228,142,0.02));
+      }
+      .pricing-enterprise-lead {
+        font-size: 14px;
+        line-height: 1.6;
+        color: var(--text-dim);
+        max-width: 640px;
+        margin: 0;
+      }
+      .pricing-enterprise-card .pricing-cta { white-space: nowrap; }
 
       /* DOG-3: intermediate tiers list (Hobby Plus + Growth callout) */
       .pricing-intermediate-list {

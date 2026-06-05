@@ -196,6 +196,69 @@ describe('PricingPage — four public tier cards present (M11 regression guard)'
   })
 })
 
+// ─── 3b. Enterprise "contact us" wall (task #56) ──────────────────────────
+
+describe('PricingPage — Enterprise contact-us wall (task #56)', () => {
+  it('renders an Enterprise column header to the right of Team', () => {
+    renderPage()
+    const headerCells = Array.from(
+      document.querySelectorAll('[role="columnheader"][data-tier="enterprise"]'),
+    )
+    expect(headerCells.length).toBeGreaterThan(0)
+    expect(document.body.textContent ?? '').toContain('Enterprise')
+  })
+
+  it('Enterprise CTA is a sales mailto (contact us), NOT a self-serve checkout', () => {
+    renderPage()
+    const cta = screen.getByTestId('pricing-cta-enterprise')
+    const href = cta.getAttribute('href') ?? ''
+    expect(href.startsWith('mailto:')).toBe(true)
+    // Matches Team's contact address (sales@instanode.dev), Enterprise subject.
+    expect(href).toContain('sales@instanode.dev')
+    expect(href).not.toContain('/app/checkout')
+    expect(href).not.toContain('plan=enterprise')
+    expect((cta.textContent ?? '').toLowerCase()).toContain('contact us')
+  })
+
+  it('Enterprise has no dollar price — the headline is "Custom"', () => {
+    renderPage()
+    const header = document.querySelector(
+      '[role="columnheader"][data-tier="enterprise"]',
+    )
+    expect(header).toBeTruthy()
+    const headerText = header?.textContent ?? ''
+    expect(headerText).toContain('Custom')
+    expect(headerText).not.toContain('$')
+  })
+
+  it('renders the Enterprise callout card with a Contact-us CTA', () => {
+    renderPage()
+    expect(screen.getByTestId('pricing-enterprise-callout')).toBeTruthy()
+    expect(screen.getByTestId('pricing-enterprise-card')).toBeTruthy()
+    const calloutCta = screen.getByTestId('pricing-enterprise-cta')
+    expect(calloutCta.tagName).toBe('A')
+    expect(calloutCta.getAttribute('href') ?? '').toContain('mailto:sales@instanode.dev')
+    expect((calloutCta.textContent ?? '').toLowerCase()).toContain('contact us')
+  })
+
+  it('surfaces the Enterprise trigger criteria (caps / dedicated infra / compliance)', () => {
+    renderPage()
+    const body = document.body.textContent ?? ''
+    expect(body).toContain('dedicated')
+    expect(body).toContain('multi-region')
+    // At least one named compliance ask routes to Enterprise.
+    expect(body).toContain('SOC2')
+  })
+
+  it('the page introduces NO "unlimited" wording (retired by the strict-margin redesign)', () => {
+    renderPage()
+    // Case-insensitive: neither the Team column nor the Enterprise wall may
+    // reintroduce the retired "unlimited" claim anywhere on /pricing.
+    const body = (document.body.textContent ?? '').toLowerCase()
+    expect(body).not.toContain('unlimited')
+  })
+})
+
 // ─── 4. B2-P1-1 / B2-P1-2: URL params + anchors (BugBash 2026-05-20) ──────
 
 describe('PricingPage — URL params + hash anchors (BugBash B2-P1-1 / B2-P1-2)', () => {
@@ -230,6 +293,19 @@ describe('PricingPage — URL params + hash anchors (BugBash B2-P1-1 / B2-P1-2)'
       const el = document.getElementById(`pricing-tier-${tier}`)
       expect(el).toBeTruthy()
     }
+  })
+
+  it('?tier=enterprise exercises the requested-tier scroll path + renders the Enterprise anchor (task #56)', () => {
+    // The requested-tier useEffect (validates the tier against the allow-list,
+    // which now includes 'enterprise', then scrolls it into view) only runs when
+    // a tier is requested via ?tier= or #hash. Render with the Enterprise param
+    // so that path executes for the new column and the shareable anchor exists.
+    render(
+      <MemoryRouter initialEntries={['/pricing?tier=enterprise']}>
+        <PricingPage />
+      </MemoryRouter>,
+    )
+    expect(document.getElementById('pricing-tier-enterprise')).toBeTruthy()
   })
 })
 

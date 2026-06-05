@@ -71,6 +71,16 @@ const CONTRACT_MARKERS: DocsMarker[] = [
     file: 'public/llms.txt',
     mustContain: ['not yet a self-serve tier'],
   },
+  {
+    // task #56 (2026-06-05): Enterprise "contact us" wall above Team. NOT a
+    // self-serve tier and NOT a plans.yaml row — a GTM surface only. Pin the
+    // dedicated Enterprise line + the sales contact so a docs revert or a
+    // content-repo sync that drops the Enterprise wall fails CI. Mirrors the
+    // Enterprise column shipped on PricingPage in the same PR.
+    field: 'Enterprise contact-us wall (custom limits / dedicated infra / compliance)',
+    file: 'public/llms.txt',
+    mustContain: ['**Enterprise**', 'sales@instanode.dev'],
+  },
 ]
 
 describe('agent docs contract — POST /deploy/new redeploy=true', () => {
