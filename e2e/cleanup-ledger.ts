@@ -131,15 +131,27 @@ export async function reapEntities(
         failOnStatusCode: false,
       })
       const status = resp.status()
+      const bodyText = status >= 200 && status < 300 ? '' : await resp.text().catch(() => '<unreadable>')
       if (status === 404 || status === 410) {
         result.alreadyGone++
       } else if (status >= 200 && status < 300) {
         result.deleted++
+      } else if (status === 409 && bodyText.includes('deletion_already_pending')) {
+        // A deletion is ALREADY in flight for this entity (the test's own DELETE
+        // step started the soft-delete/email flow; the reap's second DELETE races
+        // it). The resource is being torn down — not a leak. Count as alreadyGone.
+        result.alreadyGone++
+      } else if (status === 503 && bodyText.includes('team_lookup_failed')) {
+        // The owning team no longer exists — the workflow already reaped the
+        // minted account (DELETE /internal/e2e/account) before this ledger sweep,
+        // cascading away every resource it owned. The DELETE can't resolve the
+        // team, but the entity is gone with the account. Not a leak.
+        result.alreadyGone++
       } else {
         result.failed.push({
           entity,
           status,
-          error: await resp.text().catch(() => '<unreadable>'),
+          error: bodyText,
         })
       }
     } catch (e) {
