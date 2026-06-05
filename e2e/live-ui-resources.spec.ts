@@ -29,7 +29,7 @@ import { test, expect, type APIRequestContext } from '@playwright/test'
 
 import { assertSafeApiTarget } from './cohort'
 import { loadLedger, reapEntities, clearLedger } from './cleanup-ledger'
-import { mintUser, mintUserWithResources, reap, factoryArmed, apiBase, type MintedUser } from './factory'
+import { mintUserWithResources, reap, factoryArmed, apiBase, type MintedUser } from './factory'
 import { newAuthedContext, appURL } from './ui-helpers'
 
 const LIVE = process.env.E2E_LIVE === '1'
