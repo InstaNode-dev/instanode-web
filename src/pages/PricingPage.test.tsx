@@ -294,6 +294,19 @@ describe('PricingPage — URL params + hash anchors (BugBash B2-P1-1 / B2-P1-2)'
       expect(el).toBeTruthy()
     }
   })
+
+  it('?tier=enterprise exercises the requested-tier scroll path + renders the Enterprise anchor (task #56)', () => {
+    // The requested-tier useEffect (validates the tier against the allow-list,
+    // which now includes 'enterprise', then scrolls it into view) only runs when
+    // a tier is requested via ?tier= or #hash. Render with the Enterprise param
+    // so that path executes for the new column and the shareable anchor exists.
+    render(
+      <MemoryRouter initialEntries={['/pricing?tier=enterprise']}>
+        <PricingPage />
+      </MemoryRouter>,
+    )
+    expect(document.getElementById('pricing-tier-enterprise')).toBeTruthy()
+  })
 })
 
 // ─── 4b. DOG-3 / BUG-P001: hobby_plus + growth tiers surfaced inline ──────
