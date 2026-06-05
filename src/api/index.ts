@@ -8,6 +8,7 @@
 // real error banner instead of lying with mock data.
 
 import type {
+  Tier,
   Resource, ResourceType, DashboardStack, StackStatus,
   DashboardDeployment, DeploymentStatus, DeploymentFailure,
   DashboardTeam, BillingDetails, Invoice,
@@ -15,6 +16,11 @@ import type {
   AdminCustomerListResponse, AdminCustomerDetailResponse,
   AdminIssuePromoInput, AdminIssuePromoResponse,
   AdminSetTierInput, AdminSetTierResponse,
+  // Wire types DERIVED from the OpenAPI snapshot (generated.ts via gen:api-types).
+  // Consuming these here is what makes an api field rename fail `tsc` — see the
+  // contract-drift gate header in types.ts (Wave 1).
+  WireAuthMe, WireResourceItem, WireResourceListResponse,
+  WireBillingState, WireDeployItem,
 } from './types'
 
 export * from './types'
@@ -244,28 +250,15 @@ async function call<T>(
 // removed on 2026-05-14 per policy memory project_no_trial_pay_day_one.md.
 // The platform has no trial period — hobby/pro/team are paid from day one.
 export async function fetchMe(): Promise<AuthMeResponse> {
-  type AgentMe = {
-    ok: boolean
-    user_id: string
-    team_id: string
-    email: string
-    tier: string
-    /** A/B-test bucket per registered experiment, e.g.
-     *  `{ upgrade_button: "urgent" }`. Older API builds omit this
-     *  field entirely — callers must treat undefined as "no
-     *  experiment, render control variant". */
-    experiments?: Record<string, string>
-    /** Track A — server-authoritative platform-admin flag. The
-     *  dashboard surfaces the `/app/admin/customers` console only when
-     *  this is `true`. Absent on older API builds → treat as `false`. */
-    is_platform_admin?: boolean
-    /** Unguessable URL prefix for the admin customer-management surface.
-     *  Sent by the API only when (a) the caller is on the ADMIN_EMAILS
-     *  allowlist AND (b) the deploy has ADMIN_PATH_PREFIX configured.
-     *  Absent for every other caller / configuration. Treat as "no admin
-     *  surface available" when undefined or empty. */
-    admin_path_prefix?: string
-  }
+  // AgentMe is the WIRE shape of GET /auth/me — DERIVED from the OpenAPI
+  // snapshot (WireAuthMe = components['schemas']['AuthMeResponse']). It used to
+  // be hand-typed here; deriving it means an api rename/removal of any /auth/me
+  // field (e.g. dropping `tier`, the login-break class) fails `tsc` right here
+  // at the read sites below. The wire schema marks every field optional (no
+  // `required` array on the response), so the reads below use nullish guards —
+  // the server sends user_id/team_id/email/tier on every real response, but a
+  // partial/older build that omits one must degrade, not throw.
+  type AgentMe = WireAuthMe
   // No try/catch — errors propagate. The previous fixture fallback masked
   // backend outages by serving the `aanya@acme.dev` mock identity, which
   // led to chrome lying ("acme-corp", "aanya@acme.dev") instead of
@@ -277,7 +270,16 @@ export async function fetchMe(): Promise<AuthMeResponse> {
   // Derive a stable team slug from the email's local part — the only
   // human-readable identity we have until a real team table exposes a slug.
   const localPart = me.email?.split('@')[0] ?? ''
-  const slug = localPart.toLowerCase().replace(/[^a-z0-9-]/g, '-') || me.team_id.slice(0, 8)
+  // `?? ''` guards: WireAuthMe marks team_id/user_id/email/tier optional (the
+  // wire schema has no `required` array), so the derived type is `string |
+  // undefined`. Real responses always carry them; an omission degrades to an
+  // empty identity rather than throwing on `.slice` / failing the non-optional
+  // User/DashboardTeam field types. Runtime is unchanged for well-formed payloads.
+  const teamId = me.team_id ?? ''
+  const userId = me.user_id ?? ''
+  const email = me.email ?? ''
+  const tier = (me.tier ?? '') as Tier
+  const slug = localPart.toLowerCase().replace(/[^a-z0-9-]/g, '-') || teamId.slice(0, 8)
   // Stash the admin path prefix in a module-local var so the admin URL
   // builders below can mint `/api/v1/${prefix}/customers/...` requests
   // without forcing every caller to plumb it through manually. The prefix
@@ -285,19 +287,19 @@ export async function fetchMe(): Promise<AuthMeResponse> {
   setAdminPathPrefix(me.admin_path_prefix ?? '')
   return {
     user: {
-      id: me.user_id,
-      email: me.email,
-      team_id: me.team_id,
-      tier: me.tier as any,
+      id: userId,
+      email,
+      team_id: teamId,
+      tier,
       created_at: '',
     },
     team: {
-      id: me.team_id,
+      id: teamId,
       name: localPart || 'workspace',
       slug,
-      owner_id: me.user_id,
+      owner_id: userId,
       member_count: 1,
-      tier: me.tier as any,
+      tier,
       created_at: '',
     },
     experiments: me.experiments,
@@ -610,8 +612,15 @@ export async function inviteMember(body: { email: string; role: string }): Promi
 }
 
 // ─── Resources (LIVE) ───────────────────────────────────────────────────
-type ResourceListResp = { ok: boolean; items: any[]; total: number }
-type ResourceGetResp = { ok: boolean; item: any }
+// Resource wire envelopes — DERIVED from the OpenAPI snapshot. The list
+// envelope is the generated ResourceListResponse; the detail `item` is a
+// WireResourceItem. adaptResource() (below) reads these, so an api rename of
+// e.g. storage_bytes → storageBytes fails `tsc` at the adapter read site.
+// connection_url is NOT on the wire ResourceItem (it comes from the separate
+// /credentials endpoint and is spliced in), so the detail item is widened to
+// allow it.
+type ResourceListResp = WireResourceListResponse
+type ResourceGetResp = { ok?: boolean; item?: WireResourceItem & { connection_url?: string } }
 
 // CREDENTIALED_RESOURCE_TYPES — the resource types whose
 // GET /api/v1/resources/:id/credentials endpoint returns a usable
@@ -634,13 +643,27 @@ export const CREDENTIALED_RESOURCE_TYPES: ReadonlySet<ResourceType> = new Set<Re
   'mongodb',
 ])
 
-function adaptResource(r: any): Resource {
+// adaptResource maps the wire ResourceItem (derived from the OpenAPI snapshot)
+// into the UI's Resource shape. `r` is typed as WireResourceItem plus the two
+// fields the wire schema does NOT carry but the UI splices/derives:
+//   - connection_url: from the separate /credentials endpoint (getResource).
+//   - connections_in_use: not on ResourceItem in the spec today (the schema has
+//     connections_limit but not connections_in_use). Kept readable via the
+//     intersection so the UI's optional field stays populated if/when the api
+//     adds it; until then it's always undefined. (Latent gap, noted in report.)
+// Because `r` is the derived wire type, an api rename of any field consumed
+// below fails `tsc` HERE — that's the gate biting.
+function adaptResource(
+  r: WireResourceItem & { connection_url?: string; connections_in_use?: number },
+): Resource {
   return {
-    id: r.id,
-    token: r.token,
-    resource_type: r.resource_type,
-    tier: r.tier,
-    status: r.status,
+    id: r.id ?? '',
+    // `token` is uuid-typed on the wire; the UI treats it as the opaque
+    // resource token string.
+    token: r.token ?? '',
+    resource_type: (r.resource_type ?? 'postgres') as ResourceType,
+    tier: (r.tier ?? '') as Resource['tier'],
+    status: (r.status ?? '') as Resource['status'],
     name: r.name ?? null,
     env: r.env ?? 'production',
     storage_bytes: r.storage_bytes ?? 0,
@@ -651,7 +674,7 @@ function adaptResource(r: any): Resource {
     cloud_vendor: r.cloud_vendor,
     country_code: r.country_code,
     expires_at: r.expires_at ?? null,
-    created_at: r.created_at,
+    created_at: r.created_at ?? '',
     connection_url: r.connection_url,
   }
 }
@@ -671,7 +694,11 @@ export async function getResource(id: string): Promise<{ ok: true; resource: Res
   // 400 on it (BugBash P3-02). Gate the fetch on resource_type so we
   // don't generate a spurious 400 on every detail-page open.
   let connection_url: string | undefined
-  if (CREDENTIALED_RESOURCE_TYPES.has(r.item?.resource_type)) {
+  // r.item?.resource_type is now `ResourceType | undefined` (derived wire type);
+  // the Set is typed over ResourceType. An undefined type simply isn't a member,
+  // so the guard short-circuits — same runtime behavior, type-clean.
+  const resType = r.item?.resource_type
+  if (resType && CREDENTIALED_RESOURCE_TYPES.has(resType)) {
     try {
       const c = await call<{ connection_url: string }>(`/api/v1/resources/${id}/credentials`)
       connection_url = c.connection_url
@@ -905,49 +932,24 @@ export async function listStacks(): Promise<{ ok: true; items: DashboardStack[];
 // Status mapping: the server emits 'healthy' for a live deploy, which the
 // dashboard's shared StatusPill renders as 'running' (matching stacks).
 // We normalise here so consumer code doesn't need to special-case it.
-type DeploymentRespItem = {
-  id?: string
-  token?: string
-  app_id?: string
-  url?: string
-  port?: number
-  tier?: string
-  status?: string
-  // Server returns env as a map of env_vars (legacy alias). New callers
-  // should also accept env_vars for forward compat with the spec.
+// Deployment wire row — the DOCUMENTED fields are DERIVED from the OpenAPI
+// snapshot (WireDeployItem = components['schemas']['DeployItem']). adaptDeployment
+// (below) reads them, so an api rename of app_id/status/environment/ttl_policy/
+// failure.* fails `tsc` at the adapter site.
+//
+// WireDeployItem types `env` as a string map (the masked env_vars). The
+// adapter, however, historically tolerated `env` being EITHER a map or a
+// string, and reads two UI-side conveniences the wire schema does NOT carry:
+//   - env_vars      — the adapter's preferred name for the env map.
+//   - last_deploy_at — UI alias; adapter falls back to updated_at.
+//   - build_duration_s — reserved; not on the wire yet.
+// Those three are intersected on as optional. The `env` widening keeps the
+// adapter's defensive both-shapes handling. Everything else comes from the spec.
+type DeploymentRespItem = Omit<WireDeployItem, 'env'> & {
   env?: Record<string, string> | string
   env_vars?: Record<string, string>
-  // Env scope (production / staging / dev / ...).
-  environment?: string
-  created_at?: string
-  updated_at?: string
   last_deploy_at?: string
   build_duration_s?: number
-  resource_id?: string
-  name?: string
-  // Track B (private deploys): server flags + IP allow-list. Older API
-  // builds omit these fields entirely — the adapter treats them as
-  // `private=false` and `allowed_ips=[]` so the dashboard never lies about
-  // privacy state when the backend hasn't shipped yet.
-  private?: boolean
-  allowed_ips?: string[]
-  // Wave FIX-J TTL fields (migration 045 + handlers/deploy_ttl.go).
-  ttl_policy?: string
-  expires_at?: string
-  reminders_sent?: number
-  make_permanent_url?: string
-  extend_ttl_url?: string
-  // Phase 0 Failure Autopsy — present only on failed deploys where the
-  // backend has captured diagnostics. Absent on healthy / building / stopped
-  // deploys, and on failed deploys where autopsy is still in flight.
-  failure?: {
-    reason?: string
-    exit_code?: number | null
-    event?: string
-    last_lines?: string[]
-    hint?: string
-    occurred_at?: string
-  }
 }
 
 type DeploymentsListResp = {
@@ -1029,7 +1031,14 @@ function adaptDeployment(d: DeploymentRespItem): DashboardDeployment {
 }
 
 function adaptFailure(
-  raw: DeploymentRespItem['failure'],
+  // LATENT DRIFT (surfaced by the codegen gate): the UI's DeploymentFailure has
+  // `exit_code`, but the wire DeployItem.failure schema does NOT carry it (only
+  // GET /deployments/:id/events does — see CLAUDE.md rule 27). So `exit_code` is
+  // intersected as optional here; at runtime it was always undefined on this
+  // path → coerced to null below, identical to before. Tracked in the report as
+  // a spec/UI gap to reconcile (add exit_code to DeployItem, or drop it from the
+  // detail panel and read it only from the events surface).
+  raw: (WireDeployItem['failure'] & { exit_code?: number | null }) | undefined,
 ): DeploymentFailure | undefined {
   if (!raw) return undefined
   // Both `reason` and `hint` are required for the panel to render
@@ -1753,24 +1762,17 @@ export async function deleteCustomDomain(stackSlug: string, id: string): Promise
 //
 // cancelSubscription — LIVE. POST /api/v1/billing/cancel.
 
-type BillingStateResp = {
-  ok: boolean
-  tier: string
-  subscription_status?: 'none' | 'active' | 'cancelled'
-  next_renewal_at?: string | null
-  amount_inr?: number | null
-  payment_method?: {
-    type: 'card' | 'upi' | 'netbanking' | 'wallet'
-    brand?: string
-    last4?: string
-    vpa?: string
-  } | null
-  billing_email?: string
-  razorpay_subscription_id?: string | null
-  razorpay_customer_id?: string | null
-  // Explicit "is Razorpay configured in this environment" flag. Older API
-  // builds (GET /api/v1/billing) omit it — see mapBillingState for how an
-  // absent value is resolved.
+// Billing wire shape — DERIVED from the OpenAPI snapshot (WireBillingState =
+// components['schemas']['BillingStateResponse']) so an api rename of e.g.
+// `tier` or `subscription_status` fails `tsc` at mapBillingState/fetchBilling.
+//
+// `razorpay_configured` is intersected in: it is NOT in the snapshot schema
+// today (the api returns it on /api/v1/billing but it isn't documented in
+// openapi.go — a latent spec gap, noted in the report). Keeping it as a local
+// intersection preserves the fail-closed default logic in mapBillingState while
+// still deriving every documented field from the spec. When openapi.go adds the
+// field, drop the intersection so it too is gated.
+type BillingStateResp = WireBillingState & {
   razorpay_configured?: boolean
 }
 
@@ -1799,8 +1801,11 @@ function mapBillingState(r: BillingStateResp): BillingDetails {
     // ("contact support to upgrade") beats a button that 502s.
     razorpay_configured: r.razorpay_configured ?? false,
     subscription_status: r.subscription_status,
-    payment_last4: r.payment_method?.last4,
-    payment_network: r.payment_method?.brand,
+    // `?? undefined`: the derived BillingPaymentMethod types last4/brand as
+    // `string | null`, but BillingDetails wants `string | undefined`. Coerce
+    // null → undefined so a "no card on file" payload renders "—" as before.
+    payment_last4: r.payment_method?.last4 ?? undefined,
+    payment_network: r.payment_method?.brand ?? undefined,
     cancel_at_period_end: false,
   }
 }

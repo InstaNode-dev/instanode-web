@@ -59,6 +59,57 @@ src/
 
 ---
 
+## API contract types (OpenAPI codegen — contract-drift gate)
+
+The UI↔API wire contract is no longer hand-mirrored. It is **generated** from the
+api's committed OpenAPI snapshot, so a backend field rename fails `tsc` at PR time
+instead of breaking prod at runtime (the class that broke login).
+Design ref: `docs/ci/01-CI-INTEGRATION-DESIGN.md` (Wave 1).
+
+```
+openapi.snapshot.json        # committed copy, synced from the api repo (byte-identical)
+        │  npm run gen:api-types  (openapi-typescript)
+        ▼
+src/api/generated.ts         # GENERATED — do not hand-edit
+        │  Wire* aliases derive from components['schemas'][...]
+        ▼
+src/api/types.ts             # WireAuthMe / WireResourceItem / WireBillingState / WireDeployItem
+        │  consumed by the adapters
+        ▼
+src/api/index.ts             # fetchMe / listResources / fetchBilling / listDeployments ...
+```
+
+- **Regenerate:** `npm run gen:api-types` (also runs automatically in `prebuild`).
+- **Up-to-date gate:** `npm run gen:api-types:check` fails if `generated.ts` is
+  stale vs the snapshot (runs in CI — `.github/workflows/ci.yml`).
+- **Drift bite:** if the api renames/removes a field, regenerating `generated.ts`
+  changes the derived `Wire*` type and `tsc` (in `npm run gate`) fails at every
+  consumer site using the old field.
+
+### Syncing the snapshot from the api repo
+
+`openapi.snapshot.json` here is a **committed copy** of the api repo's
+`openapi.snapshot.json` (chosen over fetching `https://api.instanode.dev/openapi.json`
+at gen time so CI is deterministic and doesn't depend on prod being up). When the
+api contract changes:
+
+```sh
+cp ../api/openapi.snapshot.json ./openapi.snapshot.json   # re-sync the copy
+npm run gen:api-types                                      # regenerate types
+npm run gate                                               # tsc will red at any UI site using a removed/renamed field
+```
+
+The api side gates the snapshot's faithfulness to its handlers (openapi-snapshot.yml)
+and reds any breaking change at PR time (openapi-breaking.yml, oasdiff). See
+`api/docs/OPENAPI-CONTRACT-GATES.md`.
+
+Conversion is incremental — the highest-value wire shapes (auth/me, resources,
+billing, deployments) derive from `generated.ts` today; see the TODO at the bottom
+of `src/api/types.ts` for the remaining hand-typed wire types and known gate blind
+spots (e.g. `/api/v1/capabilities` has no web consumer).
+
+---
+
 ## Auth Flow
 
 1. User pastes a PAT or completes the email magic-link flow on `LoginPage`.

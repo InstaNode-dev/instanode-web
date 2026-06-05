@@ -40,9 +40,18 @@ jobs:
           cache: 'npm'
 
       - run: npm ci
+      # Wave 1 contract-drift gate (docs/ci/01-CI-INTEGRATION-DESIGN.md):
+      # src/api/generated.ts is openapi-typescript output from the committed
+      # openapi.snapshot.json. Fail the PR if the committed types are stale vs
+      # the snapshot (mirrors how api/ gates openapi.snapshot.json). This keeps
+      # the UI's derived wire types faithful to the api contract, so a backend
+      # field rename fails `tsc` below instead of breaking prod at runtime.
+      - run: npm run gen:api-types:check
       # `npm run build` runs `tsc && vite build && node scripts/prerender.mjs`.
       # The prerender step is part of CI — a local `vite build` alone is NOT a
       # valid gate. `npm run gate` (package.json) runs this exact sequence.
+      # `prebuild` regenerates generated.ts, so the build always reflects the
+      # committed snapshot.
       - run: npm run build
       - run: npm test
 
