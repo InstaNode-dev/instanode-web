@@ -169,33 +169,126 @@ export function mintedSession(): MintedSession | null {
 }
 
 // ── Per-fingerprint bypass for anonymous provisions (ISSUE 1) ────────────────
-// Prod does NOT trust X-Forwarded-For, so the CI runner's many anon provisions
-// all share ONE real fingerprint (SHA256(/24 + ASN), rule 6) and trip the
-// free-tier recycle/dedup gate → 402 free_tier_recycle_requires_claim. The api
-// exposes a real bypass: the X-E2E-Test-Token header (api internal/middleware/
-// fingerprint.go) — a matching token skips the per-fingerprint cap. The token is
-// a CI secret (E2E_TEST_TOKEN); when unset (local dev / un-tokened run) we send
-// no bypass header and rely on X-Forwarded-For varying the fingerprint instead.
+// Prod does NOT trust X-Forwarded-For (ingress-nginx overwrites it with the real
+// client IP), so the CI runner's many anon provisions all collapse onto ONE real
+// fingerprint (SHA256(/24 + ASN), rule 6). That single fingerprint trips the
+// free-tier recycle gate → 402 free_tier_recycle_requires_claim the moment a
+// previous run's anonymous resource has aged out (recycle_seen:<fp> set, no
+// active resource — api internal/handlers/provision_helper.go).
+//
+// The api's REAL bypass (internal/middleware/fingerprint.go): a request bearing
+// a valid X-E2E-Test-Token (matched against the cluster's E2E_TEST_TOKEN secret)
+// may override the fingerprint source IP via the dedicated **X-E2E-Source-IP**
+// header — NOT X-Forwarded-For (which the ingress overwrites). A unique source
+// IP per call yields a fresh fingerprint per provision → no recycle_seen marker
+// → no 402. Sending only X-Forwarded-For (the previous bug) did nothing on prod
+// because the middleware never reads XFF for the override. We now send BOTH the
+// token AND X-E2E-Source-IP so the override actually takes on prod; XFF is kept
+// for staging/local where the proxy IS trusted.
 
-/** The header name the api's fingerprint middleware honours to skip the cap. */
+/** The header name the api's fingerprint middleware honours to accept the bypass token. */
 export const E2E_TEST_TOKEN_HEADER = 'X-E2E-Test-Token'
+/** The header the api's fingerprint middleware reads for the override source IP. */
+export const E2E_SOURCE_IP_HEADER = 'X-E2E-Source-IP'
 
 /**
- * Headers an anonymous provision should carry: a unique X-Forwarded-For (varies
- * the fingerprint where the proxy IS trusted — staging/local) PLUS the
- * X-E2E-Test-Token bypass when E2E_TEST_TOKEN is set (the only thing that gets
- * past the per-fingerprint recycle gate on prod, which ignores X-Forwarded-For).
- * Both are harmless together: the bypass wins on prod, the XFF varies elsewhere.
+ * Headers an anonymous provision should carry. On prod the load-bearing pair is
+ * X-E2E-Test-Token (the bypass token) + X-E2E-Source-IP (a unique override IP →
+ * a fresh fingerprint per call → no recycle gate). X-Forwarded-For is also set
+ * with the same unique IP for staging/local where the proxy is trusted. All are
+ * harmless together: on prod the override wins, elsewhere the XFF varies.
  */
 export function anonProvisionHeaders(extra: Record<string, string> = {}): Record<string, string> {
+  const ip = uniqueIP()
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
-    'X-Forwarded-For': uniqueIP(),
+    'X-Forwarded-For': ip,
     ...extra,
   }
   const token = process.env.E2E_TEST_TOKEN
-  if (token) headers[E2E_TEST_TOKEN_HEADER] = token
+  if (token) {
+    headers[E2E_TEST_TOKEN_HEADER] = token
+    // The override source IP the middleware actually reads (XFF is ignored on
+    // prod). A unique value per call → a fresh fingerprint → no recycle gate.
+    headers[E2E_SOURCE_IP_HEADER] = ip
+  }
   return headers
+}
+
+// ── Authed provision (workflow-minted pro account) ───────────────────────────
+// On a SANCTIONED prod run the workflow mints an is_test_cohort=true PRO account
+// and exports its session JWT (E2E_SESSION_JWT). Provisioning AS that account is
+// the decisive fix for both prod anon failures:
+//   1. No 402: authed provisioning skips the anonymous recycle gate entirely
+//      (the gate runs only on the anon path), and tier=pro has ample headroom.
+//   2. No 401 on reap: the resource is OWNED by the minted team, so the reaper's
+//      authed DELETE /api/v1/resources/:id (with the same bearer) returns 200 —
+//      there is NO unauthed resource-delete on the api, so anon resources could
+//      only ever be TTL-cleaned (the 401 the last run hit).
+// The minted account is reaped wholesale by the workflow teardown (cascade), so
+// every resource it owns is double-covered.
+
+/**
+ * Headers for an AUTHENTICATED provision as the given bearer (the minted pro
+ * account's session JWT). A unique X-Forwarded-For keeps per-call fingerprints
+ * distinct on trusted proxies, but the authed path is not fingerprint-gated.
+ */
+export function authedProvisionHeaders(
+  token: string,
+  extra: Record<string, string> = {},
+): Record<string, string> {
+  return {
+    'Content-Type': 'application/json',
+    Authorization: `Bearer ${token}`,
+    'X-Forwarded-For': uniqueIP(),
+    ...extra,
+  }
+}
+
+/**
+ * The provision identity a LIVE spec should use for a resource it will reap via
+ * the authed DELETE surface. When a minted session exists (sanctioned prod run)
+ * we provision + reap AS that pro account (no 402, authed reap 200). Otherwise
+ * (staging/local) we use the anonymous path with the fingerprint bypass, and the
+ * resource is reaped by TTL / the un-authed staging delete path.
+ *
+ *   - `headers`     : the provision request headers (authed or anon-with-bypass).
+ *   - `bearer`      : the token to record on the ledger so the reaper's DELETE is
+ *                     authorized (undefined on the anon path).
+ *   - `expectTier`  : the tier the provision response will echo ('pro' authed,
+ *                     'anonymous' otherwise) — specs assert against this.
+ *   - `authed`      : true when provisioning as the minted account.
+ */
+export interface ProvisionIdentity {
+  headers: Record<string, string>
+  bearer?: string
+  expectTier: string
+  authed: boolean
+}
+
+/** Tier echoed by an anonymous provision. */
+export const ANON_TIER = 'anonymous'
+
+/**
+ * Resolve the provision identity for a LIVE resource spec. Prefers the minted
+ * pro account (authed) when E2E_SESSION_JWT is set; else the anon bypass path.
+ */
+export function provisionIdentity(extra: Record<string, string> = {}): ProvisionIdentity {
+  const minted = mintedSession()
+  if (minted?.token) {
+    return {
+      headers: authedProvisionHeaders(minted.token, extra),
+      bearer: minted.token,
+      expectTier: minted.tier || 'pro',
+      authed: true,
+    }
+  }
+  return {
+    headers: anonProvisionHeaders(extra),
+    bearer: undefined,
+    expectTier: ANON_TIER,
+    authed: false,
+  }
 }
 
 // Unique source IP per call (varies the fingerprint where the proxy is trusted).

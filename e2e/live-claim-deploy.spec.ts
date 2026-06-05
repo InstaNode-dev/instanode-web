@@ -59,6 +59,7 @@ import {
   isCohortBranded,
   assertSafeApiTarget,
   anonProvisionHeaders,
+  mintedSession,
 } from './cohort'
 import {
   recordEntity,
@@ -478,31 +479,50 @@ test.describe('LIVE — W3 claim/conversion + deploy-lifecycle + env-switcher (c
   // shipped 2026-05-30, #200) → DELETE → 404 gone. That is the user-visible
   // integration boundary; the build-to-live leg is exercised by /instant-e2e
   // and the per-deploy synthetic, not here.
-  test.describe('deploy lifecycle — create(202) → events surface → delete → gone [STAGING-ONLY]', () => {
+  test.describe('deploy lifecycle — create(202) → events surface → delete → gone', () => {
     test('POST /deploy/new accepted → events timeline → DELETE → gone', async ({ request }) => {
-      const anon = await provisionAnonCache(request)
-      const team = await claim(request, anon.upgradeJWT)
+      // Resolve a team with deployment headroom WITHOUT crossing a billing path:
+      //   - Prod (sanctioned run): the workflow-minted account is already PRO
+      //     (deployments_apps=10), so we deploy AS it directly — no claim, no
+      //     dev-only set-tier. This is the brief's "use the minted pro account".
+      //   - Staging/local: the Brevo-free claim mints a `free` team (0 deploy
+      //     headroom → 402), so we elevate it via the DEV-ONLY set-tier endpoint.
+      //     If that endpoint 404s AND there is no minted session, we skip loudly
+      //     (never 402-wall or charge).
+      const minted = mintedSession()
+      let deployBearer: string
+      let baseResource: { token: string; bearer: string } | null = null
 
-      // Elevate the free team to a deployable tier via the dev-only endpoint.
-      // 404 ⇒ not a dev/staging stack ⇒ skip loudly (never 402-wall or charge).
-      const setTier = await request.fetch(`${API_URL}${SET_TIER_PATH}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        data: JSON.stringify({ team_id: team.teamID, tier: DEPLOY_TIER }),
-        failOnStatusCode: false,
-      })
-      test.skip(
-        setTier.status() === STATUS_NOT_FOUND,
-        `${SET_TIER_PATH} returned 404 — this is a prod stack (dev-only endpoint not registered). ` +
-          `The deploy-lifecycle leg is STAGING-ONLY: a free team can't deploy (402) and we must ` +
-          `never cross a real billing path to elevate it. Reports skipped. Run against a ` +
-          `dev/staging api (ENVIRONMENT=development) to exercise it.`,
-      )
-      expect(
-        setTier.status(),
-        `${SET_TIER_PATH} should return ${STATUS_OK} on a dev/staging stack; got ${setTier.status()}. ` +
-          `Body: ${await setTier.text().catch(() => '<unreadable>')}`,
-      ).toBe(STATUS_OK)
+      if (minted?.token) {
+        // Deploy as the minted pro account — has deployment headroom already.
+        deployBearer = minted.token
+      } else {
+        const anon = await provisionAnonCache(request)
+        const team = await claim(request, anon.upgradeJWT)
+        baseResource = { token: anon.token, bearer: team.sessionToken }
+
+        // Elevate the free team to a deployable tier via the dev-only endpoint.
+        // 404 ⇒ not a dev/staging stack AND no minted account ⇒ skip loudly.
+        const setTier = await request.fetch(`${API_URL}${SET_TIER_PATH}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          data: JSON.stringify({ team_id: team.teamID, tier: DEPLOY_TIER }),
+          failOnStatusCode: false,
+        })
+        test.skip(
+          setTier.status() === STATUS_NOT_FOUND,
+          `${SET_TIER_PATH} returned 404 — this is a prod stack (dev-only endpoint not registered) ` +
+            `and no minted pro account is present. The deploy leg needs deployment headroom and we ` +
+            `must never cross a real billing path to elevate a free team. Reports skipped. Run ` +
+            `against a dev/staging api (ENVIRONMENT=development) or a sanctioned minted-account run.`,
+        )
+        expect(
+          setTier.status(),
+          `${SET_TIER_PATH} should return ${STATUS_OK} on a dev/staging stack; got ${setTier.status()}. ` +
+            `Body: ${await setTier.text().catch(() => '<unreadable>')}`,
+        ).toBe(STATUS_OK)
+        deployBearer = team.sessionToken
+      }
 
       // ── Create: a minimal tarball deploy. We do NOT wait for the Kaniko build
       //    to go live (deferred) — only the accepted contract + events surface +
@@ -523,7 +543,7 @@ test.describe('LIVE — W3 claim/conversion + deploy-lifecycle + env-switcher (c
       }
       const create = await request.fetch(`${API_URL}/deploy/new`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${team.sessionToken}` },
+        headers: { Authorization: `Bearer ${deployBearer}` },
         multipart: form,
         failOnStatusCode: false,
       })
@@ -552,7 +572,7 @@ test.describe('LIVE — W3 claim/conversion + deploy-lifecycle + env-switcher (c
         kind: 'deployment',
         id: appID,
         apiUrl: API_URL,
-        token: team.sessionToken,
+        token: deployBearer,
         note: `W3 deploy ${deployName}`,
       })
       // Accepted-contract assertions: a real building deployment in the env we
@@ -584,7 +604,7 @@ test.describe('LIVE — W3 claim/conversion + deploy-lifecycle + env-switcher (c
       //    surface EXISTS and is team-scoped, not that a specific event landed. ─
       const events = await request.fetch(
         `${API_URL}/api/v1/deployments/${encodeURIComponent(appID)}/events`,
-        { method: 'GET', headers: { Authorization: `Bearer ${team.sessionToken}` }, failOnStatusCode: false },
+        { method: 'GET', headers: { Authorization: `Bearer ${deployBearer}` }, failOnStatusCode: false },
       )
       expect(
         events.status(),
@@ -617,7 +637,7 @@ test.describe('LIVE — W3 claim/conversion + deploy-lifecycle + env-switcher (c
       //    so the dashboard would correctly show it as removed. ────────────────
       const del = await request.fetch(
         `${API_URL}/api/v1/deployments/${encodeURIComponent(appID)}`,
-        { method: 'DELETE', headers: { Authorization: `Bearer ${team.sessionToken}` }, failOnStatusCode: false },
+        { method: 'DELETE', headers: { Authorization: `Bearer ${deployBearer}` }, failOnStatusCode: false },
       )
       expect(
         del.status() >= 200 && del.status() < 300,
@@ -632,7 +652,7 @@ test.describe('LIVE — W3 claim/conversion + deploy-lifecycle + env-switcher (c
       // load-bearing assertion is that the team can no longer act on it as live.
       const afterDelete = await request.fetch(
         `${API_URL}/api/v1/deployments/${encodeURIComponent(appID)}/events`,
-        { method: 'GET', headers: { Authorization: `Bearer ${team.sessionToken}` }, failOnStatusCode: false },
+        { method: 'GET', headers: { Authorization: `Bearer ${deployBearer}` }, failOnStatusCode: false },
       )
       expect(
         [STATUS_OK, STATUS_NOT_FOUND].includes(afterDelete.status()),
@@ -641,10 +661,22 @@ test.describe('LIVE — W3 claim/conversion + deploy-lifecycle + env-switcher (c
       ).toBe(true)
 
       // Reap is now idempotent (404 == alreadyGone). Clears the ledger.
-      const result = await reapEntities(request, [
-        { kind: 'deployment', id: appID, apiUrl: API_URL, token: team.sessionToken, note: 'W3 deploy reap', recordedAt: new Date().toISOString() },
-        { kind: 'resource', id: anon.token, apiUrl: API_URL, token: team.sessionToken, note: 'W3 deploy base resource', recordedAt: new Date().toISOString() },
-      ])
+      const reapTargets = [
+        { kind: 'deployment' as const, id: appID, apiUrl: API_URL, token: deployBearer, note: 'W3 deploy reap', recordedAt: new Date().toISOString() },
+      ]
+      // The staging path created an anon base resource (claimed → team-owned);
+      // reap it too. The minted-account path created no base resource.
+      if (baseResource) {
+        reapTargets.push({
+          kind: 'resource' as const,
+          id: baseResource.token,
+          apiUrl: API_URL,
+          token: baseResource.bearer,
+          note: 'W3 deploy base resource',
+          recordedAt: new Date().toISOString(),
+        })
+      }
+      const result = await reapEntities(request, reapTargets)
       expect(result.failed.length, `reap failed: ${JSON.stringify(result.failed)}`).toBe(0)
       clearLedger()
     })

@@ -42,7 +42,7 @@
 
 import { expect, test, type APIRequestContext } from '@playwright/test'
 
-import { cohortName, COHORT_MARKER, assertSafeApiTarget, anonProvisionHeaders } from './cohort'
+import { cohortName, COHORT_MARKER, assertSafeApiTarget, provisionIdentity } from './cohort'
 import {
   recordEntity,
   loadLedger,
@@ -183,15 +183,19 @@ test.describe('LIVE — every anonymous provision flow → backend-assert → re
     }) => {
       const name = cohortName(`anon-${flow.label}`)
 
-      // ── Create: real anonymous provision against the live api ──────────────
-      // anonProvisionHeaders() adds the X-E2E-Test-Token fingerprint-bypass when
-      // E2E_TEST_TOKEN is set (the only thing that gets past prod's per-
-      // fingerprint recycle gate, which ignores X-Forwarded-For) plus a unique
-      // XFF for staging/local. A cohort name is always sent: /vector & /db
-      // REQUIRE a name (CLAUDE.md) and it is harmless (cohort-tagging) on the rest.
+      // ── Create: real provision against the live api ────────────────────────
+      // On a sanctioned prod run (E2E_SESSION_JWT set) provisionIdentity()
+      // provisions AS the minted PRO account: authed provisioning skips the
+      // anonymous recycle gate (no 402) and the resource is team-owned so the
+      // reaper's authed DELETE returns 200 (no 401). Otherwise (staging/local)
+      // it uses the anon path with the X-E2E-Test-Token + X-E2E-Source-IP
+      // fingerprint bypass (a fresh fingerprint per call → no recycle gate).
+      // A cohort name is always sent: /vector & /db REQUIRE a name (CLAUDE.md)
+      // and it is harmless (cohort-tagging) on the rest.
+      const id = provisionIdentity()
       const resp = await request.fetch(`${API_URL}${flow.path}`, {
         method: 'POST',
-        headers: anonProvisionHeaders(),
+        headers: id.headers,
         data: JSON.stringify({ name }),
         failOnStatusCode: false,
       })
@@ -217,6 +221,10 @@ test.describe('LIVE — every anonymous provision flow → backend-assert → re
         kind: 'resource',
         id: token,
         apiUrl: API_URL,
+        // Record the provision bearer (minted pro session on prod) so the
+        // reaper's authed DELETE is authorized → 200, not 401. Undefined on the
+        // anon path (resource is TTL/staging-reaped).
+        token: id.bearer,
         note: `${flow.label} ${name}`,
       }
       recordEntity(entity)
@@ -236,7 +244,11 @@ test.describe('LIVE — every anonymous provision flow → backend-assert → re
       expect(body.ok, `${flow.label}/new ok flag`).toBe(true)
       expect(token, `${flow.path} must return a resource token`).toBeTruthy()
       expect(body.id, `${flow.path} must return a resource id`).toBeTruthy()
-      expect(body.tier, `anon ${flow.label} provision is tier=anonymous`).toBe('anonymous')
+      // Tier reflects the provision identity: 'pro' as the minted account
+      // (sanctioned prod run), 'anonymous' on the anon path (staging/local).
+      expect(body.tier, `${flow.label} provision tier should be '${id.expectTier}'`).toBe(
+        id.expectTier,
+      )
       // env is echoed on every provision (rule 11 — default 'development').
       expect(body.env, `${flow.path} must echo the resolved env (rule 11)`).toBeTruthy()
       // The usable connection/URL — proves a real backend minted a live endpoint.

@@ -23,7 +23,7 @@
 
 import { expect, test, type APIRequestContext } from '@playwright/test'
 
-import { cohortName, COHORT_MARKER, assertSafeApiTarget, anonProvisionHeaders } from './cohort'
+import { cohortName, COHORT_MARKER, assertSafeApiTarget, provisionIdentity } from './cohort'
 import {
   recordEntity,
   loadLedger,
@@ -93,13 +93,17 @@ test.describe('LIVE smoke — anonymous provision → backend-assert → reap', 
   }) => {
     const name = cohortName('smoke-db')
 
-    // ── Create: real anonymous Postgres against the live api ──────────────
-    // anonProvisionHeaders() carries the X-E2E-Test-Token fingerprint-bypass when
-    // E2E_TEST_TOKEN is set (prod ignores X-Forwarded-For) + a unique XFF
-    // elsewhere. /db/new REQUIRES a name (CLAUDE.md) — already sent below.
+    // ── Create: real Postgres against the live api ────────────────────────
+    // On a sanctioned prod run (E2E_SESSION_JWT set) we provision AS the minted
+    // PRO account — authed provisioning skips the anonymous recycle gate (no
+    // 402) and the resource is team-owned so the reaper's authed DELETE returns
+    // 200 (no 401). Otherwise (staging/local) we use the anon path with the
+    // X-E2E-Test-Token + X-E2E-Source-IP fingerprint bypass. /db/new REQUIRES a
+    // name (CLAUDE.md) — sent below in both modes.
+    const id = provisionIdentity()
     const resp = await request.fetch(`${API_URL}/db/new`, {
       method: 'POST',
-      headers: anonProvisionHeaders(),
+      headers: id.headers,
       data: JSON.stringify({ name }),
       failOnStatusCode: false,
     })
@@ -124,6 +128,10 @@ test.describe('LIVE smoke — anonymous provision → backend-assert → reap', 
       kind: 'resource',
       id: db.token,
       apiUrl: API_URL,
+      // Record the provision bearer (minted pro session on prod) so the reaper's
+      // authed DELETE /api/v1/resources/:id is authorized → 200, not 401. On the
+      // anon path this is undefined and the resource is TTL/staging-reaped.
+      token: id.bearer,
       note: `postgres ${name}`,
     }
     recordEntity(entity)
@@ -132,7 +140,9 @@ test.describe('LIVE smoke — anonymous provision → backend-assert → reap', 
     expect(db.ok, 'db/new ok flag').toBe(true)
     expect(db.token, 'db/new must return a resource token').toBeTruthy()
     expect(db.id, 'db/new must return a resource id').toBeTruthy()
-    expect(db.tier, 'anon provision is tier=anonymous').toBe('anonymous')
+    // Tier reflects the provision identity: 'pro' when provisioned as the minted
+    // account (sanctioned prod run), 'anonymous' on the anon path (staging/local).
+    expect(db.tier, `provision tier should be '${id.expectTier}'`).toBe(id.expectTier)
     expect(
       db.connection_url,
       'db/new must return a usable postgres connection_url (proves a real DB was created)',
