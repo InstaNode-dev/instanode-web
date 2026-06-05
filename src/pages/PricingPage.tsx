@@ -85,9 +85,11 @@ const TIERS: {
     ctaHrefYearly: '/app/checkout?plan=pro&frequency=yearly',
     highlighted: true,
   },
-  // Team tier — $199/mo, unlimited across the board; the upsell vs Pro is
-  // dedicated infra + 90-day backup retention + SLA + RBAC + SAML. Per
-  // api/plans.yaml:375 ($199/mo, $1990/yr).
+  // Team tier — $199/mo, high finite limits across the board (NOT unlimited
+  // as of the 2026-06-05 strict-margin redesign); the upsell vs Pro is
+  // dedicated infra + 90-day backup retention + SLA + RBAC + SAML + far
+  // higher caps. Anyone needing more than the finite Team caps is routed to
+  // Enterprise (contact sales). Per api/plans.yaml ($199/mo, $1990/yr).
   {
     key: 'team',
     name: 'Team',
@@ -119,42 +121,44 @@ type Cell =
 // lock-step with the TIERS array above.
 type Row = { label: string; sub?: string; values: [Cell, Cell, Cell, Cell] }
 
-// UNLIMITED — Team-tier marker. plans.yaml uses -1 sentinel for "no cap"
-// on every Team limit; we render this as the visual "unlimited" cell.
-// Kept as its own helper so a future redesign can swap in a richer
-// visualisation (e.g. lightning-bolt icon) without rewriting every row.
-const UNLIMITED: Cell = 'unlimited'
+// strict-80% margin redesign (2026-06-05): Team is no longer "unlimited" —
+// every Team limit is now a finite plans.yaml cap rendered directly in the
+// Team column below. The former `UNLIMITED` cell helper was removed; anyone
+// needing MORE than the finite Team caps is routed to Enterprise (contact
+// sales), surfaced in the Team tier description + the section copy.
 
 // Each row has 4 cells: [Anonymous, Hobby, Pro, Team]. Numbers come from
 // api/plans.yaml. 2026-05-15: Hobby Plus column removed (the tier exists
 // for upsell flows but is not part of the public ladder); Pro storage
 // bumped per PRICING-AUDIT-2026-05-15.md (Postgres 5→10 GB, Redis
-// 256→512 MB, Mongo 2→5 GB, object 10→50 GB). 2026-05-20: Team tier
-// launched — every limit -1 in plans.yaml becomes 'unlimited' here.
+// 256→512 MB, Mongo 2→5 GB, object 10→50 GB).
+// strict-80% margin redesign (2026-06-05): every Team -1 ("unlimited")
+// replaced with the finite plans.yaml cap (Postgres 50 GB / 100 conn,
+// Redis 1.5 GB, Mongo 40 GB / 50 conn, Queue 40 GB, Vector 30 GB, Storage
+// 300 GB, Webhooks 100k, Deploy apps 100, Vault 1000). Pro queue trimmed
+// 10 GB → 5 GB in the same pass. Above Team = Enterprise (contact sales).
 const ROWS: Row[] = [
-  { label: 'Postgres', values: ['10 MB / 2 conn / 24h TTL', '1 GB / 8 conn',     '10 GB / 20 conn', UNLIMITED] },
-  { label: 'Redis',    values: ['5 MB / 24h TTL',           '50 MB',             '512 MB',          UNLIMITED] },
-  { label: 'MongoDB',  values: ['5 MB / 2 conn / 24h TTL',  '100 MB / 5 conn',   '5 GB / 20 conn',  UNLIMITED] },
+  { label: 'Postgres', values: ['10 MB / 2 conn / 24h TTL', '1 GB / 8 conn',     '10 GB / 20 conn', '50 GB / 100 conn'] },
+  { label: 'Redis',    values: ['5 MB / 24h TTL',           '50 MB',             '512 MB',          '1.5 GB'] },
+  { label: 'MongoDB',  values: ['5 MB / 2 conn / 24h TTL',  '100 MB / 5 conn',   '5 GB / 20 conn',  '40 GB / 50 conn'] },
   // FIX-G (2026-05-14): the column used to advertise "1 000 / 5 000 / 100k
   // msg/d" but there's no backing queue_messages_per_day field on the
-  // plans.yaml side — quota enforcement is on queue_storage_mb. Shipping
-  // a per-day-msg counter is real scope and not in flight, so the copy
-  // moves to the field we actually enforce. Numbers mirror plans.yaml
-  // queue_storage_mb (anonymous=1024, hobby=5120, pro=10240).
-  { label: 'Queue',    sub: 'NATS storage', values: ['1 GB / 24h TTL', '5 GB', '10 GB', UNLIMITED] },
-  // Vector — added 2026-05-20 to surface /vector/new alongside the other
-  // services. plans.yaml vector_storage_mb: anon=10, hobby=500, pro=10240,
-  // team=-1 (unlimited).
-  { label: 'Vector',   sub: 'pgvector', values: ['10 MB / 24h TTL', '500 MB', '10 GB', UNLIMITED] },
+  // plans.yaml side — quota enforcement is on queue_storage_mb. Numbers
+  // mirror plans.yaml queue_storage_mb (anon=64 MB, hobby=2 GB, pro=5 GB,
+  // team=40 GB) after the 2026-06-05 strict-margin trim.
+  { label: 'Queue',    sub: 'NATS storage', values: ['64 MB / 24h TTL', '2 GB', '5 GB', '40 GB'] },
+  // Vector — plans.yaml vector_storage_mb: anon=10 MB, hobby=500 MB,
+  // pro=10 GB, team=30 GB (strict-margin 2026-06-05).
+  { label: 'Vector',   sub: 'pgvector', values: ['10 MB / 24h TTL', '500 MB', '10 GB', '30 GB'] },
   // Anonymous storage: plans.yaml storage_storage_mb=10 (anonymous tier).
   // PB04 P1 (2026-05-21): cell used to render '—' which contradicted the
   // shipped backend — anonymous /storage/new returns a real 10 MB bucket.
-  { label: 'Storage',  values: ['10 MB / 24h TTL',              '512 MB',           '50 GB',          UNLIMITED] },
-  { label: 'Webhook stored', values: ['100',                   '1 000',            '10k',            UNLIMITED] },
+  { label: 'Storage',  values: ['10 MB / 24h TTL',              '512 MB',           '50 GB',          '300 GB'] },
+  { label: 'Webhook stored', values: ['100',                   '1 000',            '10k',            '100k'] },
   // 2026-05-20: dropped "small / medium" pod-size adjectives — there is no
   // deployment_size field on api/internal/handlers/deploy.go. Numbers map
-  // to plans.yaml deployments_apps (hobby=1, pro=10, team=-1 → unlimited).
-  { label: 'Deploy apps', values: [{ mark: 'dash' },           '1',                '10',             UNLIMITED] },
+  // to plans.yaml deployments_apps (hobby=1, pro=10, team=100 finite).
+  { label: 'Deploy apps', values: [{ mark: 'dash' },           '1',                '10',             '100'] },
   { label: 'Domains',  values: [{ mark: 'dash' }, '*.deployment.instanode.dev', 'custom domain', '50 custom domains'] },
   // Multi-env workflows (stack promotion + vault copy across envs) is a
   // shipped Pro-tier feature: POST /api/v1/stacks/:slug/promote and
@@ -162,7 +166,7 @@ const ROWS: Row[] = [
   // single-env (production only).
   { label: 'Multi-env workflows', sub: 'stack promotion + vault copy', values: [{ mark: 'dash' }, { mark: 'dash' }, 'dev / staging / prod', 'dev / staging / prod'] },
   { label: 'RBAC + audit', values: [{ mark: 'dash' }, { mark: 'dash' }, { mark: 'dash' }, { mark: 'check' }] },
-  { label: 'Vault entries', values: [{ mark: 'dash' }, '20', '200', UNLIMITED] },
+  { label: 'Vault entries', values: [{ mark: 'dash' }, '20', '200', '1 000'] },
   { label: 'Vault envs',    values: [{ mark: 'dash' }, 'production only', 'multi-env', 'multi-env'] },
   { label: 'Backups',       values: [{ mark: 'dash' }, '7-day · no restore', '30-day · 1-click restore', '90-day · self-serve restore'] },
   // SSO/SAML + SLA have no backend yet — shown as not-yet-available everywhere
@@ -467,9 +471,10 @@ export function PricingPage() {
             "outgrew Hobby's Mongo" step.
           </li>
           <li data-testid="intermediate-tier-growth">
-            <strong>Growth · $99/mo.</strong> Unlimited MongoDB, unlimited webhooks, 1 GB Redis,
-            20 GB Postgres. Pro-tier supporting services without committing to Pro's deployment
-            ladder. Yearly billing not yet offered on this tier.
+            <strong>Growth · $99/mo.</strong> 20 GB MongoDB, 100k webhook receivers, 1 GB Redis,
+            20 GB Postgres, 20 GB queue, 150 GB object storage. Pro-tier supporting services
+            without committing to Pro's deployment ladder. Yearly billing not yet offered on
+            this tier.
           </li>
         </ul>
       </section>

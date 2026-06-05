@@ -61,7 +61,7 @@ Pick a descriptive name per resource (e.g. `"prod-db"`, `"sessions-cache"`, `"ev
 - Postgres: 10 MB storage, 2 simultaneous connections.
 - Redis: 5 MB total.
 - MongoDB: 5 MB storage, 2 connections per token (shared pod cap up to 20 across all anonymous tokens).
-- NATS: 1024 MB JetStream storage.
+- NATS: 64 MB JetStream storage.
 - S3-compatible storage: 10 MB bucket prefix.
 - Webhook: keeps last 100 received payloads.
 - Deploy: not available on anonymous tier (requires Hobby or above — plans.yaml deployments_apps=0 for anonymous).
@@ -100,7 +100,7 @@ on `/api/v1/capabilities` for agent introspection.
 
 > **Upgrading auto-promotes in-flight deployment TTLs.** When a team upgrades to any paid tier (Hobby / Hobby Plus / Pro / Growth / Team), the Razorpay subscription.charged webhook flips the team's `default_deployment_ttl_policy` from `auto_24h` to `permanent` (so every future `POST /deploy/new` defaults to no TTL) AND promotes every existing `auto_24h` non-terminal deploy to permanent (clearing `expires_at`). Per-deploy `ttl_policy='custom'` and `ttl_policy='permanent'` rows are never touched — only the `auto_24h` class is rolled forward. To restore the 24h-default behaviour after an upgrade, `PATCH /api/v1/team/settings {"default_deployment_ttl_policy":"auto_24h"}`.
 - **Pro**: $49/mo. 10 GB Postgres, 512 MB Redis, 5 GB Mongo, 50 GB storage, 10 apps.
-- **Team**: available soon — not yet self-serve. Planned at $199/mo with unlimited everything (Postgres / Redis / Mongo / queues / storage / deployments / vault entries), 50 custom domains, 90-day backups with self-serve restore, RBAC + audit log; SSO/SAML and a 99.9% SLA are also planned. Team cannot be purchased or claimed today — contact support@instanode.dev for onboarding.
+- **Team**: available soon — not yet self-serve. Planned at $199/mo with high finite limits (50 GB Postgres, 1.5 GB Redis, 40 GB Mongo, 40 GB queues, 300 GB storage, 30 GB vector, 100 deployments, 1000 vault entries, 100k webhooks), 50 custom domains, 90-day backups with self-serve restore, RBAC + audit log; SSO/SAML and a 99.9% SLA are also planned. Capacity beyond these caps (or dedicated/isolated infra, multi-region, or compliance such as SOC2/BAA/SSO/SLA/DPA) is Enterprise — contact sales. Team cannot be purchased or claimed today — contact support@instanode.dev for onboarding.
 
 ## Conventions an LLM should follow when scripting against the platform
 

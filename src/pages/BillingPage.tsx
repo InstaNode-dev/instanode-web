@@ -119,22 +119,24 @@ const LIMITS: Record<string, { label: string; limits: PlanLimits; nextTier?: Tie
   },
   // D5 (2026-05-18): growth row was missing — a growth-tier team fell
   // through to `LIMITS.hobby`, painting red over-quota bars on a plan they
-  // were well within. Numbers mirror api/plans.yaml growth: postgres 20480
-  // MB, redis 1024 MB, mongodb / webhooks unlimited (-1 in plans.yaml →
-  // Infinity here), 5 deployments, 10 team_members.
+  // were well within. strict-80% margin redesign (2026-06-05): growth's
+  // formerly-unlimited (-1) mongodb/webhooks are now finite; deployments
+  // corrected 5 → 50. Numbers mirror api/plans.yaml growth.
   growth: {
     label: 'Growth',
     nextTier: 'team',
     limits: {
-      postgres_mb: 20480, redis_mb: 1024, mongodb_mb: Infinity,
-      deployments: 5, webhooks: Infinity, team_seats: 10,
+      postgres_mb: 20480, redis_mb: 1024, mongodb_mb: 20480,
+      deployments: 50, webhooks: 100000, team_seats: 10,
     },
   },
+  // strict-80% margin redesign (2026-06-05): every Team limit is now finite
+  // (was Infinity, mirroring the retired -1 sentinel). Mirrors api/plans.yaml.
   team: {
     label: 'Team',
     limits: {
-      postgres_mb: Infinity, redis_mb: Infinity, mongodb_mb: Infinity,
-      deployments: Infinity, webhooks: Infinity, team_seats: Infinity,
+      postgres_mb: 51200, redis_mb: 1536, mongodb_mb: 40960,
+      deployments: 100, webhooks: 100000, team_seats: 25,
     },
   },
 }
