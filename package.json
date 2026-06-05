@@ -5,9 +5,11 @@
   "type": "module",
   "scripts": {
     "fetch-content": "node scripts/fetch-content.mjs",
+    "gen:api-types": "openapi-typescript ./openapi.snapshot.json -o ./src/api/generated.ts",
+    "gen:api-types:check": "node scripts/check-api-types.mjs",
     "predev": "node scripts/fetch-content.mjs",
     "dev": "vite",
-    "prebuild": "node scripts/fetch-content.mjs",
+    "prebuild": "node scripts/fetch-content.mjs && npm run gen:api-types",
     "build": "tsc && vite build && node scripts/prerender.mjs",
     "preview": "vite preview",
     "test": "vitest run",
@@ -39,10 +41,17 @@
     "@vitejs/plugin-react": "^6.0.2",
     "@vitest/coverage-v8": "^4.1.8",
     "jsdom": "^29.1.1",
+    "openapi-typescript": "^7.13.0",
     "size-limit": "^12.1.0",
     "typescript": "^6.0.3",
     "vite": "^8.0.16",
     "vitest": "^4.1.7"
+  },
+  "overridesComment": "openapi-typescript@7 peer-requires typescript@^5; this repo is on TS 6 and the codegen works fine with it. The override below satisfies that peer with the repo's own typescript so plain `npm ci` resolves WITHOUT --legacy-peer-deps (which would otherwise drop the auto-installed @testing-library/dom peer and break the test type surface). Scoped to the openapi-typescript subtree only.",
+  "overrides": {
+    "openapi-typescript": {
+      "typescript": "$typescript"
+    }
   },
   "size-limit": [
     {

@@ -958,6 +958,31 @@ describe('listResources()', () => {
     const r = await listResources()
     expect(r.total).toBe(2)
   })
+
+  // Wave 1 (contract-drift gate): adaptResource now derives its param type from
+  // the wire ResourceItem (generated.ts), where EVERY field is optional. This
+  // exercises the `?? ''` / default fallbacks for id/token/resource_type/tier/
+  // status/created_at so a degraded/partial payload (older or partial-outage
+  // API build) produces a safe Resource rather than undefineds leaking into the
+  // UI. Pins the fallback behavior the codegen change introduced.
+  it('fills safe defaults when a wire item omits required-looking fields', async () => {
+    const m = installFetch()
+    // A wire item with NONE of id/token/resource_type/tier/status/created_at —
+    // every value comes from a fallback.
+    m.mockResolvedValueOnce(jsonResponse({ ok: true, total: 1, items: [{}] }))
+    const r = await listResources()
+    expect(r.ok).toBe(true)
+    const item = r.items[0]
+    expect(item.id).toBe('')
+    expect(item.token).toBe('')
+    expect(item.resource_type).toBe('postgres') // default classification
+    expect(item.tier).toBe('')
+    expect(item.status).toBe('')
+    expect(item.created_at).toBe('')
+    expect(item.env).toBe('production')
+    expect(item.storage_bytes).toBe(0)
+    expect(item.storage_exceeded).toBe(false)
+  })
 })
 
 describe('deleteResource()', () => {
