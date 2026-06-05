@@ -53,7 +53,6 @@ import { gzipSync } from 'node:zlib'
 import { expect, test, type APIRequestContext, type APIResponse } from '@playwright/test'
 
 import {
-  cohortEmail,
   cohortName,
   COHORT_MARKER,
   isCohortBranded,
