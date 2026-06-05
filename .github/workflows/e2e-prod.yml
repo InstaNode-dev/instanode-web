@@ -212,3 +212,10 @@ jobs:
           result: ${{ job.status == 'success' && 'pass' || 'fail' }}
           suite: e2e-prod
           failed-step: ${{ job.status != 'success' && 'live-prod E2E journeys / mint / reap' || '' }}
+          repo: ${{ github.repository }}
+          workflow: ${{ github.workflow }}
+          branch: ${{ github.ref_name }}
+          commit-sha: ${{ github.sha }}
+          log-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          event-name: ${{ github.event_name }}
+          actor: ${{ github.actor }}

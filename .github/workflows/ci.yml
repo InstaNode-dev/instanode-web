@@ -69,6 +69,13 @@ jobs:
           suite: build-and-test
           pr-number: ${{ github.event.pull_request.number }}
           failed-step: ${{ job.status != 'success' && 'gen:api-types:check / build (tsc+vite+prerender) / vitest' || '' }}
+          repo: ${{ github.repository }}
+          workflow: ${{ github.workflow }}
+          branch: ${{ github.ref_name }}
+          commit-sha: ${{ github.sha }}
+          log-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          event-name: ${{ github.event_name }}
+          actor: ${{ github.actor }}
 
   playwright:
     runs-on: ubuntu-latest
@@ -97,3 +104,10 @@ jobs:
           suite: playwright
           pr-number: ${{ github.event.pull_request.number }}
           failed-step: ${{ job.status != 'success' && 'playwright (mocked, chromium)' || '' }}
+          repo: ${{ github.repository }}
+          workflow: ${{ github.workflow }}
+          branch: ${{ github.ref_name }}
+          commit-sha: ${{ github.sha }}
+          log-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          event-name: ${{ github.event_name }}
+          actor: ${{ github.actor }}

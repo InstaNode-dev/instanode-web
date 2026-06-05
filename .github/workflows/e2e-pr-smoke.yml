@@ -191,3 +191,10 @@ jobs:
           suite: pr-smoke
           pr-number: ${{ github.event.pull_request.number }}
           failed-step: ${{ job.status != 'success' && 'real-backend UI @pr-smoke journeys / mint / reap' || '' }}
+          repo: ${{ github.repository }}
+          workflow: ${{ github.workflow }}
+          branch: ${{ github.ref_name }}
+          commit-sha: ${{ github.sha }}
+          log-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          event-name: ${{ github.event_name }}
+          actor: ${{ github.actor }}
