@@ -39,7 +39,14 @@ import { createHmac, randomUUID } from 'node:crypto'
 
 import { expect, test, type APIRequestContext } from '@playwright/test'
 
-import { cohortEmail, COHORT_MARKER, assertSafeApiTarget, mintedSession } from './cohort'
+import {
+  cohortEmail,
+  cohortName,
+  COHORT_MARKER,
+  assertSafeApiTarget,
+  mintedSession,
+  anonProvisionHeaders,
+} from './cohort'
 import {
   recordEntity,
   loadLedger,
@@ -70,13 +77,6 @@ const STATUS_OK = 200
 const STATUS_ACCEPTED = 202
 const STATUS_UNAUTHORIZED = 401
 const STATUS_BACKEND_UNAVAILABLE = 503
-
-// Unique source IP per provision so the per-fingerprint dedup cap (5/day, rule 6)
-// doesn't hand back an EXISTING token — mirrors live-anon-provision.spec.ts.
-function uniqueIP(): string {
-  const b = () => Math.floor(Math.random() * 254) + 1
-  return `10.${b()}.${b()}.${b()}`
-}
 
 function base64url(buf: Buffer): string {
   return buf.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
@@ -129,9 +129,13 @@ interface ClaimedIdentity {
 async function provisionAndClaim(
   request: APIRequestContext,
 ): Promise<ClaimedIdentity> {
+  // anonProvisionHeaders() carries the X-E2E-Test-Token fingerprint-bypass when
+  // E2E_TEST_TOKEN is set (prod ignores X-Forwarded-For, tripping the recycle
+  // gate) + a unique XFF for staging/local. A cohort name keeps it cohort-tagged.
   const cacheResp = await request.fetch(`${API_URL}/cache/new`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Forwarded-For': uniqueIP() },
+    headers: anonProvisionHeaders(),
+    data: JSON.stringify({ name: cohortName('auth-cache') }),
     failOnStatusCode: false,
   })
   test.skip(
@@ -578,23 +582,31 @@ test.describe('LIVE — auth/login seams (W1: OAuth, logout-revocation, CLI, /au
         `cannot derive a CLI session id to poll from ${JSON.stringify(body)} / ${authURL}.`,
       ).toBeTruthy()
 
-      // A13: poll BEFORE approval → a status, not an api_token. (We never approve
-      // in-browser here — that's the staging UI leg; the poll contract is what
-      // the CLI depends on.)
+      // A13: poll BEFORE approval. The REAL prod contract (verified against
+      // api.instanode.dev) is HTTP 202 with {ok:true, pending:true} — there is NO
+      // `status` field pre-approval; the CLI branches on `pending`. The api_token
+      // is minted ONLY after the user approves in-browser, so it must be absent.
       const poll = await request.fetch(`${API_URL}/auth/cli/${encodeURIComponent(sessionId)}`, {
         method: 'GET',
         failOnStatusCode: false,
       })
       expect(
         [STATUS_OK, STATUS_ACCEPTED].includes(poll.status()),
-        `GET /auth/cli/:id pre-approval should return 200/202 with a status; got ${poll.status()}. ` +
+        `GET /auth/cli/:id pre-approval should return 200/202; got ${poll.status()}. ` +
           `Body: ${await poll.text().catch(() => '<unreadable>')}`,
       ).toBe(true)
       const pollBody = (await poll.json()) as Record<string, unknown>
+      // The poll must be answerable: ok:true (request accepted) AND pending:true
+      // (not yet approved). This is the contract the CLI polls on.
       expect(
-        pollBody.status,
-        `pre-approval poll must carry a 'status' (e.g. 'pending'); got ${JSON.stringify(pollBody)}.`,
-      ).toBeTruthy()
+        pollBody.ok,
+        `pre-approval poll must return ok:true; got ${JSON.stringify(pollBody)}.`,
+      ).toBe(true)
+      expect(
+        pollBody.pending,
+        `pre-approval poll must signal pending:true (the user hasn't approved yet); got ` +
+          `${JSON.stringify(pollBody)}.`,
+      ).toBe(true)
       // Pre-approval there must be NO api_token (it appears only after approve).
       expect(
         pollBody.api_token,

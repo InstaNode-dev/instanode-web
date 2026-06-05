@@ -167,3 +167,39 @@ export function mintedSession(): MintedSession | null {
     tier: process.env.E2E_ACCOUNT_TIER ?? '',
   }
 }
+
+// ── Per-fingerprint bypass for anonymous provisions (ISSUE 1) ────────────────
+// Prod does NOT trust X-Forwarded-For, so the CI runner's many anon provisions
+// all share ONE real fingerprint (SHA256(/24 + ASN), rule 6) and trip the
+// free-tier recycle/dedup gate → 402 free_tier_recycle_requires_claim. The api
+// exposes a real bypass: the X-E2E-Test-Token header (api internal/middleware/
+// fingerprint.go) — a matching token skips the per-fingerprint cap. The token is
+// a CI secret (E2E_TEST_TOKEN); when unset (local dev / un-tokened run) we send
+// no bypass header and rely on X-Forwarded-For varying the fingerprint instead.
+
+/** The header name the api's fingerprint middleware honours to skip the cap. */
+export const E2E_TEST_TOKEN_HEADER = 'X-E2E-Test-Token'
+
+/**
+ * Headers an anonymous provision should carry: a unique X-Forwarded-For (varies
+ * the fingerprint where the proxy IS trusted — staging/local) PLUS the
+ * X-E2E-Test-Token bypass when E2E_TEST_TOKEN is set (the only thing that gets
+ * past the per-fingerprint recycle gate on prod, which ignores X-Forwarded-For).
+ * Both are harmless together: the bypass wins on prod, the XFF varies elsewhere.
+ */
+export function anonProvisionHeaders(extra: Record<string, string> = {}): Record<string, string> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'X-Forwarded-For': uniqueIP(),
+    ...extra,
+  }
+  const token = process.env.E2E_TEST_TOKEN
+  if (token) headers[E2E_TEST_TOKEN_HEADER] = token
+  return headers
+}
+
+// Unique source IP per call (varies the fingerprint where the proxy is trusted).
+function uniqueIP(): string {
+  const b = () => Math.floor(Math.random() * 254) + 1
+  return `10.${b()}.${b()}.${b()}`
+}

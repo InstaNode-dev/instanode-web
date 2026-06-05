@@ -42,7 +42,7 @@
 
 import { expect, test, type APIRequestContext } from '@playwright/test'
 
-import { cohortName, COHORT_MARKER, assertSafeApiTarget } from './cohort'
+import { cohortName, COHORT_MARKER, assertSafeApiTarget, anonProvisionHeaders } from './cohort'
 import {
   recordEntity,
   loadLedger,
@@ -134,14 +134,6 @@ const PROVISION_FLOWS: ProvisionFlow[] = [
   },
 ]
 
-// Unique source IP per call so the per-fingerprint dedup cap (5/day, rule 6)
-// doesn't hand back an EXISTING token — mirrors live-provision-smoke.spec.ts
-// and auth-roundtrip.spec.ts uniqueIP().
-function uniqueIP(): string {
-  const b = () => Math.floor(Math.random() * 254) + 1
-  return `10.${b()}.${b()}.${b()}`
-}
-
 test.describe('LIVE — every anonymous provision flow → backend-assert → reap', () => {
   test.describe.configure({ mode: 'serial' })
 
@@ -192,9 +184,14 @@ test.describe('LIVE — every anonymous provision flow → backend-assert → re
       const name = cohortName(`anon-${flow.label}`)
 
       // ── Create: real anonymous provision against the live api ──────────────
+      // anonProvisionHeaders() adds the X-E2E-Test-Token fingerprint-bypass when
+      // E2E_TEST_TOKEN is set (the only thing that gets past prod's per-
+      // fingerprint recycle gate, which ignores X-Forwarded-For) plus a unique
+      // XFF for staging/local. A cohort name is always sent: /vector & /db
+      // REQUIRE a name (CLAUDE.md) and it is harmless (cohort-tagging) on the rest.
       const resp = await request.fetch(`${API_URL}${flow.path}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Forwarded-For': uniqueIP() },
+        headers: anonProvisionHeaders(),
         data: JSON.stringify({ name }),
         failOnStatusCode: false,
       })

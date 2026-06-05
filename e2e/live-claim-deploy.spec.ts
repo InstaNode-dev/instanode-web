@@ -52,7 +52,14 @@ import { gzipSync } from 'node:zlib'
 
 import { expect, test, type APIRequestContext } from '@playwright/test'
 
-import { cohortEmail, cohortName, COHORT_MARKER, isCohortBranded, assertSafeApiTarget } from './cohort'
+import {
+  cohortEmail,
+  cohortName,
+  COHORT_MARKER,
+  isCohortBranded,
+  assertSafeApiTarget,
+  anonProvisionHeaders,
+} from './cohort'
 import {
   recordEntity,
   loadLedger,
@@ -110,9 +117,14 @@ interface AnonProvision {
 // assertion (rule 24). Returns the token + the anon-upgrade JWT for /claim.
 // Skips loudly if the cache backend is 503 (can't mint a claimable resource).
 async function provisionAnonCache(request: APIRequestContext): Promise<AnonProvision> {
+  // anonProvisionHeaders() carries the X-E2E-Test-Token fingerprint-bypass when
+  // E2E_TEST_TOKEN is set (prod ignores X-Forwarded-For, tripping the recycle
+  // gate) + a unique XFF for staging/local. A cohort name keeps the resource
+  // cohort-tagged (harmless for /cache/new, which does not require a name).
   const resp = await request.fetch(`${API_URL}/cache/new`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Forwarded-For': uniqueIP() },
+    headers: anonProvisionHeaders(),
+    data: JSON.stringify({ name: cohortName('w3-anon-cache') }),
     failOnStatusCode: false,
   })
   test.skip(
