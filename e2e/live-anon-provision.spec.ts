@@ -79,6 +79,14 @@ interface ProvisionFlow {
   connPattern: RegExp
   /** Optional extra per-service assertion on the parsed JSON body. */
   extra?: (body: Record<string, unknown>) => void
+  /**
+   * Pin the anonymous bypass path even when a minted pro session exists. Only
+   * `queue` sets this: the authed /queue/new path attempts isolated per-tenant
+   * NATS provisioning which HANGS on prod (operator NKeys unseeded — CLAUDE.md
+   * P1). The anon path returns fast with auth_mode=legacy_open; the anon
+   * resource is TTL-reaped (no authed DELETE for anon resources).
+   */
+  forceAnon?: boolean
 }
 
 // The registry. The matrix's seventh service (db) is covered by
@@ -110,6 +118,9 @@ const PROVISION_FLOWS: ProvisionFlow[] = [
     path: '/queue/new',
     connKey: 'connection_url',
     connPattern: /^nats:\/\//,
+    // Pin anon: the authed (pro) /queue/new isolated-NATS path hangs on prod
+    // (P1 NKeys gap). Anon returns fast with auth_mode=legacy_open.
+    forceAnon: true,
     extra: (b) =>
       // auth_mode is legacy_open in prod today (CLAUDE.md P1) but the field
       // must always be present so the caller can branch on it.
@@ -192,7 +203,7 @@ test.describe('LIVE — every anonymous provision flow → backend-assert → re
       // fingerprint bypass (a fresh fingerprint per call → no recycle gate).
       // A cohort name is always sent: /vector & /db REQUIRE a name (CLAUDE.md)
       // and it is harmless (cohort-tagging) on the rest.
-      const id = provisionIdentity()
+      const id = provisionIdentity({}, flow.forceAnon ?? false)
       const resp = await request.fetch(`${API_URL}${flow.path}`, {
         method: 'POST',
         headers: id.headers,
@@ -268,22 +279,40 @@ test.describe('LIVE — every anonymous provision flow → backend-assert → re
       // Per-service extra shape assertion (mode / extension / auth_mode / …).
       flow.extra?.(body)
 
-      // ── Reap inline (happy path). afterAll + reap-cohort.ts are the backstops
-      //    if this is skipped by a thrown assertion above. ────────────────────
+      // ── Reap inline. afterAll + reap-cohort.ts are the backstops if this is
+      //    skipped by a thrown assertion above. ─────────────────────────────────
       const result = await reapEntities(request, [
         { ...entity, recordedAt: new Date().toISOString() },
       ])
-      expect(
-        result.failed.length,
-        `reaping the provisioned ${flow.label} resource failed: ${JSON.stringify(result.failed)}`,
-      ).toBe(0)
-      expect(
-        result.deleted + result.alreadyGone,
-        `the ${flow.label} resource should be deleted (or already gone) after reap`,
-      ).toBeGreaterThan(0)
+      if (id.bearer) {
+        // Authed (minted-account) resource: the reaper's DELETE is authorized →
+        // must succeed (200) or be already gone. A 401 here is a real reap bug.
+        expect(
+          result.failed.length,
+          `reaping the provisioned ${flow.label} resource failed: ${JSON.stringify(result.failed)}`,
+        ).toBe(0)
+        expect(
+          result.deleted + result.alreadyGone,
+          `the ${flow.label} resource should be deleted (or already gone) after reap`,
+        ).toBeGreaterThan(0)
+      } else {
+        // Anonymous resource (no bearer): there is NO unauthed resource-delete on
+        // the api, so the authed DELETE 401s by design. Anonymous resources carry
+        // a 24h TTL and are TTL-reaped — NOT a leak. We assert the reaper failed
+        // for exactly the expected reason (401 / missing-credentials), so a
+        // DIFFERENT failure (e.g. 500) would still red. This is the documented
+        // "anon resources are TTL-reaped" path (queue flow on prod).
+        const onlyAuthFailures = result.failed.every((f) => f.status === 401 || f.status === 403)
+        expect(
+          onlyAuthFailures,
+          `anonymous ${flow.label} reap should only ever fail with 401/403 (no unauthed delete ` +
+            `exists; the resource is TTL-reaped). Got: ${JSON.stringify(result.failed)}`,
+        ).toBe(true)
+      }
 
       // Clear the ledger so afterAll doesn't re-try a now-deleted token (a no-op
       // 404, but keeps the ledger truthful between serial tests in this file).
+      // For the anon (no-bearer) path the resource is left to its 24h TTL.
       clearLedger()
     })
   }

@@ -272,10 +272,22 @@ export const ANON_TIER = 'anonymous'
 /**
  * Resolve the provision identity for a LIVE resource spec. Prefers the minted
  * pro account (authed) when E2E_SESSION_JWT is set; else the anon bypass path.
+ *
+ * `forceAnon` pins the anonymous bypass path even when a minted session exists.
+ * Used for the QUEUE flow: the authed (pro) /queue/new path attempts isolated
+ * per-tenant NATS provisioning, which HANGS on prod until the operator seeds the
+ * NATS operator/sys NKeys (CLAUDE.md P1 known gap). The anonymous path returns
+ * fast with auth_mode=legacy_open. The resulting anon resource is reaped by its
+ * 24h TTL (no authed DELETE exists for anon resources); the spec treats a
+ * no-bearer resource's reap as best-effort (TTL-backed) rather than asserting a
+ * 200 it can never get.
  */
-export function provisionIdentity(extra: Record<string, string> = {}): ProvisionIdentity {
+export function provisionIdentity(
+  extra: Record<string, string> = {},
+  forceAnon = false,
+): ProvisionIdentity {
   const minted = mintedSession()
-  if (minted?.token) {
+  if (minted?.token && !forceAnon) {
     return {
       headers: authedProvisionHeaders(minted.token, extra),
       bearer: minted.token,
