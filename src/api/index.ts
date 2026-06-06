@@ -901,7 +901,9 @@ export async function listStacks(): Promise<{ ok: true; items: DashboardStack[];
       id: s.stack_id ?? '',
       slug: s.stack_id ?? '',
       name: s.name ?? '',
-      status: (s.status as DashboardStack['status']) ?? 'building',
+      // Normalise the api's 'healthy' (live) → 'running' so list/detail status
+      // comparisons agree with the type. See normaliseStackStatus.
+      status: normaliseStackStatus(s.status),
       url: null,
       created_at: s.created_at ?? '',
       team_id: '',
@@ -975,6 +977,47 @@ function normaliseDeploymentStatus(s: string | undefined): DeploymentStatus {
       return s
     case 'expired':
       return 'expired' // C02: TTL-expired — render badge not spinner
+    default:
+      return 'building'
+  }
+}
+
+// normaliseStackStatus — map the api's stack lifecycle status onto the
+// dashboard's StackStatus vocabulary, mirroring normaliseDeploymentStatus.
+//
+// The api's stack statuses are: building | deploying | healthy | failed |
+// stopped | deleting (api/internal/models/stack.go:564). The dashboard's
+// StackStatus union is intentionally narrower: building | running | failed |
+// stopped (types.ts). The two enums DISAGREE on the live state — the api calls
+// it 'healthy', the dashboard calls it 'running' (matching the deployment
+// path's StatusPill vocabulary).
+//
+// Before this normalizer, fetchStackStatus()/listStacks() force-cast the raw
+// api string with `as DashboardStack['status']`, so a live stack surfaced as
+// the runtime string 'healthy' — which the StackCreatePage poll's
+// `status === 'running'` live-test never matched. A successful stack deploy
+// therefore spun in the 'building' stage until the ~5-minute poll timeout
+// instead of flipping to 'live'. Normalising here makes the type and the
+// runtime value agree in one place: every consumer that compares against
+// 'running' now works for a live stack.
+//   - healthy / deploying → running (the dashboard's single live/in-flight-to-
+//     live state; deploying is "build done, rolling out" which the create page
+//     should keep treating as in-progress-but-succeeding → render as running so
+//     the live test trips as soon as the pod is up).
+//   - deleting            → stopped (no compute; the create flow never observes
+//     it, but a list view should show it as terminal rather than spinning).
+function normaliseStackStatus(s: string | undefined): StackStatus {
+  switch (s) {
+    case 'healthy':
+    case 'deploying':
+      return 'running' // dashboard speaks 'running' for the live state
+    case 'building':
+    case 'failed':
+    case 'stopped':
+    case 'running':
+      return s
+    case 'deleting':
+      return 'stopped' // terminal-ish; consumes no compute
     default:
       return 'building'
   }
@@ -1620,7 +1663,10 @@ export async function createStack(
   // resolved).
   const stack: CreateStackResponse = {
     slug: body?.slug ?? body?.stack_id ?? body?.stack_slug ?? '',
-    status: (body?.status as StackStatus) ?? 'building',
+    // Normalise the lifecycle status: the api may return a cached-build
+    // 'healthy' synchronously (rare), which the StackCreatePage onSubmit path
+    // compares against 'running' to skip straight to the live stage.
+    status: normaliseStackStatus(body?.status),
     url: body?.url ?? null,
     name: body?.name,
     env: body?.env ?? body?.environment,
@@ -1659,7 +1705,11 @@ export async function fetchStackStatus(
       id: r.stack_id,
       slug: r.stack_id,
       name: r.name ?? '',
-      status: (r.status as DashboardStack['status']) ?? 'building',
+      // CRITICAL (P1-2): the api emits 'healthy' for a live stack, but the
+      // StackCreatePage poll only treats 'running' as live. Normalise here so
+      // a successful deploy flips to the live stage instead of spinning to the
+      // 5-minute poll timeout. See normaliseStackStatus.
+      status: normaliseStackStatus(r.status),
       url: derivedURL,
       created_at: '',
       team_id: '',
@@ -1760,7 +1810,11 @@ export async function deleteCustomDomain(stackSlug: string, id: string): Promise
 //                  propagate as APIError so the page's checkoutErr state
 //                  can surface them inline.
 //
-// cancelSubscription — LIVE. POST /api/v1/billing/cancel.
+// cancelSubscription — NOT live. POST /api/v1/billing/cancel was removed by
+//   policy (cancellation is support-only; memory project_no_self_serve_cancel_downgrade,
+//   api router.go:1133). This helper is unreferenced by any page/component and
+//   would 404 if called. Kept as an explicit "intentionally absent" marker;
+//   do NOT wire it into the UI. (P3-1 — filed for cleanup, harmless dead code.)
 
 // Billing wire shape — DERIVED from the OpenAPI snapshot (WireBillingState =
 // components['schemas']['BillingStateResponse']) so an api rename of e.g.
@@ -1895,42 +1949,53 @@ export async function createCheckout(
   return { ok: true, short_url: r.short_url, subscription_id: r.subscription_id }
 }
 
-// ─── Promotion validation (P3 — mocked until api ships endpoint) ────────
+// ─── Promotion validation (LIVE — POST /api/v1/billing/promotion/validate) ──
 //
-// Contract proposed for `POST /api/v1/billing/promotion/validate`:
-//   request:  { code: string, plan: string }
-//   response: { ok: true, code, discount: { kind: "percent_off" | "amount_off"
-//                                          | "free_period",
-//                                          value: number,
-//                                          applies_to?: number,
-//                                          unit?: "months" | "days" },
-//              valid_until: string /* ISO */ }
-//   errors:   404 { error: "promotion_not_found", message: "Code not found." }
-//             410 { error: "promotion_expired",   message: "This code has expired." }
-//             409 { error: "promotion_not_applicable",
-//                   message: "Code can't be applied to this plan." }
+// The endpoint is LIVE (api/internal/handlers/billing_promotion.go, registered
+// at router.go:1148). Its envelope is UNUSUAL: validation FAILURES are reported
+// as **200 with `ok:false`**, NOT a 4xx. Only true request errors are non-2xx:
+//   200 ok:true  + code + discount + valid_until?   — valid for this plan
+//   200 ok:false + error + message + agent_action   — invalid / wrong-plan /
+//                                                       expired / exhausted
+//   400 invalid_body                                — empty code / bad JSON
+//   401 unauthorized                                — no session
+//   429 rate_limit_exceeded                         — >30 validations / hour
 //
-// api/internal/plans/promotion_test.go already has the engine
-// (`plans.validatePromotion(code, plan) (Promotion, error)`) — the missing
-// piece is the HTTP handler. Until that ships, this function transparently
-// falls back to a small in-memory table of three seed codes so the upgrade
-// flow is testable end-to-end. The mock activates on 404 (endpoint not
-// registered) OR on a network error to /api/v1/billing/promotion/validate.
+// CRITICAL (P1-3): call() only throws on a non-2xx response, so a 200 ok:false
+// body returns normally. The previous implementation built a "valid" Promotion
+// straight from that body — surfacing an invalid/expired/wrong-plan code as a
+// VALID promo with an empty/undefined discount (a misleading-discount surface
+// on the checkout path, and a money bug once Razorpay offers wire up). We now
+// inspect `ok` and throw an APIError carrying the api's error/message so the UI
+// renders the real rejection. There is no 404→seeds fallback any more: the
+// handler never returns 404 (it shipped), so that branch was dead code.
+//
+// `discount` is passed through verbatim from the api's promotionDiscount
+// envelope ({ kind, value, applies_to, max_uses, description }); the type below
+// stays permissive because it's display-only and the api may add fields.
 export type Promotion = {
   code: string
   discount: {
     kind: 'percent_off' | 'amount_off' | 'free_period'
     value: number
-    applies_to?: number
+    // api sends applies_to as a list of plan slugs; legacy callers expected a
+    // number. Tolerate either — this field is display-only.
+    applies_to?: number | string[]
     unit?: 'months' | 'days'
+    max_uses?: number
+    description?: string
   }
-  valid_until: string
+  /** ISO timestamp; the api omits it for never-expiring codes. */
+  valid_until?: string
 }
 
-const PROMOTION_SEEDS: Record<string, Promotion['discount']> = {
-  TWITTER15: { kind: 'percent_off', value: 15, applies_to: 3, unit: 'months' },
-  LAUNCH50:  { kind: 'percent_off', value: 50, applies_to: 1, unit: 'months' },
-  COMEBACK10: { kind: 'percent_off', value: 10, applies_to: 1, unit: 'months' },
+type PromotionValidateBody = {
+  ok: boolean
+  code?: string
+  discount?: Promotion['discount']
+  valid_until?: string
+  error?: string
+  message?: string
 }
 
 export async function validatePromotion(
@@ -1941,43 +2006,24 @@ export async function validatePromotion(
   if (!normalized) {
     throw new APIError(400, 'promotion_invalid', 'Enter a code.')
   }
-  try {
-    const r = await call<{
-      ok: boolean
-      code: string
-      discount: Promotion['discount']
-      valid_until: string
-    }>('/api/v1/billing/promotion/validate', {
-      method: 'POST',
-      body: JSON.stringify({ code: normalized, plan }),
-    })
-    return {
-      ok: true,
-      promotion: { code: r.code, discount: r.discount, valid_until: r.valid_until },
-    }
-  } catch (e: any) {
-    // 404 = endpoint not yet shipped on api → fall back to local seeds so
-    // the upgrade flow is demo-able. Any other status (400/410/409/etc.)
-    // is a real validation error and propagates so the UI can show it.
-    const status = e?.status
-    if (status === 404 || status === undefined || status === 0) {
-      const seed = PROMOTION_SEEDS[normalized]
-      if (!seed) {
-        throw new APIError(404, 'promotion_not_found', 'Code not found.')
-      }
-      return {
-        ok: true,
-        promotion: {
-          code: normalized,
-          discount: seed,
-          // Mocked seeds are valid through 2026-09-01 — matches the spec
-          // example in the P3 brief. Replace with server response once the
-          // endpoint ships.
-          valid_until: '2026-09-01T00:00:00Z',
-        },
-      }
-    }
-    throw e
+  // Non-2xx (400/401/429/5xx) throws from call() and propagates untouched.
+  const r = await call<PromotionValidateBody>('/api/v1/billing/promotion/validate', {
+    method: 'POST',
+    body: JSON.stringify({ code: normalized, plan }),
+  })
+  // 200 ok:false is a VALIDATION REJECTION, not a success. Surface it as an
+  // APIError so the page renders the api's reason ("Code not found", "expired",
+  // "not applicable to this plan", ...) instead of a phantom valid promo.
+  if (!r.ok || !r.discount) {
+    throw new APIError(
+      400,
+      r.error || 'promotion_invalid',
+      r.message || 'This promotion code is not valid for the selected plan.',
+    )
+  }
+  return {
+    ok: true,
+    promotion: { code: r.code ?? normalized, discount: r.discount, valid_until: r.valid_until },
   }
 }
 
