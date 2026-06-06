@@ -123,7 +123,8 @@ Every page has a `.md` mirror at the same path. Examples:
 - [/pricing.md](https://instanode.dev/pricing.md) — tier comparison
 - [/for-agents.md](https://instanode.dev/for-agents.md) — agent-specific guidance
 - [/status.md](https://instanode.dev/status.md) — current status
-- [/docs.md](https://instanode.dev/docs.md) — quickstart + service reference (all 9 sections concatenated)
+- [/docs.md](https://instanode.dev/docs.md) — quickstart + service reference (all sections concatenated)
+- [/docs/troubleshooting-deploys.md](https://instanode.dev/docs/troubleshooting-deploys.md) — agent self-recovery guide for a failed deploy (the `/events` autopsy loop)
 - [/blog.md](https://instanode.dev/blog.md) — blog index (post titles + dates + links)
 - [/blog/<slug>.md](https://instanode.dev/blog/) — every post
 - [/use-cases.md](https://instanode.dev/use-cases.md) — catalogue index (all 104 grouped by category)
@@ -161,6 +162,16 @@ Agent escape hatch: `X-Skip-Email-Confirmation: yes` on the original `DELETE` �
 Anonymous tier (24h TTL): no email on file, `DELETE` returns 200 immediately. See [/docs#deploy](https://instanode.dev/docs#deploy) for full request/response shapes.
 
 - [Deployments](https://instanode.dev/docs#deploy): POST /deploy/new + private deploys + custom domains + two-step email-confirmed deletion + 24h-TTL semantics (default; three routes to keep a deploy permanent)
+
+## Debugging a failed deploy (agent self-recovery)
+
+Deploy failed? You don't need cluster access — the platform classifies the failure and serves the real error back over HTTP. Read the classified cause at `GET /api/v1/deployments/:id/events` → `events[]` with `reason`, `last_lines` (the tail of the build-pod log = the actual error output), and `hint` (a plain-language remedy). For the one-line summary use `GET /api/v1/deployments/:id` → `status` + `error_message`. The loop: read `reason` + `last_lines` + `hint` → fix the Dockerfile / tarball / `port` / `env_vars` → redeploy in place (`POST /deploy/:id/redeploy`, or `redeploy=true` on `POST /deploy/new` with the same `name`) → re-poll status until `running`. Watch the build live with the SSE stream `GET /deploy/:id/logs`.
+
+**Anonymous deploys** go through `POST /stacks/new` and have a thinner failure path: `GET /api/v1/stacks/:slug` returns `status="failed"` + the raw error string, and `GET /stacks/:slug/logs/:svc` returns per-service build logs — but there is **no** classified `/events` autopsy for anonymous stacks (a known thinner path). Claim/upgrade and deploy via `/deploy/new` for the full `reason`/`last_lines`/`hint` surface.
+
+**Caveats:** don't rely on the failure email (transactional email delivery is currently blocked — use `/events` and the dashboard failure-autopsy panel instead); there is a brief "diagnostics pending" window right after a failure where `/events` may be empty or `reason="Unknown"` (re-poll); and runtime crash-loops have thinner diagnostics today than build failures.
+
+Full guide: [https://instanode.dev/docs#troubleshooting-deploys](https://instanode.dev/docs#troubleshooting-deploys) (markdown mirror: [/docs/troubleshooting-deploys.md](https://instanode.dev/docs/troubleshooting-deploys.md)).
 
 ## How to use this file
 

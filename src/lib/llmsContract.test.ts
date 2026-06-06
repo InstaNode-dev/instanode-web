@@ -81,6 +81,22 @@ const CONTRACT_MARKERS: DocsMarker[] = [
     file: 'public/llms.txt',
     mustContain: ['**Enterprise**', 'sales@instanode.dev'],
   },
+  {
+    // Task #69 / docs/ci/02-FAILURE-DIAGNOSIS-AND-AUTODEBUG.md (2026-06-06): the
+    // agent-facing deploy-failure auto-debug path. An agent that hits a failed
+    // deploy must be able to DISCOVER, from llms.txt alone, that the classified
+    // cause is served back over HTTP — so this pins BOTH the troubleshooting
+    // reference (the dedicated guide) AND the dedicated debug surface
+    // `GET /api/v1/deployments/:id/events` (the reliable machine surface the
+    // auto-debug loop reads: reason + last_lines + hint). If a content-repo sync
+    // or a docs edit ever drops the debug path from the manifest, this reds CI so
+    // agent-discoverability of the failure-diagnosis path can't silently regress.
+    // Mirrors the requireMarkers guard in scripts/fetch-content.mjs (lock-step,
+    // rule 22) + the FUNCTIONAL live proof in e2e/live-ui-failure-diag.spec.ts.
+    field: 'deploy-failure auto-debug path (troubleshooting guide + /events debug surface)',
+    file: 'public/llms.txt',
+    mustContain: ['troubleshooting-deploys', '/api/v1/deployments/:id/events'],
+  },
 ]
 
 describe('agent docs contract — POST /deploy/new redeploy=true', () => {
