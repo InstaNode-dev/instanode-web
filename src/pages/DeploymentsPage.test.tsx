@@ -116,6 +116,50 @@ describe('DeploymentsPage — empty state', () => {
     expect(banner.textContent).toMatch(/Could not load deployments/)
   })
 
+  it('F1: on a load error the empty-state CTA is NOT rendered alongside the error banner', async () => {
+    // F1 (bug-hunt, PR #199 per-tier error-state matrix): the catch handler
+    // sets items=[], so the empty-state condition (items.length === 0) was
+    // also true during an error — the page showed "No deployments yet"
+    // (deployments-empty) at the same time as deployments-error. Contradictory
+    // UX: "nothing here, create one" AND "something went wrong". The empty
+    // state is now gated on `!err`. This test FAILS before the fix (the empty
+    // CTA appears) and PASSES after.
+    mockListDeployments.mockRejectedValueOnce(new Error('boom'))
+    render(withRouter(<DeploymentsPage />))
+    // Error banner is the dominant signal.
+    const banner = await screen.findByTestId('deployments-error')
+    expect(banner).toBeTruthy()
+    // The empty / create-CTA row must NOT be present during an error.
+    expect(screen.queryByTestId('deployments-empty')).toBeNull()
+    expect(screen.queryByText(/No deployments yet/i)).toBeNull()
+  })
+
+  it('F1: a 429 rate-limit error shows the retry hint with NO empty-state row', async () => {
+    // Companion to the F1 guard above for the rate-limited surface: a 429
+    // must render the retry-hint banner and suppress the empty/create CTA.
+    const rateLimited: Error & { status?: number; retryAfter?: number } = new Error('rate limited')
+    rateLimited.status = 429
+    rateLimited.retryAfter = 30
+    mockListDeployments.mockRejectedValueOnce(rateLimited)
+    render(withRouter(<DeploymentsPage />))
+    const banner = await screen.findByTestId('deployments-error')
+    expect(banner.textContent).toMatch(/Too many requests/i)
+    // No empty / create CTA during the rate-limited error.
+    expect(screen.queryByTestId('deployments-empty')).toBeNull()
+  })
+
+  it('F1: genuine empty (no error, zero items) still renders the create-CTA', async () => {
+    // The fix must NOT suppress the happy-path empty state. With no error and
+    // zero deployments the create-CTA must still show.
+    mockListDeployments.mockResolvedValueOnce({ ok: true, items: [], total: 0 })
+    render(withRouter(<DeploymentsPage />))
+    const empty = await screen.findByTestId('deployments-empty')
+    expect(empty).toBeTruthy()
+    expect(empty.textContent).toMatch(/No deployments yet/i)
+    // And no error banner in the happy path.
+    expect(screen.queryByTestId('deployments-error')).toBeNull()
+  })
+
   it('renders a 429 rate-limit hint with the Retry-After seconds', async () => {
     // Regression guard for T15 P2-7: DeploymentsPage now consumes
     // retryHint just like TeamPage. A rejected fetch carrying status=429

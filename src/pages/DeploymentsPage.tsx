@@ -238,7 +238,14 @@ export function DeploymentsPage() {
             <span className="skel" style={{ width: '60%', height: 18, margin: '0 auto' }} />
           </div>
         )}
-        {!loading && items.length === 0 && (
+        {/* F1 (bug-hunt, PR #199 error-state matrix): gate on `!err` so the
+            "No deployments yet" create-CTA never renders alongside the
+            deployments-error banner. On a 429/5xx the catch handler sets
+            items=[] (honest — nothing loaded), which would otherwise satisfy
+            items.length === 0 and show the empty CTA at the same time as the
+            error. The error banner is the dominant signal; the genuine
+            zero-deployments empty state (no error) still shows. */}
+        {!loading && !err && items.length === 0 && (
           <div
             className="table-row"
             data-testid="deployments-empty"
