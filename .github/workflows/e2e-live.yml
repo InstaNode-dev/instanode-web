@@ -104,6 +104,15 @@ jobs:
           # self-skip loudly; the contract-only legs (OAuth state-replay, CORS,
           # CLI canonical host, magic-link start, tampered-token) still run.
           E2E_JWT_SECRET: ${{ secrets.E2E_JWT_SECRET }}
+          # Wave 4b: arm the FULL Razorpay TEST-card payment leg in
+          # live-ui-payment.spec.ts. INERT until the operator wires rzp_test_*
+          # keys on the staging api AND sets vars.E2E_RAZORPAY_TEST_MODE=1 —
+          # otherwise the card-entry test skips clean. See
+          # docs/ci/01-CI-INTEGRATION-DESIGN.md §"Razorpay test-card payment".
+          E2E_RAZORPAY_TEST_MODE: ${{ vars.E2E_RAZORPAY_TEST_MODE }}
+          # The payment spec mints its OWN free cohort account via the factory;
+          # arm it with the mint-guard token so it doesn't skip-on-unarmed.
+          E2E_ACCOUNT_TOKEN: ${{ secrets.E2E_ACCOUNT_TOKEN }}
         run: npm run test:e2e:live
 
       # Reaper ALWAYS runs (even on test failure/cancel) so a leaked resource

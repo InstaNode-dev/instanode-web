@@ -160,6 +160,13 @@ jobs:
           # X-E2E-Test-Token header skips the per-fingerprint cap when it matches
           # this secret (api internal/middleware/fingerprint.go).
           E2E_TEST_TOKEN: ${{ secrets.E2E_TEST_TOKEN }}
+          # Wave 4b: arm the FULL Razorpay TEST-card payment leg in
+          # live-ui-payment.spec.ts. Sourced from a repo VARIABLE so it is
+          # INERT until the operator wires rzp_test_* keys on the api AND flips
+          # vars.E2E_RAZORPAY_TEST_MODE=1. Until then the card-entry test
+          # skips clean; the @pr-smoke contract-only leg always runs. See
+          # docs/ci/01-CI-INTEGRATION-DESIGN.md §"Razorpay test-card payment".
+          E2E_RAZORPAY_TEST_MODE: ${{ vars.E2E_RAZORPAY_TEST_MODE }}
         run: npm run test:e2e:live
 
       - name: Reap minted account (teardown)
