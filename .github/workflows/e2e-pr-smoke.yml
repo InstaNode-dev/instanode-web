@@ -175,3 +175,26 @@ jobs:
             e2e/.cleanup-ledger.json
           if-no-files-found: ignore
           retention-days: 7
+
+      # Wave 5 — record the PR-smoke outcome in NR (suite=pr-smoke). Gated on
+      # RUN == '1' so a fork/secret-less no-op run does NOT report a misleading
+      # pass (the suite did not actually execute). When it DID run, if: always()
+      # captures both the journey failure and a leak-reaper failure. No-ops
+      # without the NR secret. The pr-smoke-failing-main NR alert reads this.
+      - name: Emit PR-smoke result to New Relic
+        if: always() && env.RUN == '1'
+        uses: ./.github/actions/nr-ci-event
+        with:
+          license-key: ${{ secrets.NEW_RELIC_LICENSE_KEY }}
+          account-id: ${{ secrets.NEW_RELIC_ACCOUNT_ID }}
+          result: ${{ job.status == 'success' && 'pass' || 'fail' }}
+          suite: pr-smoke
+          pr-number: ${{ github.event.pull_request.number }}
+          failed-step: ${{ job.status != 'success' && 'real-backend UI @pr-smoke journeys / mint / reap' || '' }}
+          repo: ${{ github.repository }}
+          workflow: ${{ github.workflow }}
+          branch: ${{ github.ref_name }}
+          commit-sha: ${{ github.sha }}
+          log-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          event-name: ${{ github.event_name }}
+          actor: ${{ github.actor }}

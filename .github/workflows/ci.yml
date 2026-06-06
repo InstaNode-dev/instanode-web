@@ -55,6 +55,28 @@ jobs:
       - run: npm run build
       - run: npm test
 
+      # Wave 5 — push the gated-test result to New Relic so a red run is
+      # studyable from an NR dashboard, not just the GitHub Actions log.
+      # if: always() records a FAILED tsc/build/vitest as InstantCITestRun
+      # result=fail + InstantCITestFailure. No-ops cleanly without the NR secret.
+      - name: Emit CI result to New Relic
+        if: always()
+        uses: ./.github/actions/nr-ci-event
+        with:
+          license-key: ${{ secrets.NEW_RELIC_LICENSE_KEY }}
+          account-id: ${{ secrets.NEW_RELIC_ACCOUNT_ID }}
+          result: ${{ job.status == 'success' && 'pass' || 'fail' }}
+          suite: build-and-test
+          pr-number: ${{ github.event.pull_request.number }}
+          failed-step: ${{ job.status != 'success' && 'gen:api-types:check / build (tsc+vite+prerender) / vitest' || '' }}
+          repo: ${{ github.repository }}
+          workflow: ${{ github.workflow }}
+          branch: ${{ github.ref_name }}
+          commit-sha: ${{ github.sha }}
+          log-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          event-name: ${{ github.event_name }}
+          actor: ${{ github.actor }}
+
   playwright:
     runs-on: ubuntu-latest
     steps:
@@ -68,3 +90,24 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - run: VITE_NO_PROXY=1 npx playwright test --project=chromium
+
+      # Wave 5 — record the mocked-Playwright suite outcome in NR
+      # (suite=playwright) so a red is visible on the CI-health dashboard.
+      # No-ops without the NR secret.
+      - name: Emit Playwright result to New Relic
+        if: always()
+        uses: ./.github/actions/nr-ci-event
+        with:
+          license-key: ${{ secrets.NEW_RELIC_LICENSE_KEY }}
+          account-id: ${{ secrets.NEW_RELIC_ACCOUNT_ID }}
+          result: ${{ job.status == 'success' && 'pass' || 'fail' }}
+          suite: playwright
+          pr-number: ${{ github.event.pull_request.number }}
+          failed-step: ${{ job.status != 'success' && 'playwright (mocked, chromium)' || '' }}
+          repo: ${{ github.repository }}
+          workflow: ${{ github.workflow }}
+          branch: ${{ github.ref_name }}
+          commit-sha: ${{ github.sha }}
+          log-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          event-name: ${{ github.event_name }}
+          actor: ${{ github.actor }}

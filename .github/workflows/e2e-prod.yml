@@ -196,3 +196,26 @@ jobs:
             e2e/.cleanup-ledger.json
           if-no-files-found: ignore
           retention-days: 14
+
+      # Wave 5 — record the live-prod E2E outcome in NR (suite=e2e-prod). This
+      # is the user-facing-journeys-against-prod signal; the e2e-prod-suite-
+      # failing NR alert (P1) reads it. Gated on RUN == '1' so a secret-less
+      # no-op run does NOT report a misleading pass. if: always() captures the
+      # journey failure and the leak-reaper failure. No-ops without the NR
+      # secret.
+      - name: Emit e2e-prod result to New Relic
+        if: always() && env.RUN == '1'
+        uses: ./.github/actions/nr-ci-event
+        with:
+          license-key: ${{ secrets.NEW_RELIC_LICENSE_KEY }}
+          account-id: ${{ secrets.NEW_RELIC_ACCOUNT_ID }}
+          result: ${{ job.status == 'success' && 'pass' || 'fail' }}
+          suite: e2e-prod
+          failed-step: ${{ job.status != 'success' && 'live-prod E2E journeys / mint / reap' || '' }}
+          repo: ${{ github.repository }}
+          workflow: ${{ github.workflow }}
+          branch: ${{ github.ref_name }}
+          commit-sha: ${{ github.sha }}
+          log-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          event-name: ${{ github.event_name }}
+          actor: ${{ github.actor }}
