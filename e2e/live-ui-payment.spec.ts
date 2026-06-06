@@ -60,10 +60,34 @@ const TEST_EXPIRY = '12/30'
 const TEST_CVV = '123'
 const TEST_OTP = '1234'
 
-// A short_url host we accept as "reached a Razorpay checkout". Razorpay hosts
-// subscription checkout on rzp.io / razorpay.com — assert the host class, not a
-// brittle full URL.
-const RAZORPAY_HOST_RE = /(razorpay\.com|rzp\.io)/i
+// The apex domains Razorpay hosts subscription checkout on. We assert the host
+// class, not a brittle full URL.
+const RAZORPAY_HOST_DOMAINS = ['razorpay.com', 'rzp.io'] as const
+
+// Anchored host matcher for Playwright's page.route() interception. route()
+// matches against the WHOLE request URL, so anchor on the scheme + an exact
+// host segment (apex or a subdomain) — this prevents the unanchored-substring
+// class CodeQL flags (e.g. https://evil.com/?x=razorpay.com would match a bare
+// /razorpay\.com/). Used only as a test interceptor (not a security boundary),
+// but kept tight so it can't grab an unrelated cross-origin request.
+const RAZORPAY_HOST_RE = /^https?:\/\/([a-z0-9-]+\.)*(razorpay\.com|rzp\.io)(\/|$|[:?#])/i
+
+/**
+ * True iff `url` is a well-formed absolute URL whose HOST is exactly one of the
+ * Razorpay apex domains or a subdomain thereof. Parses the URL and inspects the
+ * hostname (rather than substring-matching the raw string), so a hostile URL
+ * like `https://evil.com/razorpay.com` or `https://razorpay.com.evil.com/` does
+ * NOT pass — this is the anchored, sanitized check the assertion uses.
+ */
+function isRazorpayCheckoutHost(url: string): boolean {
+  let host: string
+  try {
+    host = new URL(url).hostname.toLowerCase()
+  } catch {
+    return false
+  }
+  return RAZORPAY_HOST_DOMAINS.some((d) => host === d || host.endsWith(`.${d}`))
+}
 
 test.describe('LIVE-UI — Razorpay TEST-card payment (free → upgrade → Pro)', () => {
   test.describe.configure({ mode: 'serial' })
@@ -128,7 +152,10 @@ test.describe('LIVE-UI — Razorpay TEST-card payment (free → upgrade → Pro)
           `got '${outcome.kind}' (${outcome.detail})`,
       ).toBeTruthy()
       if (outcome.kind === 'razorpay') {
-        expect(outcome.detail, 'reached URL must be a Razorpay checkout host').toMatch(RAZORPAY_HOST_RE)
+        expect(
+          isRazorpayCheckoutHost(outcome.detail),
+          `reached URL must be a Razorpay checkout host (got ${outcome.detail})`,
+        ).toBeTruthy()
         // eslint-disable-next-line no-console
         console.log(`[live-ui-payment] contract-only reached Razorpay TEST checkout: ${outcome.detail}`)
       } else if (outcome.kind === 'cohort_inert') {
