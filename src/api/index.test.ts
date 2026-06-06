@@ -641,27 +641,28 @@ describe('changePlan()', () => {
   })
 })
 
-// ─── validatePromotion() (P3) ────────────────────────────────────────────
-// Until api ships POST /api/v1/billing/promotion/validate, this helper
-// falls back to a small set of seed codes on a 404. The mock + fallback
-// path together must:
-//   - return a Promotion shape when the api responds 200
-//   - return the seed Promotion for a known seed code when the api 404s
-//   - throw promotion_not_found for an unknown code when the api 404s
-//   - propagate non-404 errors (e.g. 410 expired) untouched
-describe('validatePromotion() (P3)', () => {
-  it('returns the api Promotion on a 200 response', async () => {
+// ─── validatePromotion() (P1-3 — LIVE endpoint, 200 ok:false contract) ─────
+// POST /api/v1/billing/promotion/validate is LIVE. Its quirk: VALIDATION
+// FAILURES come back as 200 with ok:false (NOT a 4xx). The helper must:
+//   - return a Promotion when the api responds 200 ok:true + discount
+//   - REJECT a 200 ok:false body (invalid / expired / wrong-plan) — the bug
+//     this fixes: those used to surface as a phantom "valid" promo
+//   - propagate true non-2xx (400/401/429/5xx) untouched
+//   - reject empty input before any network call
+describe('validatePromotion() (P1-3)', () => {
+  it('returns the api Promotion on a 200 ok:true response', async () => {
     const m = installFetch()
     m.mockResolvedValueOnce(jsonResponse({
       ok: true,
       code: 'PARTNER25',
-      discount: { kind: 'percent_off', value: 25, applies_to: 6, unit: 'months' },
-      valid_until: '2026-12-31T00:00:00Z',
+      discount: { kind: 'percent_off', value: 25, applies_to: ['pro'], max_uses: 100 },
+      valid_until: '2026-12-31T23:59:59Z',
     }))
     const r = await validatePromotion('PARTNER25', 'pro')
     expect(r.promotion.code).toBe('PARTNER25')
-    expect(r.promotion.discount).toEqual({ kind: 'percent_off', value: 25, applies_to: 6, unit: 'months' })
-    expect(r.promotion.valid_until).toBe('2026-12-31T00:00:00Z')
+    expect(r.promotion.discount.kind).toBe('percent_off')
+    expect(r.promotion.discount.value).toBe(25)
+    expect(r.promotion.valid_until).toBe('2026-12-31T23:59:59Z')
   })
 
   it('POSTs {code, plan} to /api/v1/billing/promotion/validate (uppercased + trimmed)', async () => {
@@ -669,7 +670,7 @@ describe('validatePromotion() (P3)', () => {
     m.mockResolvedValueOnce(jsonResponse({
       ok: true,
       code: 'TWITTER15',
-      discount: { kind: 'percent_off', value: 15, applies_to: 3, unit: 'months' },
+      discount: { kind: 'percent_off', value: 15, applies_to: ['pro'] },
       valid_until: '2026-09-01T00:00:00Z',
     }))
     await validatePromotion('  twitter15  ', 'pro')
@@ -679,39 +680,77 @@ describe('validatePromotion() (P3)', () => {
     expect(JSON.parse(init.body as string)).toEqual({ code: 'TWITTER15', plan: 'pro' })
   })
 
-  it('falls back to the seed table when the api 404s on a known seed code', async () => {
+  // REGRESSION GUARD (P1-3): a 200 ok:false body is a REJECTION. Before the
+  // fix this resolved to a "valid" promo with an undefined discount. It must
+  // now throw, carrying the api's error code + message.
+  it('rejects a 200 ok:false body (invalid code) instead of reporting valid', async () => {
     const m = installFetch()
-    m.mockResolvedValueOnce(jsonResponse(
-      { error: 'not_found', message: 'no such route' },
-      { status: 404, statusText: 'Not Found' },
-    ))
-    const r = await validatePromotion('TWITTER15', 'pro')
-    expect(r.promotion.code).toBe('TWITTER15')
-    expect(r.promotion.discount.kind).toBe('percent_off')
-    expect(r.promotion.discount.value).toBe(15)
+    m.mockResolvedValueOnce(jsonResponse({
+      ok: false,
+      error: 'promotion_not_found',
+      message: 'Code not found.',
+      agent_action: 'Tell the user this promo code is invalid.',
+    }))
+    await expect(validatePromotion('NONEXISTENT', 'pro')).rejects.toMatchObject({
+      code: 'promotion_not_found',
+      message: 'Code not found.',
+    })
+    // It DID hit the live endpoint (no dead seed fallback short-circuit).
+    expect(m).toHaveBeenCalledTimes(1)
   })
 
-  it('throws promotion_not_found on 404 for an unknown code', async () => {
+  it('rejects a 200 ok:false body for a wrong-plan / expired code', async () => {
     const m = installFetch()
-    m.mockResolvedValueOnce(jsonResponse(
-      { error: 'not_found' },
-      { status: 404, statusText: 'Not Found' },
-    ))
-    await expect(validatePromotion('NONEXISTENT', 'pro')).rejects.toMatchObject({
-      status: 404,
-      code: 'promotion_not_found',
+    m.mockResolvedValueOnce(jsonResponse({
+      ok: false,
+      error: 'promotion_invalid',
+      message: "Promotion code \"OLDCODE\" is not valid for the pro plan.",
+    }))
+    await expect(validatePromotion('OLDCODE', 'pro')).rejects.toMatchObject({
+      code: 'promotion_invalid',
     })
   })
 
-  it('propagates 410 expired errors with the api message', async () => {
+  // Defensive: a malformed 200 ok:true WITHOUT a discount is still a rejection
+  // (we never surface a phantom valid promo with an empty discount).
+  it('rejects a 200 ok:true body that is missing the discount field', async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse({ ok: true, code: 'WEIRD' }))
+    await expect(validatePromotion('WEIRD', 'pro')).rejects.toMatchObject({
+      code: 'promotion_invalid',
+    })
+  })
+
+  it('propagates a true 4xx (e.g. 429 rate-limited) untouched', async () => {
     const m = installFetch()
     m.mockResolvedValueOnce(jsonResponse(
-      { error: 'promotion_expired', message: 'This code has expired.' },
-      { status: 410, statusText: 'Gone' },
+      { error: 'rate_limit_exceeded', message: 'Too many validations.' },
+      { status: 429, statusText: 'Too Many Requests' },
     ))
-    await expect(validatePromotion('OLDCODE', 'pro')).rejects.toMatchObject({
-      status: 410,
-      code: 'promotion_expired',
+    await expect(validatePromotion('ANYCODE', 'pro')).rejects.toMatchObject({
+      status: 429,
+      code: 'rate_limit_exceeded',
+    })
+  })
+
+  it('falls back to the normalised input code when the api omits code on success', async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse({
+      ok: true,
+      discount: { kind: 'percent_off', value: 10, applies_to: ['pro'] },
+      // no `code`, no `valid_until` (never-expiring code)
+    }))
+    const r = await validatePromotion('partner10', 'pro')
+    expect(r.promotion.code).toBe('PARTNER10')
+    expect(r.promotion.valid_until).toBeUndefined()
+  })
+
+  it('uses default reason copy when a 200 ok:false body omits error/message', async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse({ ok: false }))
+    await expect(validatePromotion('BARE', 'pro')).rejects.toMatchObject({
+      code: 'promotion_invalid',
+      message: 'This promotion code is not valid for the selected plan.',
     })
   })
 
@@ -1064,6 +1103,23 @@ describe('listStacks() env field', () => {
     }))
     const r = await listStacks()
     expect(r.items[0].env).toBe('production')
+  })
+
+  // REGRESSION GUARD (P1-2): list rows from the api carry 'healthy' for live
+  // stacks. listStacks() must normalise it to 'running' so list/detail status
+  // comparisons (and the StatusPill) agree with the StackStatus type.
+  it("normalises 'healthy' list rows to 'running'", async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse({
+      ok: true,
+      items: [
+        { stack_id: 'stk-live', name: 'demo', status: 'healthy', tier: 'pro', env: 'production', created_at: 'x' },
+        { stack_id: 'stk-deploying', name: 'demo2', status: 'deploying', tier: 'pro', env: 'production', created_at: 'y' },
+      ],
+    }))
+    const r = await listStacks()
+    expect(r.items[0].status).toBe('running')
+    expect(r.items[1].status).toBe('running')
   })
 })
 
@@ -1796,6 +1852,19 @@ describe('createStack()', () => {
     expect(r.stack.status).toBe('building')
     expect(r.stack.url).toBeNull()
   })
+
+  // P1-2: a rare synchronous cached-build returns 'healthy'. createStack() must
+  // normalise it to 'running' so StackCreatePage.onSubmit skips to the live
+  // stage instead of polling.
+  it("normalises a synchronous 'healthy' response to 'running'", async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse({
+      ok: true, slug: 'cached-1', status: 'healthy',
+      url: 'https://cached-1.deployment.instanode.dev',
+    }))
+    const r = await createStack(fakeFile('a.tar.gz', 100), {})
+    expect(r.stack.status).toBe('running')
+  })
 })
 
 // ─── fetchStackStatus() — GET /api/v1/stacks/:slug polling helper (D09/C06) ──
@@ -1852,6 +1921,71 @@ describe('fetchStackStatus()', () => {
     const m = installFetch()
     m.mockResolvedValueOnce(jsonResponse({ error: 'internal' }, { status: 500 }))
     await expect(fetchStackStatus('s1')).rejects.toMatchObject({ status: 500 })
+  })
+
+  // REGRESSION GUARD (P1-2): the api emits 'healthy' for a LIVE stack, but the
+  // dashboard's StackStatus / StackCreatePage poll only treat 'running' as
+  // live. Without normalisation a successful deploy spins to the 5-min poll
+  // timeout. fetchStackStatus() must map 'healthy' → 'running' so the
+  // create-page poll's `status === 'running'` live-test trips.
+  it("normalises a live stack's 'healthy' status to 'running'", async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse({
+      ok: true,
+      stack_id: 'live-stack',
+      name: 'shipped',
+      status: 'healthy', // ← raw api live state
+      tier: 'pro',
+      services: [{ name: 'app', url: 'https://live-stack.deployment.instanode.dev', status: 'healthy' }],
+    }))
+    const r = await fetchStackStatus('live-stack')
+    expect(r.stack?.status).toBe('running')
+    expect(r.stack?.url).toBe('https://live-stack.deployment.instanode.dev')
+  })
+
+  it("normalises 'deploying' (rolling out) to 'running'", async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse({
+      ok: true, stack_id: 'rolling', status: 'deploying', tier: 'pro',
+    }))
+    const r = await fetchStackStatus('rolling')
+    expect(r.stack?.status).toBe('running')
+  })
+
+  it("passes 'failed' through unchanged so the poll can stop", async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse({
+      ok: true, stack_id: 'broke', status: 'failed', tier: 'pro',
+    }))
+    const r = await fetchStackStatus('broke')
+    expect(r.stack?.status).toBe('failed')
+  })
+
+  it("maps an unknown/empty status to 'building' (spinner, not crash)", async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse({
+      ok: true, stack_id: 'mystery', status: 'pending-something', tier: 'pro',
+    }))
+    const r = await fetchStackStatus('mystery')
+    expect(r.stack?.status).toBe('building')
+  })
+
+  it("maps 'deleting' to 'stopped' (terminal-ish, no compute)", async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse({
+      ok: true, stack_id: 'going-away', status: 'deleting', tier: 'pro',
+    }))
+    const r = await fetchStackStatus('going-away')
+    expect(r.stack?.status).toBe('stopped')
+  })
+
+  it("passes 'building' through unchanged (still in flight)", async () => {
+    const m = installFetch()
+    m.mockResolvedValueOnce(jsonResponse({
+      ok: true, stack_id: 'wip', status: 'building', tier: 'pro',
+    }))
+    const r = await fetchStackStatus('wip')
+    expect(r.stack?.status).toBe('building')
   })
 })
 
