@@ -80,7 +80,23 @@ const SYNC_FILES = [
     // version missing the Enterprise line; this PRESERVES the committed local
     // copy until content HEAD also carries it. Becomes a no-op once the
     // content PR merges.
-    requireMarkers: ['redeploy=true', '"redeployed":', 'not yet a self-serve tier', '**Enterprise**'],
+    //
+    // task #69 (2026-06-06): 'troubleshooting-deploys' + the dedicated debug
+    // surface '/api/v1/deployments/:id/events' guard agent-discoverability of the
+    // deploy-failure auto-debug path. An upstream sync that ever drops the
+    // troubleshooting reference or the events surface from llms.txt PRESERVES the
+    // committed copy instead of silently reverting the documentation — so an agent
+    // reading the live https://instanode.dev/llms.txt can always find the
+    // failure-diagnosis loop. Mirrors the CONTRACT_MARKERS row in
+    // src/lib/llmsContract.test.ts (content PR #27 already carries both, no-op today).
+    requireMarkers: [
+      'redeploy=true',
+      '"redeployed":',
+      'not yet a self-serve tier',
+      '**Enterprise**',
+      'troubleshooting-deploys',
+      '/api/v1/deployments/:id/events',
+    ],
   },
 ]
 
