@@ -45,3 +45,37 @@ describe('prerender.mjs Step 4.6 — authShellRoutes (UI-3)', () => {
     expect(src).toMatch(/['"]\/app\/billing['"]:\s*{[^}]*title:/)
   })
 })
+
+/* Bug-3 (2026-06-06): the agent-facing troubleshooting page is linked from
+ * llms.txt as https://instanode.dev/docs/troubleshooting-deploys.md, but that
+ * nested per-section .md route 404'd — only /docs.md (concatenated) and the
+ * legal /docs/public/*.md statics resolved. Step 6b of emitMarkdownRoutes now
+ * emits /docs/<slug>.md for every docs section so the contract URL 200s.
+ *
+ * These are source guards (deterministic, no filesystem/build dependency) so
+ * they run identically under `npm run gate` (build-then-vitest) and the
+ * coverage job (vitest only, no build) — every line is always executed. The
+ * real-file emission is exercised by `npm run build` in the gate; the existing
+ * llmsContract.test.ts already pins the `troubleshooting-deploys` reference in
+ * public/llms.txt, so URL and contract stay in lock-step. */
+describe('prerender.mjs Step 6b — per-section docs .md mirrors (Bug-3)', () => {
+  const src = readFileSync(PRERENDER, 'utf-8')
+
+  it('emits /docs/<slug>.md from each .content/docs section file', () => {
+    // The loop derives the slug from the docs filename and writes /docs/<slug>.
+    expect(src).toMatch(/writeRouteMd\(`\/docs\/\$\{slug\}`/)
+  })
+
+  it('excludes per-section docs from the aggregate (content already in /docs.md)', () => {
+    // The per-section mirror call passes includeInAggregate=false (third arg)
+    // so /llms-full.txt does not duplicate every docs section.
+    expect(src).toMatch(/writeRouteMd\(`\/docs\/\$\{slug\}`,[^)]*,\s*false\)/)
+  })
+
+  it('builds each section mirror from the section title + frontmatter-stripped body', () => {
+    // The mirror is the standalone section: an H1 from frontmatter title and
+    // the body with its YAML frontmatter removed (mirrors buildDocsPage).
+    expect(src).toMatch(/const title = meta\.title \|\| slug/)
+    expect(src).toMatch(/`# \$\{title\}\\n\\n\$\{body\}\\n`/)
+  })
+})

@@ -590,12 +590,20 @@ async function emitMarkdownRoutes() {
   // route '/foo'   → dist/foo.md
   // route '/foo/bar' → dist/foo/bar.md
   // route '/'      → dist/index.md
-  async function writeRouteMd(route, content) {
+  //
+  // includeInAggregate (default true): whether the route's content is also
+  // concatenated into /llms-full.txt. The per-section docs mirrors pass false
+  // because their content already appears verbatim in the /docs.md
+  // concatenated mirror — including them too would duplicate every docs
+  // section in the one-shot aggregate.
+  async function writeRouteMd(route, content, includeInAggregate = true) {
     const fileSubpath = route === '/' ? 'index.md' : route.replace(/^\//, '') + '.md'
     const outPath = resolve(DIST, fileSubpath)
     await mkdir(dirname(outPath), { recursive: true })
     await writeFile(outPath, content, 'utf-8')
-    out.push({ route: route === '/' ? '/index.md' : route + '.md', content })
+    if (includeInAggregate) {
+      out.push({ route: route === '/' ? '/index.md' : route + '.md', content })
+    }
   }
 
   // 1. React-only pages — read from .content/pages/<name>.md
@@ -657,6 +665,32 @@ async function emitMarkdownRoutes() {
   if (docsFiles.length > 0) {
     const docsPage = await buildDocsPage(docsDir, docsFiles)
     await writeRouteMd('/docs', docsPage)
+
+    // 6b. Per-section .md mirrors — /docs/<slug>.md for every docs section.
+    //
+    // The /docs HTML page renders all sections under one route with anchor
+    // ids equal to the source filename slug (buildDocsPage sets s.id =
+    // filename, matching the `#troubleshooting-deploys` HTML anchor). The
+    // /llms.txt agent contract links the section directly as
+    // `/docs/<slug>.md` (e.g. the troubleshooting-deploys auto-debug guide).
+    // Without these per-section mirrors that URL 404s — only /docs.md (the
+    // concatenated mirror) and the legal /docs/public/*.md statics resolved.
+    //
+    // Each mirror is the standalone section: an H1 title (from frontmatter)
+    // + the section body with its YAML frontmatter stripped. This mirrors the
+    // blog/use-case per-slug .md pattern above so an agent can fetch ONE
+    // section instead of the whole concatenated doc. GH Pages serves the
+    // nested file directly (proven by the existing /docs/public/*.md statics).
+    for (const f of docsFiles) {
+      const slug = f.replace(/\.md$/, '')
+      const src = await readFile(resolve(docsDir, f), 'utf-8')
+      const meta = parseFrontmatter(src)
+      const body = src.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '').trim()
+      const title = meta.title || slug
+      // includeInAggregate=false: the content is already in /docs.md (the
+      // concatenated mirror that IS in the aggregate).
+      await writeRouteMd(`/docs/${slug}`, `# ${title}\n\n${body}\n`, false)
+    }
   }
 
   return out
