@@ -72,6 +72,14 @@ export interface MintedUser {
   sessionJWT: string
   /** Pre-seeded resource tokens (empty unless mintUserWithResources was used). */
   seededTokens: string[]
+  /**
+   * The app_id of the seeded FAILED deployment (status=failed + a
+   * failure_autopsy event with reason/last_lines/hint), present only when minted
+   * via mintUserWithFailedDeploy(). Empty string otherwise. The failure-diag
+   * journey navigates to /app/deployments/<failedDeployID> and reads
+   * GET /api/v1/deployments/<id>/events with this id.
+   */
+  failedDeployID: string
 }
 
 interface MintResponseBody {
@@ -82,6 +90,7 @@ interface MintResponseBody {
   session_jwt: string
   seeded_tokens?: string[]
   seeded_count?: number
+  failed_deploy_id?: string
 }
 
 // ── Mint ─────────────────────────────────────────────────────────────────────
@@ -89,6 +98,15 @@ interface MintResponseBody {
 interface MintOpts {
   tier?: MintableTier
   withResources?: boolean
+  /**
+   * Pre-seed ONE failed deployment + its failure_autopsy event (OOMKilled, exit
+   * 137, JS-heap last_lines, a memory hint) on the minted team. Surfaces the
+   * deployment's app_id as failed_deploy_id on the response. Pure DB rows on the
+   * api side (no k8s) — synchronous + sub-ms. Used by the failure-diagnosis
+   * journey to render the FailureAutopsyPanel + read /events against a real
+   * backend. api: internal_e2e_account.go with_failed_deploy (#70, 021bb7e).
+   */
+  withFailedDeploy?: boolean
 }
 
 /**
@@ -111,7 +129,11 @@ export async function mintUser(
   const resp = await request.fetch(`${base}/internal/e2e/account`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', [E2E_ACCOUNT_TOKEN_HEADER]: accountToken() },
-    data: JSON.stringify({ tier, with_resources: !!opts.withResources }),
+    data: JSON.stringify({
+      tier,
+      with_resources: !!opts.withResources,
+      with_failed_deploy: !!opts.withFailedDeploy,
+    }),
     failOnStatusCode: false,
   })
   // Inert-by-default 404: the token is wrong or the endpoint isn't armed on
@@ -141,6 +163,7 @@ export async function mintUser(
     tier: body.tier,
     sessionJWT: body.session_jwt,
     seededTokens: body.seeded_tokens ?? [],
+    failedDeployID: body.failed_deploy_id ?? '',
   }
 }
 
@@ -150,6 +173,21 @@ export function mintUserWithResources(
   opts: Omit<MintOpts, 'withResources'> = {},
 ): Promise<MintedUser | null> {
   return mintUser(request, { ...opts, withResources: true })
+}
+
+/**
+ * Mint an account pre-seeded with ONE failed deployment + its failure_autopsy
+ * event (default tier pro — deployments_apps headroom). The returned
+ * MintedUser.failedDeployID is the seeded deployment's app_id; the
+ * failure-diagnosis journey navigates to /app/deployments/<failedDeployID> and
+ * reads GET /api/v1/deployments/<id>/events with it. Returns null when the
+ * factory is unarmed (caller SKIPs). See mintUser + the withFailedDeploy opt.
+ */
+export function mintUserWithFailedDeploy(
+  request: APIRequestContext,
+  opts: Omit<MintOpts, 'withFailedDeploy'> = {},
+): Promise<MintedUser | null> {
+  return mintUser(request, { tier: 'pro', ...opts, withFailedDeploy: true })
 }
 
 /**
