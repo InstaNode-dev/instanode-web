@@ -27,6 +27,17 @@
 //   #7 team invite ........... POST /api/v1/team/members/invite,
 //                              GET /api/v1/team/invitations,
 //                              DELETE /api/v1/team/invitations/:id
+//   tier-matrix .............. GET /auth/me, GET /api/v1/resources,
+//                              GET /api/v1/deployments, GET /api/v1/billing,
+//                              GET /api/v1/vault/:env
+//                              (per-tier × per-page render sweep — the gated/
+//                              ungated UI assertions read these per minted tier;
+//                              live-ui-tier-matrix.spec.ts)
+//   error-states ............. GET /auth/me, POST /auth/logout (401 revoke leg),
+//                              POST /api/v1/resources/:id/pause (real 402 wall),
+//                              GET /api/v1/deployments (429/5xx route-stubbed +
+//                              real empty-state)
+//                              (async/error-state sweep; live-ui-error-states.spec.ts)
 export const coveredRoutes: string[] = [
   // #1 auth round-trip (UI)
   'GET /auth/me',
@@ -56,4 +67,13 @@ export const coveredRoutes: string[] = [
   'POST /api/v1/team/members/invite',
   'GET /api/v1/team/invitations',
   'DELETE /api/v1/team/invitations/:id',
+  // tier-matrix + error-states sweeps: the per-tier render assertions and the
+  // 401-revoke / billing-render legs read these against the real api. Each must
+  // already be a 'live' flow in prod-coverage-manifest.ts (the done-bar guard's
+  // reverse-drift check enforces it). /auth/me + /resources + /deployments are
+  // already listed above (journeys #1–#3); billing + vault-list + logout are the
+  // routes these two sweeps newly drive through the browser.
+  'GET /api/v1/billing',
+  'GET /api/v1/vault/:env',
+  'POST /auth/logout',
 ]
