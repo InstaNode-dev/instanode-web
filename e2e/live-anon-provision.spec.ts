@@ -281,6 +281,12 @@ test.describe('LIVE — every anonymous provision flow → backend-assert → re
         headers: id.headers,
         data: JSON.stringify({ name }),
         failOnStatusCode: false,
+        // Bound the provision call: a CREATE that intermittently hangs on
+        // postgres-customers contention would otherwise eat the whole test
+        // timeout (a hang, not slowness — raising the test timeout just makes it
+        // last longer). 45s fails fast → Playwright retries → passes on the next
+        // attempt when the contention clears. Pairs with the orphan-DB sweep.
+        timeout: 45_000,
       })
 
       test.skip(

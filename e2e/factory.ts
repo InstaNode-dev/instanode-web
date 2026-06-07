@@ -135,6 +135,10 @@ export async function mintUser(
       with_failed_deploy: !!opts.withFailedDeploy,
     }),
     failOnStatusCode: false,
+    // Bound the mint: with_resources provisions real DBs server-side, which can
+    // hang on postgres-customers contention. 45s fails fast → the spec SKIPs
+    // (mint==null) rather than hanging the whole test on a stalled mint.
+    timeout: 45_000,
   })
   // Inert-by-default 404: the token is wrong or the endpoint isn't armed on
   // this stack. Treat as "can't mint" → null (caller SKIPS), never a red.
@@ -217,6 +221,9 @@ export async function reap(request: APIRequestContext, teamID: string): Promise<
     method: 'DELETE',
     headers: { [E2E_ACCOUNT_TOKEN_HEADER]: accountToken() },
     failOnStatusCode: false,
+    // Bound the cohort reap: the team-cascade drops customer DBs; a hung DROP
+    // must fail fast (45s), not hang teardown. afterAll + ledger reaper backstop.
+    timeout: 45_000,
   })
   const ok = [200, 202, 204, 404, 410].includes(resp.status())
   if (!ok) {

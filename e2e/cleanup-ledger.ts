@@ -184,6 +184,10 @@ export async function reapEntities(
         method: 'DELETE',
         headers,
         failOnStatusCode: false,
+        // Bound the reap DELETE: a DROP that hangs on postgres-customers
+        // contention must fail fast (45s) rather than hang teardown to the test
+        // timeout. The on-disk ledger backstop re-reaps on the next run.
+        timeout: 45_000,
       })
       const status = resp.status()
       const bodyText = status >= 200 && status < 300 ? '' : await resp.text().catch(() => '<unreadable>')
