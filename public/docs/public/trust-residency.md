@@ -45,7 +45,7 @@ Customer databases are backed up via snapshot. Snapshot retention by tier:
 | Pro | 30 days |
 | Team | 90 days |
 
-Customer-initiated restore from a snapshot is rolling out for Pro and Team tiers. Until that surface is live, restore is operator-assisted — open a ticket at `support@instanode.dev` with the resource ID and target timestamp.
+Customer-initiated restore from a snapshot is rolling out for Pro and Team tiers. Until that surface is live, restore is operator-assisted — open a ticket at `contact@instanode.dev` with the resource ID and target timestamp.
 
 ### Vault
 
@@ -79,7 +79,7 @@ We aim to say only what is true. Here is what is true today.
 |---|---|
 | SOC 2 Type II | In progress. Target completion Q3 2026. Audit firm not yet selected. We do not have a SOC 2 report to share today. |
 | HIPAA | Not supported. We do not sign Business Associate Agreements today. If you need a BAA, email `enterprise@instanode.dev` so we can scope a Team-tier engagement and tell you whether and when we can support it. |
-| GDPR | Standard Contractual Clauses (Module Two, controller-to-processor) are incorporated by reference in our [Data Processing Agreement](./dpa.md) — sign the DPA via `support@instanode.dev` to activate them. The product gating is separate: as of 2026-05, instanode.dev runs in NYC3 only, so customers whose users are EU residents should not route their PII through us without a separate residency commitment from the platform side. EU customers requiring an EU data-residency posture should wait for eu-west-1. |
+| GDPR | Standard Contractual Clauses (Module Two, controller-to-processor) are incorporated by reference in our [Data Processing Agreement](./dpa.md) — sign the DPA via `contact@instanode.dev` to activate them. The product gating is separate: as of 2026-05, instanode.dev runs in NYC3 only, so customers whose users are EU residents should not route their PII through us without a separate residency commitment from the platform side. EU customers requiring an EU data-residency posture should wait for eu-west-1. |
 | PCI-DSS | We do not handle cardholder data. Payment processing runs through Razorpay. Do not store card numbers in instanode.dev resources. |
 
 If you are on a procurement call that requires a compliance answer not listed here, contact `security@instanode.dev` and we will tell you the truth instead of dodging.

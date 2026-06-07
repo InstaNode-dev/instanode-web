@@ -51,7 +51,7 @@ export function TermsPage() {
             Anonymous tier is free with a 24-hour TTL. Paid tiers
             (Hobby / Hobby Plus / Pro / Team) bill via Razorpay from day
             one — there is no free trial. Cancel by emailing{' '}
-            <code>support@instanode.dev</code>; existing resources keep
+            <code>contact@instanode.dev</code>; existing resources keep
             their tier until the end of the current billing period.
           </li>
           <li>

@@ -267,7 +267,7 @@ export function BillingPage() {
           We couldn't load your billing details right now. {billingErr ? <code style={{ color: 'var(--text-dim)' }}>{billingErr}</code> : null}
         </div>
         <div style={{ marginTop: 8, fontSize: 12, color: 'var(--text-dim)' }}>
-          Try again in a moment, or contact <a href="mailto:support@instanode.dev" style={{ color: 'var(--accent)' }}>support@instanode.dev</a> if it persists.
+          Try again in a moment, or contact <a href="mailto:contact@instanode.dev" style={{ color: 'var(--accent)' }}>contact@instanode.dev</a> if it persists.
         </div>
       </div>
     )
@@ -436,7 +436,7 @@ export function BillingPage() {
         <div style={{ marginTop: 10, display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
           <a
             className="btn btn-ghost btn-sm"
-            href="mailto:support@instanode.dev?subject=Cancel%20subscription"
+            href="mailto:contact@instanode.dev?subject=Cancel%20subscription"
             data-testid="contact-support-cancel"
           >
             Cancel? Contact support
@@ -718,7 +718,7 @@ function UpdatePaymentButton() {
       <a
         className="btn btn-sm btn-ghost"
         style={{ marginLeft: 'auto' }}
-        href="mailto:support@instanode.dev?subject=Update%20payment%20method"
+        href="mailto:contact@instanode.dev?subject=Update%20payment%20method"
         data-testid="contact-support-update-payment"
       >
         Contact support

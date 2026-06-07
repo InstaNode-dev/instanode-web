@@ -255,7 +255,7 @@ export function ChangePlanModal({
               You're already on the highest plan available through self-serve.
               To explore a custom plan,{' '}
               <a
-                href="mailto:support@instanode.dev?subject=Plan%20change"
+                href="mailto:contact@instanode.dev?subject=Plan%20change"
                 style={{ color: 'var(--accent)' }}
               >
                 contact support
@@ -354,7 +354,7 @@ export function ChangePlanModal({
                 <div style={{ marginTop: 6 }}>
                   Still stuck?{' '}
                   <a
-                    href="mailto:support@instanode.dev?subject=Change%20plan%20failed"
+                    href="mailto:contact@instanode.dev?subject=Change%20plan%20failed"
                     data-testid="change-plan-support-fallback"
                     style={{ color: 'var(--accent)' }}
                   >
@@ -396,7 +396,7 @@ export function ChangePlanModal({
                 who clicked "Change plan" hoping to downgrade aren't dead-
                 ended. Policy memory: downgrade is support-only. */}
             <a
-              href="mailto:support@instanode.dev?subject=Downgrade%20plan"
+              href="mailto:contact@instanode.dev?subject=Downgrade%20plan"
               data-testid="change-plan-downgrade-support"
               style={{ fontSize: 11, color: 'var(--text-faint)' }}
             >
