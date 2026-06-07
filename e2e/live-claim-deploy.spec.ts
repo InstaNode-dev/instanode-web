@@ -232,6 +232,15 @@ async function provisionInEnv(
 test.describe('LIVE — W3 claim/conversion + deploy-lifecycle + env-switcher (cross-surface)', () => {
   test.describe.configure({ mode: 'serial' })
 
+  // These legs do real prod provisioning + claim + deploy (each heavy) and the
+  // assert-usable connect from the CI runner — occasionally well past the 120s
+  // default under prod contention, timing out the serial group on transient
+  // latency (recovered on retry). Raise the per-test budget so a slow-but-OK
+  // run doesn't red the suite. See live-anon-provision.spec.ts for the same.
+  test.beforeEach(() => {
+    test.setTimeout(180_000)
+  })
+
   // Hard skip in normal CI: the LIVE harness must never make the per-PR gate
   // depend on a reachable backend.
   test.skip(

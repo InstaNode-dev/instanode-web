@@ -255,6 +255,15 @@ test.describe('LIVE — every anonymous provision flow → backend-assert → re
     }: {
       request: APIRequestContext
     }) => {
+      // Real prod provisioning (esp. /vector = CREATE DATABASE + CREATE
+      // EXTENSION, /nosql, /db) + the assert-usable connect from the CI runner
+      // occasionally spikes well past Playwright's 120s default under prod
+      // contention — normally ~14s, but a busy provisioner has been seen to
+      // exceed 2min, timing out the whole serial group (one slow flow aborts the
+      // rest). Give the live provision+connect+reap real headroom so transient
+      // latency flakes (recovered on retry today) stop redding the suite. This
+      // verifies the flow WORKS, not that it's <120s.
+      test.setTimeout(180_000)
       const name = cohortName(`anon-${flow.label}`)
 
       // ── Create: real provision against the live api ────────────────────────
