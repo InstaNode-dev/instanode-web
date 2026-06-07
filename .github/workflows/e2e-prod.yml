@@ -46,16 +46,19 @@ name: E2E LIVE (prod, minted account)
 on:
   workflow_dispatch: {}
   schedule:
-    # Every 30 minutes — continuous prod integration signal.
+    # Every 30 minutes — continuous prod integration signal. This is the
+    # controlled cadence for the FULL live suite: it provisions real customer
+    # DBs on shared prod infra, so it must NOT run on every build. (We tried
+    # push:[main] + an api per-deploy dispatch; on a busy day that fired the
+    # full provision suite dozens of times, accumulating customer DBs faster
+    # than reaps cleaned them and degrading prod provisioning — self-DoS. The
+    # cheap per-build coverage lives elsewhere: e2e-pr-smoke.yml runs the
+    # contract-only leg on every web PR, and the api's webhook-injection unit
+    # test + auth-contract dispatch cover the money path per api build.)
     - cron: '*/30 * * * *'
-  push:
-    # Every UI build (merge to main = a web deploy) runs the full payment/UI
-    # suite against prod, so a UI change that breaks the money funnel is caught
-    # on the build that ships it — not only on the next 30-min tick.
-    branches: [main]
   repository_dispatch:
-    # Fired by the api on every push to master (an API build/deploy) so an
-    # api-side change to checkout/webhook is exercised by the browser suite too.
+    # Kept as an ON-DEMAND hook (operators can fire it deliberately). NOT wired
+    # to fire on every api deploy anymore — see the schedule rationale above.
     types: [e2e-prod-from-deploy]
 
 concurrency:
