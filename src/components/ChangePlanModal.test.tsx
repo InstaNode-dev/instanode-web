@@ -146,7 +146,7 @@ describe('ChangePlanModal — target tier rendering', () => {
   it('always renders the downgrade-via-support exit path', () => {
     render(<ChangePlanModal currentTier="hobby" onClose={() => {}} />)
     const link = screen.getByTestId('change-plan-downgrade-support') as HTMLAnchorElement
-    expect(link.href).toContain('mailto:support@instanode.dev')
+    expect(link.href).toContain('mailto:contact@instanode.dev')
   })
 
   it('preselects defaultTargetTier when it is a valid (self-serve) upgrade', () => {

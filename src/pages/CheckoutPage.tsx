@@ -82,7 +82,7 @@ import { useDashboardCtx } from '../hooks/useDashboardCtx'
 // stuck users back there is the right fallback — they can see what they
 // were about to buy and email support to complete the purchase manually.
 const RAZORPAY_FALLBACK_URL = 'https://instanode.dev/pricing'
-const SUPPORT_EMAIL = 'support@instanode.dev'
+const SUPPORT_EMAIL = 'contact@instanode.dev'
 
 // Login redirect target — used when the second-layer auth gate trips.
 // Lives outside the component so it survives test re-renders and matches

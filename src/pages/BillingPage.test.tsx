@@ -300,7 +300,7 @@ describe('BillingPage — initial render', () => {
     expect(screen.queryByRole('button', { name: /cancel subscription/i })).toBeNull()
     const link = screen.getByTestId('contact-support-cancel') as HTMLAnchorElement
     expect(link.tagName).toBe('A')
-    expect(link.href.toLowerCase()).toContain('mailto:support@instanode.dev')
+    expect(link.href.toLowerCase()).toContain('mailto:contact@instanode.dev')
   })
 })
 
@@ -751,7 +751,7 @@ describe('BillingPage — cancellation is support-only', () => {
     render(<BillingPage />)
     await waitForLoaded()
     const link = screen.getByTestId('contact-support-cancel') as HTMLAnchorElement
-    expect(link.href.toLowerCase()).toContain('mailto:support@instanode.dev')
+    expect(link.href.toLowerCase()).toContain('mailto:contact@instanode.dev')
   })
 })
 

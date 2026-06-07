@@ -10,7 +10,7 @@
  *      yearly CTA aimed at /app/checkout?plan=…&frequency=….
  *   2. The FAQ no longer claims "Cancel anytime" — that contradicted the
  *      no-self-serve-cancel policy. We assert the new copy mentions
- *      support@instanode.dev so the BillingPage and PricingPage copy
+ *      contact@instanode.dev so the BillingPage and PricingPage copy
  *      stay in lock-step.
  *   3. M11 source-of-truth-risk regression: the four public tier cards
  *      (anonymous, hobby, pro, team) are all present. The pricing matrix
@@ -107,10 +107,10 @@ describe('PricingPage — FAQ matches no-self-serve-cancel policy (W12 H14)', ()
     expect(body).not.toContain('Cancel anytime')
   })
 
-  it("mentions support@instanode.dev with the 24h SLA — matches BillingPage copy", () => {
+  it("mentions contact@instanode.dev with the 24h SLA — matches BillingPage copy", () => {
     renderPage()
     const body = document.body.textContent ?? ''
-    expect(body).toContain('support@instanode.dev')
+    expect(body).toContain('contact@instanode.dev')
     expect(body).toContain('within 24h')
   })
 })

@@ -236,14 +236,14 @@ const FAQ: { q: string; a: string }[] = [
     // Calling this out on the public surface stops customers from
     // emailing us asking "what's $19/mo or $99/mo?".
     q: 'What are Hobby Plus and Growth — I see them in the API?',
-    a: "Intermediate tiers ($19/mo and $99/mo) summarized above under \"Between the headline tiers\". They sit between Hobby/Pro and Pro/Team and are surfaced to existing customers as upgrade nudges (e.g. when a Hobby team hits 80% of its quota). They're not in the headline ladder on purpose — three public tiers are a cleaner first-time funnel. If you want them, ask in the dashboard or email support@instanode.dev."
+    a: "Intermediate tiers ($19/mo and $99/mo) summarized above under \"Between the headline tiers\". They sit between Hobby/Pro and Pro/Team and are surfaced to existing customers as upgrade nudges (e.g. when a Hobby team hits 80% of its quota). They're not in the headline ladder on purpose — three public tiers are a cleaner first-time funnel. If you want them, ask in the dashboard or email contact@instanode.dev."
   },
   {
     // W12 H14: previous copy said "Cancel anytime" which contradicted the
     // platform's no-self-serve-cancel policy. The honest answer matches
     // the BillingPage copy: cancellation is support-only with a 24h SLA.
     q: 'How is billing handled?',
-    a: "Razorpay subscriptions. Cancel by emailing support@instanode.dev — we'll process within 24h. Existing resources keep their tier until the end of the current period."
+    a: "Razorpay subscriptions. Cancel by emailing contact@instanode.dev — we'll process within 24h. Existing resources keep their tier until the end of the current period."
   },
   {
     q: 'Can I move resources between envs?',
@@ -254,7 +254,7 @@ const FAQ: { q: string; a: string }[] = [
     // platform's no-self-serve-cancel/downgrade policy and the sibling
     // billing FAQ above. The previous copy implied a self-serve toggle.
     q: 'What happens if I downgrade?',
-    a: "Downgrades are handled by support — email support@instanode.dev and we'll process within 24h. Existing resources retain their old tier limits as a courtesy; new provisions follow the new tier."
+    a: "Downgrades are handled by support — email contact@instanode.dev and we'll process within 24h. Existing resources retain their old tier limits as a courtesy; new provisions follow the new tier."
   }
 ]
 
