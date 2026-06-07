@@ -290,8 +290,18 @@ async function driveUpgradeToCheckout(page: Page): Promise<UpgradeOutcome> {
   try {
     await expect(redirecting.or(fallback).or(errorPanel).or(emailGate)).toBeVisible({ timeout: 30_000 })
   } catch {
+    // When the api is ARMED (test keys live), CheckoutPage gets a real short_url
+    // and calls window.location.assign immediately — our route() aborts that
+    // top-level nav, which can tear the React tree down before the
+    // checkout-redirecting testid stabilises, so toBeVisible can time out even
+    // though the redirect DID happen. If the route captured a Razorpay URL,
+    // that's a successful 'razorpay' outcome, not 'stuck'.
+    if (capturedShortUrl) return { kind: 'razorpay', detail: capturedShortUrl }
     return { kind: 'stuck', detail: 'no terminal checkout state within 30s (still loading?)' }
   }
+  // Same race even on the success branch: the route may have fired before any
+  // panel rendered. Prefer the captured URL the instant we have it.
+  if (capturedShortUrl) return { kind: 'razorpay', detail: capturedShortUrl }
 
   if (await fallback.isVisible().catch(() => false)) {
     return { kind: 'fallback', detail: 'billing-not-configured fallback panel' }
