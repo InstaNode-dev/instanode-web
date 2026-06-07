@@ -366,17 +366,32 @@ async function driveRazorpayTestCard(page: Page): Promise<boolean> {
     await popup.waitForLoadState('domcontentloaded').catch(() => {})
   }
 
-  // Razorpay sometimes shows a "Card" payment-method tab first. Try to click it.
+  // The flow, as observed driving a real TEST-mode INR subscription checkout
+  // (2026-06-07): the short_url lands on a Razorpay "Subscription Details" page
+  // with a "Start Subscription" button → that opens the checkout iframe listing
+  // UPI / Cards / EMandate → pick Cards → fill card → "Continue" → an RBI
+  // "Save your card as per RBI guidelines?" mandate modal (required for
+  // recurring) → "Yes, secure my card" → a mock-bank OTP step → enter 1234 →
+  // "Continue". Every step is best-effort (clickIfPresent never throws) so a
+  // markup change still soft-fails rather than redding the nightly.
+
+  // 0) Subscription details page → "Start Subscription" opens the checkout iframe.
   await clickIfPresent(target, [
-    'text=/^card$/i',
-    'text=/cards?/i',
+    'button:has-text("Start Subscription")',
+    'button:has-text("Start subscription")',
+  ])
+  // Give the checkout iframe a beat to mount before scanning frames.
+  await target.waitForTimeout(2000).catch(() => {})
+
+  // 1) Select the "Cards" payment method (the INR checkout defaults to UPI).
+  await clickIfPresent(target, [
+    '[role="radio"][aria-label*="card" i]',
+    'text=/^cards?$/i',
     '[data-testid="card"]',
     'button:has-text("Card")',
   ])
 
-  // Find the card-number field across the page + its frames. Razorpay nests the
-  // PCI card fields in iframes; we scan candidate frames for a recognisable
-  // number input.
+  // 2) Find + fill the card fields across the page + its (cross-origin) frames.
   const cardFilled = await fillCardAcrossFrames(target)
   if (!cardFilled) {
     // eslint-disable-next-line no-console
@@ -384,8 +399,10 @@ async function driveRazorpayTestCard(page: Page): Promise<boolean> {
     return false
   }
 
-  // Submit (Pay). The button label varies (Pay, Pay Now, ₹…).
+  // 3) Submit the card. For SUBSCRIPTIONS the button is "Continue" (one-time
+  //    payments say "Pay"); try both.
   const submitted = await clickIfPresent(target, [
+    'button:has-text("Continue")',
     'button:has-text("Pay")',
     'button:has-text("Subscribe")',
     'button[type="submit"]',
@@ -393,12 +410,19 @@ async function driveRazorpayTestCard(page: Page): Promise<boolean> {
   ])
   if (!submitted) {
     // eslint-disable-next-line no-console
-    console.warn('[live-ui-payment] could not find the Razorpay Pay/Submit button — markup changed?')
+    console.warn('[live-ui-payment] could not find the Razorpay Continue/Pay button — markup changed?')
     return false
   }
 
-  // Mock-bank / 3DS OTP step. Enter OTP 1234 and click Success/Submit. Both the
-  // OTP field and the success button are in the bank-simulator frame on TEST.
+  // 4) RBI save-card mandate modal ("Save your card as per RBI guidelines?") —
+  //    required for recurring. Best-effort; absent on some flows.
+  await target.waitForTimeout(1000).catch(() => {})
+  await clickIfPresent(target, [
+    'button:has-text("Yes, secure my card")',
+    'button:has-text("secure my card")',
+  ])
+
+  // 5) Mock-bank / 3DS OTP step. Enter OTP 1234 and click Continue/Success.
   const otpDone = await enterOtpAcrossFrames(target, TEST_OTP)
   if (!otpDone) {
     // The OTP step may be skipped for some test flows; don't fail solely on it.
@@ -501,9 +525,10 @@ async function enterOtpAcrossFrames(page: Page, otp: string): Promise<boolean> {
       }
     }
   }
-  // Click Success / Submit on the bank simulator (TEST mode renders a "Success"
-  // button; OTP 1234 is also valid).
+  // Submit the OTP. The TEST bank simulator's button is "Continue" (newer
+  // checkout) or "Success"/"Submit" (older) — try all.
   await clickIfPresent(page, [
+    'button:has-text("Continue")',
     'button:has-text("Success")',
     'button:has-text("Submit")',
     'button[type="submit"]',
