@@ -179,6 +179,13 @@ test.describe('LIVE-UI — Razorpay TEST-card payment (free → upgrade → Pro)
     browser,
     request,
   }) => {
+    // The full flow is multi-step (Razorpay subscription page → checkout iframe →
+    // card → RBI mandate modal → 3DS/OTP) PLUS up to a 90s tier poll, which
+    // exceeds Playwright's 120s default and HARD-times-out before the
+    // soft-skip/assert can run. Give it room so the happy path completes and the
+    // resilient soft-skip paths (markup undriveable / tier didn't flip) actually
+    // execute instead of redding the suite on a timeout.
+    test.setTimeout(240_000)
     test.skip(!factoryArmed(), 'E2E_ACCOUNT_TOKEN unset — cannot mint a cohort account.')
     test.skip(
       !CARD_MODE,
