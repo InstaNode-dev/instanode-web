@@ -48,7 +48,14 @@ on:
   schedule:
     # Every 30 minutes — continuous prod integration signal.
     - cron: '*/30 * * * *'
+  push:
+    # Every UI build (merge to main = a web deploy) runs the full payment/UI
+    # suite against prod, so a UI change that breaks the money funnel is caught
+    # on the build that ships it — not only on the next 30-min tick.
+    branches: [main]
   repository_dispatch:
+    # Fired by the api on every push to master (an API build/deploy) so an
+    # api-side change to checkout/webhook is exercised by the browser suite too.
     types: [e2e-prod-from-deploy]
 
 concurrency:
