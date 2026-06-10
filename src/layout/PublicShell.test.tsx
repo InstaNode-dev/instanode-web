@@ -94,3 +94,18 @@ describe('PublicShell — dark/light theme toggle (B3-P2-4)', () => {
     expect(document.documentElement.hasAttribute('data-theme')).toBe(false)
   })
 })
+
+describe('PublicShell — footer support email consistency (2026-06-11)', () => {
+  it('footer Contact link uses the canonical contact@ address, not hello@', () => {
+    render(<PublicShell><p>hi</p></PublicShell>)
+    const mailtos = Array.from(document.querySelectorAll('a[href^="mailto:"]')).map(
+      (a) => a.getAttribute('href') ?? '',
+    )
+    expect(mailtos.some((h) => h.includes('hello@instanode.dev'))).toBe(false)
+    const contact = Array.from(document.querySelectorAll('a')).find(
+      (a) => (a.textContent ?? '').trim() === 'Contact',
+    ) as HTMLAnchorElement | undefined
+    expect(contact).toBeTruthy()
+    expect(contact!.getAttribute('href')).toContain('mailto:contact@instanode.dev')
+  })
+})

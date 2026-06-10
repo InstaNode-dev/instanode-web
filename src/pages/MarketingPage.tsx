@@ -249,7 +249,12 @@ export function MarketingPage() {
       {/* ---------- top nav (sticky, glassmorphic) ---------- */}
       <nav className="mkt-nav" aria-label="Primary">
         <div className="mkt-wrap mkt-nav-inner">
-          <a href="/" className="mkt-brand-link" aria-label="instanode home">
+          {/* WCAG 2.5.3 (Label in Name): the accessible name must contain the
+              visible text. The brand renders "instanode.dev", so the
+              aria-label must include "instanode.dev" (was "instanode home",
+              which dropped the visible ".dev" — a label/name mismatch a
+              voice-control user can't target). Matches PublicShell's brand. */}
+          <a href="/" className="mkt-brand-link" aria-label="instanode.dev — home">
             <Brand />
           </a>
           {/* B1-P0-1 (2026-05-20): nav links read from the shared
@@ -612,9 +617,11 @@ export function MarketingPage() {
               product run in production + staging + development. Team is for the company
               that ships every day —{' '}
               {/* BugBash P3-09: the teaser said "talk to us" but had no
-                  contact path. Link to the real address used elsewhere
-                  (PublicShell footer Contact, support FAQ). */}
-              <a href="mailto:hello@instanode.dev">talk to us</a> about your needs.
+                  contact path. 2026-06-11: standardized on contact@ — the
+                  canonical support address used by the FAQ, cancel/downgrade
+                  links, billing, terms, and the content repo. (sales@ stays
+                  for Team/Enterprise lead capture only.) */}
+              <a href="mailto:contact@instanode.dev">talk to us</a> about your needs.
             </p>
           </div>
 
@@ -770,15 +777,21 @@ export function MarketingPage() {
                 <code>npm create</code> to a live URL.
               </p>
             </div>
+            {/* WCAG 1.3.1 / heading-order: these footer column headers were
+                <h4> while the page's deepest preceding heading was <h3> (the
+                how-it-works step cards). An <h4> with no <h3> ancestor in the
+                footer skips a level, breaking the document outline for screen
+                readers. They're <h3> now — the next level below the page's
+                <h2> sections, no skipped level. */}
             <div className="mkt-footer-col">
-              <h4>Product</h4>
+              <h3>Product</h3>
               <a href={ROUTES.pricing}>Pricing</a>
               <a href={ROUTES.forAgents}>For agents</a>
               <a href={ROUTES.docs}>Docs</a>
               <a href={ROUTES.blog}>Blog</a>
             </div>
             <div className="mkt-footer-col">
-              <h4>Legal</h4>
+              <h3>Legal</h3>
               {/* W12 H15: /privacy and /terms are real routes again
                   (stop-gap placeholder pages with a legal@ email).
                   /llms.txt is served from the apex by the prerender
@@ -1746,10 +1759,11 @@ const MKT_CSS = `
   font-size: 12px;
   color: var(--text);
 }
-.mkt-footer-col h4 {
+.mkt-footer-col h3 {
   font-family: var(--font-mono);
   font-size: 11px;
-  color: var(--text-faint);
+  /* WCAG AA: --text-muted (5.1:1) not --text-faint (2.4:1) — read content. */
+  color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.05em;
   margin: 0 0 16px;

@@ -507,7 +507,10 @@ describe('OverviewPage — Stat sparklines (no fake trend data)', () => {
 // this site, this test fails loudly.
 describe('OverviewPage — W12 XSS hardening (activity feed is plain text)', () => {
   it('renders an activity row with hostile HTML as a text node — no <img> element materialises', async () => {
-    const hostile = '<img src=x onerror=alert(1)>'
+    // Text-bearing hostile input: the leading "deployed " survives the
+    // tag-strip empty-row filter (2026-06-11) so the row still renders, while
+    // the <img> payload must NOT materialise as an element.
+    const hostile = 'deployed <img src=x onerror=alert(1)>'
     ;(api.listResources as any).mockResolvedValueOnce({ ok: true, total: 0, items: [] })
     ;(api.fetchActivity as any).mockResolvedValueOnce({
       ok: true,
