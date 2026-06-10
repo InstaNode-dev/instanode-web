@@ -314,6 +314,56 @@ describe('ClaimPage — submitting the email funnels into checkout', () => {
     expect(screen.queryByTestId('claim-funnel')).toBeNull()
   })
 
+  // account_exists recovery: when the api refuses the claim because the email
+  // already has an account, the user is told to log in — and must be given a
+  // control to do so. The CTA carries the claim token through ?next= so the
+  // claim resumes after sign-in. Detected via the api error's code/status.
+  it('renders a "Log in to claim" CTA on an account_exists (code) claim failure', async () => {
+    const jwt = buildClaimJWT()
+    const err = Object.assign(new Error('An account already exists for this email. Sign in instead.'), {
+      code: 'account_exists',
+      status: 409,
+    })
+    ;(api.claim as any).mockRejectedValue(err)
+    renderClaim(jwt)
+    fireEvent.change(screen.getByTestId('claim-email'), { target: { value: 'taken@example.com' } })
+    fireEvent.click(screen.getByTestId('claim-submit'))
+    await waitFor(() => {
+      expect(screen.getByTestId('claim-account-exists-login')).toBeTruthy()
+    })
+    const cta = screen.getByTestId('claim-account-exists-login') as HTMLAnchorElement
+    expect(cta.tagName).toBe('A')
+    // The login CTA carries the claim token through ?next= so the post-login
+    // flow can resume the claim.
+    const href = cta.getAttribute('href') ?? ''
+    expect(href).toContain('/login?next=')
+    expect(decodeURIComponent(href)).toContain(`/claim?t=${jwt}`)
+    // The claim was still refused — no funnel, no session minted.
+    expect(screen.queryByTestId('claim-funnel')).toBeNull()
+  })
+
+  it('does NOT render the login CTA on already_claimed (also 409, but code differs)', async () => {
+    const err = Object.assign(new Error('Link already used'), { code: 'already_claimed', status: 409 })
+    // already_claimed is ALSO 409 — but it must NOT offer the login CTA (the
+    // recovery is "ask your agent for a fresh link", not "log in"). The detection
+    // keys on the error CODE so the CTA is account_exists-specific, not 409-wide.
+    ;(api.claim as any).mockRejectedValue(err)
+    renderClaim()
+    fireEvent.change(screen.getByTestId('claim-email'), { target: { value: 'founder@example.com' } })
+    fireEvent.click(screen.getByTestId('claim-submit'))
+    await waitFor(() => expect(screen.getByTestId('claim-error').textContent).toContain('Link already used'))
+    expect(screen.queryByTestId('claim-account-exists-login')).toBeNull()
+  })
+
+  it('does NOT render the login CTA on a plain Error claim failure (no code)', async () => {
+    ;(api.claim as any).mockRejectedValue(new Error('Claim failed.'))
+    renderClaim()
+    fireEvent.change(screen.getByTestId('claim-email'), { target: { value: 'founder@example.com' } })
+    fireEvent.click(screen.getByTestId('claim-submit'))
+    await waitFor(() => expect(screen.getByTestId('claim-error').textContent).toContain('Claim failed'))
+    expect(screen.queryByTestId('claim-account-exists-login')).toBeNull()
+  })
+
   it('does not block the funnel if listResources fails', async () => {
     ;(api.claim as any).mockResolvedValue({
       ok: true, team_id: 't', user_id: 'u', session_token: 's',

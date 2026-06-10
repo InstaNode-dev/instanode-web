@@ -1,7 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { Brand } from '../components/Common'
-import { setToken, clearToken, fetchMe } from '../api'
+import { setToken, clearToken, fetchMe, getToken, completeCliSession } from '../api'
 import { postAuthDestination } from '../lib/postAuthDestination'
 
 const OAUTH_API_BASE_DEFAULT = 'https://api.instanode.dev'
@@ -55,6 +55,43 @@ export function LoginPage() {
   const [emailBusy, setEmailBusy] = useState(false)
   const [emailSent, setEmailSent] = useState(false)
   const [emailErr, setEmailErr] = useState<string | null>(null)
+
+  // D2 — already-signed-in CLI device-flow completion.
+  //
+  // When a developer who is ALREADY authenticated runs `instant login`, the
+  // CLI opens /login?cli_session=<id> and polls. The fresh-OAuth/magic-link
+  // path completes the device flow in LoginCallbackPage (it POSTs
+  // /auth/cli/{id}/complete after sign-in) — but an already-authed user never
+  // takes that path: they land directly on /login with a live token and would
+  // otherwise be shown the sign-in form again, never firing the completion.
+  // So here, when BOTH a token exists AND cli_session is present, we fire the
+  // SAME completion path (completeCliSession) immediately and show a terminal-
+  // return confirmation instead of the sign-in form. Mirrors LoginCallbackPage:
+  // same function, best-effort (completeCliSession swallows its own errors), and
+  // a failure surfaces a note but does NOT hard-block.
+  const [cliApproved, setCliApproved] = useState<null | 'ok' | 'failed'>(null)
+  // Ref guard so completeCliSession fires EXACTLY once. React StrictMode (and
+  // any fast remount) double-invokes mount effects in dev; the server side is
+  // idempotent, but firing one POST keeps the behaviour deterministic and
+  // avoids a duplicate device-flow completion. We deliberately do NOT abort the
+  // state update on effect cleanup: under StrictMode the first pass's cleanup
+  // fires before the async resolves, and gating on a per-pass `cancelled` flag
+  // (combined with the fire-once ref preventing the second pass from re-firing)
+  // would drop the result entirely and never render the confirmation. A
+  // setState after unmount is a no-op in React 19, so firing once and always
+  // committing the outcome is correct here.
+  const cliFiredRef = useRef(false)
+  useEffect(() => {
+    const cli = readCliSession()
+    // Only the already-authed path runs here. A fresh-login user has no token
+    // yet; their cli_session rides through return_to to LoginCallbackPage.
+    if (!cli || !getToken() || cliFiredRef.current) return
+    cliFiredRef.current = true
+    void (async () => {
+      const { ok } = await completeCliSession(cli)
+      setCliApproved(ok ? 'ok' : 'failed')
+    })()
+  }, [])
 
   // sendMagicLink — POST /auth/email/start. Extracted from submitEmail so the
   // "Resend" affordance in the sent-confirmation state (F4) can re-fire the
@@ -130,13 +167,70 @@ export function LoginPage() {
       navigate(dest, { replace: true })
     } catch (e: any) {
       clearToken()
-      setErr(
-        e?.status === 401
-          ? 'Token rejected. Mint a fresh PAT or use the claim link from your agent.'
-          : `Couldn't reach the API: ${e?.message ?? 'unknown error'}`,
-      )
+      const rejected = 'Token rejected. Mint a fresh PAT or use the claim link from your agent.'
+      const unreachable = `Couldn't reach the API: ${e?.message ?? 'unknown error'}`
+      setErr(e?.status === 401 ? rejected : unreachable)
       setBusy(false)
     }
+  }
+
+  // D2 — already-authed CLI approval confirmation. The user came from a
+  // terminal (they ran `instant login`); don't silently drop them into the
+  // dashboard. Show a clear "return to your terminal" screen. On a completion
+  // failure we still confirm they're signed in and tell them to retry the CLI
+  // (completeCliSession never throws, so this is the only failure surface).
+  if (cliApproved !== null) {
+    return (
+      <div className="auth-shell">
+        <div className="auth-card" data-testid="cli-approved" style={{ maxWidth: 480 }}>
+          <div style={{ marginBottom: 28 }}>
+            <Brand />
+          </div>
+          {cliApproved === 'ok' ? (
+            <>
+              <h1>CLI session approved.</h1>
+              <div
+                role="status"
+                data-testid="cli-approved-ok"
+                style={{
+                  marginTop: 16,
+                  padding: '10px 12px',
+                  borderLeft: '2px solid var(--accent)',
+                  fontSize: 13,
+                  fontFamily: 'var(--font-mono)',
+                  color: 'var(--text)',
+                  lineHeight: 1.6,
+                }}
+              >
+                ✓ Your CLI session is approved — return to your terminal. You can
+                close this tab.
+              </div>
+            </>
+          ) : (
+            <>
+              <h1>Couldn't approve the CLI session.</h1>
+              <div
+                role="alert"
+                data-testid="cli-approved-failed"
+                style={{
+                  marginTop: 16,
+                  padding: '10px 12px',
+                  borderLeft: '2px solid var(--rose)',
+                  fontSize: 13,
+                  fontFamily: 'var(--font-mono)',
+                  color: 'var(--text)',
+                  lineHeight: 1.6,
+                }}
+              >
+                You're signed in, but we couldn't link this browser to your CLI
+                session — it may have expired. Re-run <code style={{ color: 'var(--accent)' }}>instant login</code> in
+                your terminal to get a fresh link.
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    )
   }
 
   return (
