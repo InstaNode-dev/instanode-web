@@ -286,7 +286,15 @@ export async function mockAdminPromoIssue(
   })
 }
 
-export async function installAPIFake(page: Page) {
+// The plan tier installAPIFake's /auth/me reports unless a test overrides it.
+// COMMERCE-FIRST REDIRECT (2026-06-10): the post-auth landing routes by this
+// tier (hobby = paid + upgrade-eligible → /app/billing), so any spec that
+// drives a real login flow must pass/assume the tier EXPLICITLY rather than
+// relying on this default silently — see auth.spec.ts.
+export const FAKE_TIER = 'hobby'
+
+export async function installAPIFake(page: Page, opts: { tier?: string } = {}) {
+  const tier = opts.tier ?? FAKE_TIER
   // GET /auth/me — agent API shape
   await page.route('**/auth/me', (route: Route) =>
     route.fulfill({
@@ -297,7 +305,7 @@ export async function installAPIFake(page: Page) {
         user_id: FAKE_USER,
         team_id: FAKE_TEAM,
         email: 'aanya@example.com',
-        tier: 'hobby',
+        tier,
         trial_ends_at: null,
       }),
     }),

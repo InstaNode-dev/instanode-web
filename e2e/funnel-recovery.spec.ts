@@ -40,13 +40,15 @@ async function mockEmailStart(page: Page, captured: { body?: any; count: number 
 }
 
 /** Mock GET /auth/me → 200 so the callback page's post-token verification
- *  succeeds and it proceeds to navigation. */
-async function mockAuthMe(page: Page) {
+ *  succeeds and it proceeds to navigation. The tier is EXPLICIT because the
+ *  COMMERCE-FIRST REDIRECT (2026-06-10) routes the post-auth landing by it:
+ *  free → /pricing, paid+eligible → /app/billing, team → /app. */
+async function mockAuthMe(page: Page, tier: string) {
   await page.route(AUTH_ME_PATH, (route: Route) =>
     route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify({ ok: true, user_id: 'u1', team_id: 't1', email: TEST_EMAIL, tier: 'free' }),
+      body: JSON.stringify({ ok: true, user_id: 'u1', team_id: 't1', email: TEST_EMAIL, tier }),
     }),
   )
 }
@@ -138,8 +140,15 @@ test.describe('D2 — CLI device-flow completion', () => {
     expect(cap.body?.return_to).toContain(`/login/callback?cli_session=${CLI_SESSION_ID}`)
   })
 
-  test('the callback POSTs /auth/cli/{id}/complete then lands the user on /app', async ({ page }) => {
-    await mockAuthMe(page)
+  // The post-completion landing follows the COMMERCE-FIRST REDIRECT
+  // (2026-06-10, memory project_commerce_first_redirect_at_interactions):
+  // the CLI got its token via POST /auth/cli/{id}/complete, so the browser
+  // tab is a scarce free interaction — a free-tier user is pushed to
+  // /pricing (NOT /app). The cli_session is not a deep-link; only an
+  // explicit ?next= / saved return_to overrides the tier rule.
+
+  test('the callback POSTs /auth/cli/{id}/complete then lands a free user on /pricing', async ({ page }) => {
+    await mockAuthMe(page, 'free')
     const completeCap = { id: '', count: 0 }
     await page.route(CLI_COMPLETE_PATH, (route: Route) => {
       completeCap.count += 1
@@ -152,31 +161,34 @@ test.describe('D2 — CLI device-flow completion', () => {
     // The callback uses the legacy ?session_token path (no cookie exchange
     // needed for the mock) + ?cli_session to trigger completion.
     await page.goto(`/login/callback?session_token=${SESSION_TOKEN}&cli_session=${CLI_SESSION_ID}`)
-    await expect(page).toHaveURL(/\/app\/?$/)
+    // free tier → commerce-first push to /pricing after the device flow
+    // completes; the CLI itself is already unblocked by the POST below.
+    await expect(page).toHaveURL(/\/pricing$/)
     expect(completeCap.count).toBe(1)
     expect(completeCap.id).toBe(CLI_SESSION_ID)
   })
 
-  test('a cli-completion failure does NOT block the user sign-in (still lands on /app)', async ({ page }) => {
-    await mockAuthMe(page)
+  test('a cli-completion failure does NOT block the user sign-in (still lands post-auth)', async ({ page }) => {
+    await mockAuthMe(page, 'free')
     await page.route(CLI_COMPLETE_PATH, (route: Route) =>
       route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ error: 'session_not_found' }) }),
     )
     await page.goto(`/login/callback?session_token=${SESSION_TOKEN}&cli_session=${CLI_SESSION_ID}`)
     // completeCliSession swallows the error; the browser user must still
-    // reach the app.
-    await expect(page).toHaveURL(/\/app\/?$/)
+    // reach the signed-in landing (free tier → /pricing, commerce-first).
+    await expect(page).toHaveURL(/\/pricing$/)
   })
 
   test('no cli_session → the callback never calls /auth/cli/.../complete', async ({ page }) => {
-    await mockAuthMe(page)
+    await mockAuthMe(page, 'free')
     let completeCalled = false
     await page.route(CLI_COMPLETE_PATH, (route: Route) => {
       completeCalled = true
       return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true }) })
     })
     await page.goto(`/login/callback?session_token=${SESSION_TOKEN}`)
-    await expect(page).toHaveURL(/\/app\/?$/)
+    // free tier → /pricing (commerce-first post-auth landing).
+    await expect(page).toHaveURL(/\/pricing$/)
     expect(completeCalled).toBe(false)
   })
 })

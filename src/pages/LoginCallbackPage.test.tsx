@@ -39,6 +39,7 @@ function renderCallback(search: string) {
         <Route path="/login/callback" element={<LoginCallbackPage />} />
         <Route path="/app" element={<div data-testid="app-landed">app</div>} />
         <Route path="/app/billing" element={<div data-testid="billing-landed">billing</div>} />
+        <Route path="/pricing" element={<div data-testid="pricing-landed">pricing</div>} />
       </Routes>
     </MemoryRouter>,
   )
@@ -84,6 +85,38 @@ describe('LoginCallbackPage', () => {
     ;(api.fetchMe as any).mockRejectedValue({})
     renderCallback('?session_token=bad')
     await waitFor(() => expect(screen.getByText(/Session token rejected by the API/)).toBeTruthy())
+  })
+
+  // ---- COMMERCE-FIRST REDIRECT (2026-06-10) ----
+  // Post-auth landing routes by the signed-in user's plan tier unless a
+  // deep-link return_to is present. fetchMe() resolves to the adapted
+  // AuthMeResponse shape ({ user: { tier } }).
+
+  it('commerce-first: free tier → /pricing', async () => {
+    ;(api.fetchMe as any).mockResolvedValue({ user: { tier: 'free' } })
+    renderCallback('?session_token=abc')
+    await waitFor(() => expect(screen.getByTestId('pricing-landed')).toBeTruthy())
+  })
+
+  it('commerce-first: paid+eligible tier (pro) → /app/billing', async () => {
+    ;(api.fetchMe as any).mockResolvedValue({ user: { tier: 'pro' } })
+    renderCallback('?session_token=abc')
+    await waitFor(() => expect(screen.getByTestId('billing-landed')).toBeTruthy())
+  })
+
+  it('commerce-first: top tier (team) → /app, never a Team checkout', async () => {
+    ;(api.fetchMe as any).mockResolvedValue({ user: { tier: 'team' } })
+    renderCallback('?session_token=abc')
+    await waitFor(() => expect(screen.getByTestId('app-landed')).toBeTruthy())
+  })
+
+  it('commerce-first: a saved /app deep-link overrides the free-tier pricing push', async () => {
+    ;(api.fetchMe as any).mockResolvedValue({ user: { tier: 'free' } })
+    localStorage.setItem('instanode.return_to', '/app/checkout?plan=pro')
+    renderCallback('?session_token=abc')
+    // Deep-link wins → does NOT land on /pricing.
+    await waitFor(() => expect(screen.queryByTestId('pricing-landed')).toBeNull())
+    expect(localStorage.getItem('instanode.return_to')).toBeNull()
   })
 
   // ---- AUTH-004 (cookie-exchange) flow ----
