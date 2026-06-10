@@ -136,7 +136,9 @@ export function StatusPage() {
       {/* FIX-G (2026-05-14): "Subscribe via RSS" link removed — /status.rss
           404s on the API. See IncidentsPage for the matching cleanup. */}
       <section className="public-section status-links">
-        <a href="https://github.com/instanode" className="status-link">GitHub status</a>
+        {/* Display-detail accuracy (2026-06-11): github.com/instanode is an
+            unrelated third-party org — ours is InstaNode-dev. */}
+        <a href="https://github.com/InstaNode-dev" className="status-link">GitHub status</a>
         <span className="status-link-sep">·</span>
         <a href="/incidents" className="status-link">Incident log</a>
       </section>

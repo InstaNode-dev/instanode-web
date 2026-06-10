@@ -67,10 +67,16 @@ const PLAYGROUND_CURL = `curl -X POST https://api.instanode.dev/db/new \\
 // provisioning response (CLAUDE.md convention #11) — a caller that omits
 // `env` lands in `development`, the lowest-stakes bucket. The earlier
 // sample dropped it, so the page misrepresented the wire shape.
+// Display-detail accuracy (2026-06-11): the page promises "what hits the
+// wire — no mocks", so the shapes must match prod: `token` is a UUID
+// (openapi DBProvisionResponse format:uuid, not the old fabricated
+// "res_…"), the public host is pg.instanode.dev (POSTGRES_PUBLIC_HOST;
+// "shared-1.instanode.dev" never existed), and role/db names follow the
+// provisioner's canonical usr_{token[:12]}/db_{token[:12]} scheme.
 const PLAYGROUND_RESPONSE = `{
   "ok": true,
-  "token": "res_2RtL9k4mP",
-  "connection_url": "postgres://u_3jX:••••@shared-1.instanode.dev:5432/db_2rtL9k4mp",
+  "token": "9b2f61ce-4a3d-4e8b-b150-7c2f0a4d9e21",
+  "connection_url": "postgres://usr_9b2f61ce4a3d:••••@pg.instanode.dev:5432/db_9b2f61ce4a3d",
   "tier": "anonymous",
   "env": "development",
   "limits": { "storage_mb": 10, "connections": 2 },
@@ -172,7 +178,9 @@ export function ForAgentsPage() {
             <div className="fa-play-head">
               <span className="fa-play-dot fa-play-dot--res" />
               response
-              <span className="fa-play-meta">200 · 1.4s · application/json</span>
+              {/* Display-detail accuracy (2026-06-11): /db/new returns
+                  201 Created (synchronous provisioning), not 200. */}
+              <span className="fa-play-meta">201 · 1.4s · application/json</span>
             </div>
             <pre className="public-code"><code>{highlightJson(PLAYGROUND_RESPONSE)}</code></pre>
           </div>
