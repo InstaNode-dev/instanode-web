@@ -16,6 +16,7 @@ vi.mock('../api', async () => {
     ...actual,
     setToken: vi.fn(),
     fetchMe: vi.fn(),
+    completeCliSession: vi.fn(() => Promise.resolve({ ok: true })),
   }
 })
 
@@ -163,5 +164,38 @@ describe('LoginCallbackPage', () => {
 
     expect(fetchSpy).not.toHaveBeenCalled()
     expect(api.setToken).toHaveBeenCalledWith('legacy123')
+  })
+
+  // ---- D2: CLI device-flow completion ----
+  // When ?cli_session=<id> rides along on the callback, the page must POST
+  // /auth/cli/{id}/complete (via completeCliSession) AFTER the session token
+  // is stored + verified, then still navigate the browser user to /app.
+
+  it('D2: completes the CLI session when ?cli_session is present, then navigates', async () => {
+    ;(api.fetchMe as any).mockResolvedValue({ ok: true })
+    renderCallback('?session_token=abc&cli_session=cli_123')
+    await waitFor(() => expect(screen.getByTestId('app-landed')).toBeTruthy())
+    expect(api.completeCliSession).toHaveBeenCalledTimes(1)
+    expect(api.completeCliSession).toHaveBeenCalledWith('cli_123')
+    // The session token is stored BEFORE the completion call so the api
+    // gets the authenticated Bearer.
+    expect(api.setToken).toHaveBeenCalledWith('abc')
+  })
+
+  it('D2: does NOT call completeCliSession when cli_session is absent', async () => {
+    ;(api.fetchMe as any).mockResolvedValue({ ok: true })
+    renderCallback('?session_token=abc')
+    await waitFor(() => expect(screen.getByTestId('app-landed')).toBeTruthy())
+    expect(api.completeCliSession).not.toHaveBeenCalled()
+  })
+
+  it('D2: a CLI-completion failure never blocks the user sign-in navigation', async () => {
+    ;(api.fetchMe as any).mockResolvedValue({ ok: true })
+    // completeCliSession is best-effort and swallows errors itself, but even
+    // if it rejected, the browser user must still land on /app.
+    ;(api.completeCliSession as any).mockResolvedValue({ ok: false })
+    renderCallback('?session_token=abc&cli_session=cli_dead')
+    await waitFor(() => expect(screen.getByTestId('app-landed')).toBeTruthy())
+    expect(api.completeCliSession).toHaveBeenCalledWith('cli_dead')
   })
 })

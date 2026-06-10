@@ -2262,6 +2262,40 @@ export async function claim(body: { jwt: string; email: string }): Promise<Claim
   return call('/claim', { method: 'POST', body: JSON.stringify(body) })
 }
 
+// ─── CLI device-flow completion (D2) ─────────────────────────────────────
+//
+// The CLI opens /login?cli_session=<id> in the browser and then polls
+// GET /auth/cli/{id} for the issued api_key. The browser half is what flips
+// the pending session from "waiting" to "complete": once the user finishes
+// OAuth / magic-link sign-in IN THE BROWSER, the SPA POSTs
+//   POST /auth/cli/{id}/complete
+// with the just-minted *session* Bearer (call() attaches it from getToken()).
+// The api (contract: 200 {ok:true}) associates the pending CLI session with
+// the now-authenticated user's team, so the CLI's next poll returns the
+// api_key. Before this helper existed, App.tsx forwarded ?cli_session= to
+// /login then DROPPED it — the CLI polled forever and the device-flow never
+// completed from the web side.
+//
+// Best-effort by design: the caller (LoginCallbackPage) must NOT block the
+// user's own sign-in navigation on the CLI completion. A failure here means
+// the CLI keeps polling (and eventually times out / the user retries), which
+// is strictly better than trapping the browser user on the callback screen.
+// So we swallow errors and report the outcome as a boolean.
+export async function completeCliSession(sessionId: string): Promise<{ ok: boolean }> {
+  if (!sessionId) return { ok: false }
+  try {
+    await call<{ ok: boolean }>(
+      `/auth/cli/${encodeURIComponent(sessionId)}/complete`,
+      { method: 'POST' },
+    )
+    return { ok: true }
+  } catch {
+    // Non-fatal — the browser user is already signed in; the CLI half will
+    // retry or time out on its own. Never surface this as a sign-in failure.
+    return { ok: false }
+  }
+}
+
 // ─── §10.20 cached aggregates (LIVE) ────────────────────────────────────
 //
 // Two server-side cached endpoints replace what the dashboard previously

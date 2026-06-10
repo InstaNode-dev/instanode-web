@@ -89,6 +89,15 @@ const SYNC_FILES = [
     // reading the live https://instanode.dev/llms.txt can always find the
     // failure-diagnosis loop. Mirrors the CONTRACT_MARKERS row in
     // src/lib/llmsContract.test.ts (content PR #27 already carries both, no-op today).
+    //
+    // F6/anon-deploy (2026-06-10): the canonical homepage example is the
+    // anonymous "no signup" flow, which MUST deploy via POST /stacks/new
+    // (/deploy/new requires a Bearer JWT — memory
+    // project_anonymous_deploy_via_stacks_not_deploy_new). The marker pins
+    // the corrected wording so an upstream content sync that still tells the
+    // anon flow to call /deploy/new PRESERVES the committed copy rather than
+    // reverting agents back to the broken instruction. No-op once the content
+    // repo carries the same correction.
     requireMarkers: [
       'redeploy=true',
       '"redeployed":',
@@ -96,6 +105,7 @@ const SYNC_FILES = [
       '**Enterprise**',
       'troubleshooting-deploys',
       '/api/v1/deployments/:id/events',
+      'anonymous deploys go through `/stacks/new`',
     ],
   },
 ]

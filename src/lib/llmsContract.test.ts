@@ -97,6 +97,19 @@ const CONTRACT_MARKERS: DocsMarker[] = [
     file: 'public/llms.txt',
     mustContain: ['troubleshooting-deploys', '/api/v1/deployments/:id/events'],
   },
+  {
+    // F6 / anon-deploy (2026-06-10): the canonical homepage example is the
+    // anonymous "no signup" path, which MUST deploy via POST /stacks/new — NOT
+    // POST /deploy/new (which is RequireAuth; memory
+    // project_anonymous_deploy_via_stacks_not_deploy_new). The old example told
+    // the anon agent to call /deploy/new, which 401s for an anonymous caller.
+    // Pin the corrected instruction so a docs revert or a content-repo sync that
+    // restores the broken wording reds CI. Mirrors the requireMarkers guard in
+    // scripts/fetch-content.mjs (lock-step, rule 22).
+    field: 'anonymous deploy uses POST /stacks/new, not /deploy/new (canonical example)',
+    file: 'public/llms.txt',
+    mustContain: ['anonymous deploys go through `/stacks/new`'],
+  },
 ]
 
 describe('agent docs contract — POST /deploy/new redeploy=true', () => {

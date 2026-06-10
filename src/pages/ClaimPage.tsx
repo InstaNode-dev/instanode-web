@@ -7,6 +7,45 @@ import type { Resource, ResourceType } from '../api'
 type Preview = { type: ResourceType; id: string; size: string }
 type Stage = 'enter-email' | 'claiming' | 'choose-plan' | 'checkout' | 'error'
 
+// F6 (2026-06-10): point funnel recovery at the one working auth path.
+// Magic-link / claim-email delivery is 100%-failing (Brevo sender
+// unvalidated — CLAUDE.md P0), so when a claim flow hits a dead end (no
+// token, expired token), GitHub OAuth is the only path that actually signs
+// the user in and lets them reach their resources / a paid plan. We surface
+// it as the primary CTA in those states.
+const OAUTH_API_BASE_DEFAULT = 'https://api.instanode.dev'
+const OAUTH_CALLBACK_PATH = '/login/callback'
+
+function startGitHubOAuth() {
+  const apiBase =
+    (typeof window !== 'undefined' && (window as any).__INSTANODE_API_URL__) || OAUTH_API_BASE_DEFAULT
+  const returnTo = encodeURIComponent(window.location.origin + OAUTH_CALLBACK_PATH)
+  window.location.href = `${apiBase}/auth/github/start?return_to=${returnTo}`
+}
+
+// GitHubRecoveryCta — the shared "Continue with GitHub" recovery button used
+// by the dead-end claim states. Kept as a component so the testid + copy stay
+// identical across the tokenless and invalid-link surfaces.
+function GitHubRecoveryCta({ note }: { note: string }) {
+  return (
+    <div style={{ marginTop: 20 }}>
+      <button
+        type="button"
+        className="btn btn-primary"
+        data-testid="claim-github-oauth"
+        onClick={startGitHubOAuth}
+        style={{ width: '100%', justifyContent: 'center', gap: 10 }}
+      >
+        <span aria-hidden="true" style={{ fontFamily: 'var(--font-mono)' }}>▢</span>
+        <span>Continue with GitHub</span>
+      </button>
+      <p style={{ marginTop: 10, fontSize: 11, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)', lineHeight: 1.5 }}>
+        {note}
+      </p>
+    </div>
+  )
+}
+
 function decodeJWT(jwt: string): {
   rt?: string[]
   tok?: string[]
@@ -170,6 +209,10 @@ export function ClaimPage() {
           <div style={{ marginBottom: 24 }}><Brand /></div>
           <h1>Missing claim link.</h1>
           <p>This page expects a token. Open the claim link from your agent's response.</p>
+          {/* F6: already have an account, or lost the link? GitHub OAuth is
+              the working sign-in path — get them into the app rather than
+              stranding them on a dead page. */}
+          <GitHubRecoveryCta note="Already signed up, or lost the link? Sign in with GitHub to reach your resources." />
         </div>
       </div>
     )
@@ -202,7 +245,11 @@ export function ClaimPage() {
             Tokens are single-use and expire after 24 hours. Ask your agent to call
             <code style={{ marginLeft: 4 }}>POST /db/new</code> (or any /new endpoint) to mint a fresh link.
           </div>
-          <Link to="/pricing" className="btn btn-primary" data-testid="claim-invalid-pricing" style={{ width: '100%', justifyContent: 'center' }}>
+          {/* F6: GitHub OAuth as the primary recovery path — a user with an
+              expired token may already have an account; sign them in rather
+              than only offering the pricing page. */}
+          <GitHubRecoveryCta note="Already have an account? Sign in with GitHub instead of waiting on a new link." />
+          <Link to="/pricing" className="btn btn-secondary" data-testid="claim-invalid-pricing" style={{ width: '100%', justifyContent: 'center', marginTop: 12 }}>
             See plans →
           </Link>
         </div>
