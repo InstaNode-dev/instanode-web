@@ -204,7 +204,12 @@ const ROWS: Row[] = [
   { label: 'RBAC + audit', values: [{ mark: 'dash' }, { mark: 'dash' }, { mark: 'dash' }, { mark: 'check' }, { mark: 'check' }] },
   { label: 'Vault entries', values: [{ mark: 'dash' }, '20', '200', '1 000', CUSTOM] },
   { label: 'Vault envs',    values: [{ mark: 'dash' }, 'production only', 'multi-env', 'multi-env', 'multi-env'] },
-  { label: 'Backups',       values: [{ mark: 'dash' }, '7-day · no restore', '30-day · 1-click restore', '90-day · self-serve restore', 'Custom retention'] },
+  // Worker #104 (2026-06-11): backups cover Postgres / pgvector / MongoDB /
+  // Redis. Restore is self-serve for Postgres / pgvector / MongoDB; Redis is
+  // backup-only today (restore needs pod-level access — tracked follow-up).
+  // Object storage / webhook / queue have no backup coverage — the sub line
+  // names the covered services so the row can't be read as "everything".
+  { label: 'Backups',       sub: 'Postgres · pgvector · MongoDB · Redis — Redis is backup-only today (restore coming soon)', values: [{ mark: 'dash' }, '7-day · no restore', '30-day · 1-click restore', '90-day · self-serve restore', 'Custom retention'] },
   // SSO/SAML + SLA have no backend yet — shown as not-yet-available on the
   // self-serve tiers (gap analysis 2026-06-03), consistent with PricingGrid +
   // llms.txt "coming soon". Enterprise reads 'Contact us' because these are

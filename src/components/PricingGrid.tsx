@@ -136,7 +136,9 @@ export const PRICING_GRID_TIERS: TierDefinition[] = [
       { text: '1 GB MongoDB · 5 conn · 5 GB object storage' },
       { text: '2 deployments · custom domain' },
       { text: '50 vault entries · production env' },
-      { text: '14-day backups · 1-click restore' },
+      // Worker #104: restore is self-serve for Postgres/pgvector/MongoDB;
+      // Redis is backup-only today (restore is a tracked follow-up).
+      { text: '14-day backups · 1-click restore (Redis backup-only)' },
     ],
     upgradesTo: 'pro',
     // FIX-G (2026-05-14): "Most Popular" badge moved here from Pro. The W12
@@ -187,7 +189,7 @@ export const PRICING_GRID_TIERS: TierDefinition[] = [
       { text: '40 GB queues · 300 GB object storage' },
       { text: '100 deployments · 50 custom domains' },
       { text: '1 000 vault entries · multi-env' },
-      { text: '90-day backups · self-serve restore' },
+      { text: '90-day backups · self-serve restore (Redis backup-only)' },
       { text: 'RBAC + audit log · need more? contact sales' },
       { text: 'SSO / SAML (coming soon)' },
       { text: '99.9% SLA (coming soon)' },
