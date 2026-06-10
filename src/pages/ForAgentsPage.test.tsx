@@ -42,6 +42,20 @@ describe('ForAgentsPage', () => {
     expect(cta).toBeTruthy()
   })
 
+  it('playground response sample matches the real /db/new wire shape (2026-06-11 display-detail audit)', () => {
+    renderPage()
+    const text = document.body.textContent ?? ''
+    // The page promises "what hits the wire — no mocks": the public host is
+    // pg.instanode.dev (POSTGRES_PUBLIC_HOST) — "shared-1.instanode.dev"
+    // never existed — and role/db names use the provisioner's canonical
+    // usr_/db_ prefixes. /db/new returns 201 (synchronous), not 200.
+    expect(text).toContain('@pg.instanode.dev:5432')
+    expect(text).not.toContain('shared-1.instanode.dev')
+    expect(text).toContain('postgres://usr_')
+    expect(text).not.toContain('"res_')
+    expect(text).toContain('201 · 1.4s · application/json')
+  })
+
   it('copies the command and flips the button label to "copied"', async () => {
     copyMock.mockResolvedValue(true)
     renderPage()

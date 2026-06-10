@@ -383,11 +383,15 @@ export function MarketingPage() {
         </div>
       </header>
 
-      {/* ---------- seven services row ---------- */}
+      {/* ---------- eight services row ---------- */}
       <section className="mkt-section" id="services">
         <div className="mkt-wrap">
           <div className="mkt-section-head">
-            <div className="mkt-section-tag">Seven services. One bundle.</div>
+            {/* Display-detail accuracy (2026-06-11): Vector (pgvector, /vector/new)
+                joined the SERVICES array on 2026-05-20 but this headline kept
+                saying "Seven" above eight rendered cards. The count below is
+                asserted against SERVICES.length in MarketingPage.test.tsx. */}
+            <div className="mkt-section-tag">Eight services. One bundle.</div>
             <h2 className="mkt-section-title">
               The whole stack, <span className="mkt-accent">not the pieces.</span>
             </h2>
@@ -447,7 +451,11 @@ export function MarketingPage() {
                 <div className="r"><span className="k">auth</span><span className="v dim">none — fingerprinted</span></div>
                 <div className="r"><span className="k">body</span><span className="v dim">{'{}'}</span></div>
                 <div className="r" style={{ marginTop: 8 }}>
-                  <span className="k">status</span><span className="v ok">202 accepted</span>
+                  {/* Display-detail accuracy (2026-06-11): POST /db/new provisions
+                      synchronously and returns 201 Created (see /openapi.json) —
+                      the old "202 accepted" implied an async contract the db
+                      endpoint does not have (202 is /deploy/new + /stacks/new). */}
+                  <span className="k">status</span><span className="v ok">201 created</span>
                 </div>
               </div>
             </article>
@@ -460,8 +468,14 @@ export function MarketingPage() {
                 stored credentials, a connection string in 1.4 s. 24 h TTL on the free tier.
               </p>
               <div className="mkt-how-visual" aria-hidden="true">
-                <div className="r"><span className="k">service</span><span className="v">postgres 16.2</span></div>
-                <div className="r"><span className="k">region</span><span className="v dim">iad-1 · us-east</span></div>
+                {/* Display-detail accuracy (2026-06-11): prod customer Postgres runs
+                    the pgvector pg16 image (major version is the honest claim — the
+                    patch level tracks the image) in DigitalOcean nyc3, not the old
+                    fabricated "iad-1" (a region we never ran in). nyc3 is US-East
+                    (NYC) — matches the Changelog's nyc3 cutover entry and the
+                    Privacy page's "US-region cloud infrastructure". */}
+                <div className="r"><span className="k">service</span><span className="v">postgres 16</span></div>
+                <div className="r"><span className="k">region</span><span className="v dim">nyc3 · us-east</span></div>
                 <div className="r"><span className="k">size</span><span className="v">10 MB / 2 conn</span></div>
                 <div className="r"><span className="k">expires</span><span className="v dim">in 24h</span></div>
                 <div className="r" style={{ marginTop: 8 }}>
@@ -493,8 +507,8 @@ export function MarketingPage() {
                     Obfuscation" feature scans every served HTML response
                     and replaces any string that looks like name@domain.tld
                     with a "[email protected]" placeholder + JS-decode shim.
-                    The sample URL below has `u_xY9...@pg.instanode.dev`,
-                    which matches CF's regex (the `u_xY9` part is a valid
+                    The sample URL below has `usr_xY9...@pg.instanode.dev`,
+                    which matches CF's regex (the `usr_xY9` part is a valid
                     email local-part), so the live homepage rendered
                     "postgres://[email protected]:5432/d_..." — confusing
                     for visitors and broken for the hero claim card.
@@ -507,7 +521,11 @@ export function MarketingPage() {
                   className="url"
                   dangerouslySetInnerHTML={{
                     __html:
-                      '<!--email_off-->postgres://u_xY9...@pg.instanode.dev:5432/d_...<!--/email_off-->',
+                      // Display-detail accuracy (2026-06-11): the provisioner's
+                      // canonical naming is usr_{token}/db_{token} (see
+                      // provisioner internal/backend/postgres/backend.go) — the
+                      // old `u_…`/`d_…` prefixes were fabricated.
+                      '<!--email_off-->postgres://usr_xY9...@pg.instanode.dev:5432/db_...<!--/email_off-->',
                   }}
                 />
                 <div className="claim-btn">Claim these resources →</div>
@@ -701,12 +719,14 @@ export function MarketingPage() {
                   {'\n  '}{'}'}
                   {'\n'}{'}'}
                 </div>
-                {/* T18 P1-4 (2026-05-20): list the same seven tools as
-                    the "Seven services. One bundle." headline (and the
+                {/* T18 P1-4 (2026-05-20): list the same tools as the
+                    "Eight services. One bundle." headline (and the
                     SERVICES array). The earlier "Six tools" copy dropped
                     webhook — a real MCP tool — and contradicted the same
-                    page. */}
-                <p>Seven provisioning tools: <code>postgres</code>, <code>redis</code>, <code>mongo</code>, <code>queue</code>, <code>storage</code>, <code>webhook</code>, <code>deploy</code> — plus stack &amp; deployment management (<code>create_stack</code>, <code>list_stacks</code>, <code>update_stack_env</code>, <code>list_deployments</code>, <code>get_deployment</code>, <code>redeploy</code>, <code>delete_deployment</code>, …).</p>
+                    page. 2026-06-11: count bumped seven → eight and
+                    `vector` added — mcp registers create_vector (shipped
+                    with /vector/new) but this card still omitted it. */}
+                <p>Eight provisioning tools: <code>postgres</code>, <code>vector</code>, <code>redis</code>, <code>mongo</code>, <code>queue</code>, <code>storage</code>, <code>webhook</code>, <code>deploy</code> — plus stack &amp; deployment management (<code>create_stack</code>, <code>list_stacks</code>, <code>update_stack_env</code>, <code>list_deployments</code>, <code>get_deployment</code>, <code>redeploy</code>, <code>delete_deployment</code>, …).</p>
               </div>
             </div>
 

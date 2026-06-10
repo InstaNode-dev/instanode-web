@@ -88,24 +88,58 @@ describe('MarketingPage — homepage nav drift (T18 P1-2)', () => {
 })
 
 describe('MarketingPage — claim consistency (T18 P1-4 / P1-6)', () => {
-  it("'Seven services' headline matches the MCP tools card (both say seven, listing webhook)", () => {
+  it('services headline + MCP tools card count match the rendered SERVICES cards (registry-derived, not hand-typed)', () => {
     const { container } = render(
       <MemoryRouter initialEntries={['/']}>
         <MarketingPage />
       </MemoryRouter>,
     )
     const text = container.textContent ?? ''
-    // Headline says "Seven services. One bundle."
-    expect(text).toMatch(/Seven services\. One bundle\./)
-    // MCP tools card lists the seven provisioning tools (must still list
-    // webhook — anti-regression for the dropped-webhook bug) AND, per the
-    // 2026-06-03 gap fix, also surfaces the stack/deployment management tools
-    // (the MCP server registers more than seven; "Seven tools registered" was
-    // an understatement).
-    expect(text).not.toMatch(/Six provisioning tools/)
-    expect(text).toMatch(/Seven provisioning tools/)
-    expect(text).toMatch(/webhook/)
+    // 2026-06-11 display-detail audit: the headline said "Seven services"
+    // above EIGHT rendered cards (vector joined SERVICES on 2026-05-20 but
+    // the count copy was never bumped), and the MCP card said "Seven
+    // provisioning tools" while omitting `vector` (mcp registers
+    // create_vector). Per rule 18, derive the expected count from the live
+    // registry (the rendered service cards) instead of a hand-typed word so
+    // adding service #9 without bumping the copy fails this test.
+    const cardCount = container.querySelectorAll('.mkt-service-card').length
+    expect(cardCount).toBeGreaterThan(0)
+    const COUNT_WORDS = [
+      'Zero', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight',
+      'Nine', 'Ten', 'Eleven', 'Twelve',
+    ]
+    const word = COUNT_WORDS[cardCount]
+    expect(word).toBeDefined()
+    expect(text).toContain(`${word} services. One bundle.`)
+    expect(text).toContain(`${word} provisioning tools`)
+    // The MCP tools card must list every provisioning service shown in the
+    // cards row — anti-regression for the dropped-webhook (T18 P1-4) and
+    // dropped-vector (2026-06-11) bugs — plus the management tools.
+    for (const svc of ['postgres', 'vector', 'redis', 'mongo', 'queue', 'storage', 'webhook', 'deploy']) {
+      expect(text).toContain(svc)
+    }
     expect(text).toMatch(/list_deployments/)
+  })
+
+  it('mock provision visual shows real prod facts: nyc3 region, 201 for /db/new, usr_/db_ name prefixes', () => {
+    const { container } = render(
+      <MemoryRouter initialEntries={['/']}>
+        <MarketingPage />
+      </MemoryRouter>,
+    )
+    const html = container.innerHTML
+    // 2026-06-11 display-detail audit: prod runs on DigitalOcean nyc3 —
+    // "iad-1" was a fabricated region we never ran in.
+    expect(html).toContain('nyc3 · us-east')
+    expect(html).not.toContain('iad-1')
+    // POST /db/new provisions synchronously → 201 Created (openapi.json);
+    // "202 accepted" belongs to /deploy/new + /stacks/new only.
+    expect(html).toContain('201 created')
+    expect(html).not.toContain('202 accepted')
+    // Claim-card sample URL uses the provisioner's canonical usr_/db_
+    // prefixes, not the fabricated u_/d_ ones.
+    expect(html).toContain('usr_xY9')
+    expect(html).not.toContain('postgres://u_xY9')
   })
 
   it("Deploy service card claims a build window consistent with content/llms.txt (~60s, not '<10s')", () => {
