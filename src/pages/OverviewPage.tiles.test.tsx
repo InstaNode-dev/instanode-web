@@ -14,7 +14,7 @@
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest'
-import { render, cleanup, screen, waitFor, within } from '@testing-library/react'
+import { render, cleanup, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import type { Resource, ActivityItem } from '../api'
 
