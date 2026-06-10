@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Brand } from '../components/Common'
-import { setToken, fetchMe, getAPIBaseURL } from '../api'
+import { setToken, fetchMe, getAPIBaseURL, completeCliSession } from '../api'
 
 // AUTH-004 (api PR #176, 2026-05-29): the OAuth/magic-link browser
 // callback no longer puts the session JWT in the URL — it sets a Secure;
@@ -69,6 +69,21 @@ export function LoginCallbackPage() {
         // Verify the token actually works before navigating.
         await fetchMe()
         if (cancelled) return
+        // D2 (2026-06-10): CLI device-flow completion. The CLI opened
+        // /login?cli_session=<id>; LoginPage forwarded the id through the
+        // OAuth/magic-link return_to so it lands here as ?cli_session=<id>.
+        // Now that the browser user is authenticated (token stored, /auth/me
+        // verified), POST /auth/cli/{id}/complete with that session Bearer to
+        // flip the pending CLI session so the CLI's next poll returns its
+        // api_key. Best-effort: completeCliSession swallows failures and never
+        // throws — a CLI-completion error must NOT trap the browser user on
+        // this screen. We don't await it before navigating beyond storing the
+        // outcome; the api call itself is fast and idempotent server-side.
+        const cliSession = params.get('cli_session')
+        if (cliSession) {
+          await completeCliSession(cliSession)
+          if (cancelled) return
+        }
         // Restore the original destination (set by 401 interceptor pre-login)
         // or default to the authenticated overview.
         const returnTo = (() => {

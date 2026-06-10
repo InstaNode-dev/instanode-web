@@ -171,3 +171,96 @@ describe('LoginPage', () => {
     await waitFor(() => expect(screen.getByText('APP HOME')).toBeTruthy())
   })
 })
+
+// ─── F4: magic-link "sent" state is NOT a silent dead-end ────────────────
+// Email delivery is 100%-failing (Brevo sender unvalidated, CLAUDE.md P0),
+// so the "check your inbox" confirmation must offer a way out: a Resend
+// affordance + a GitHub-OAuth fallback to the one working auth path.
+describe('LoginPage — F4 magic-link recovery affordances', () => {
+  async function reachSentState() {
+    ;(globalThis as any).fetch.mockResolvedValue({ status: 202 })
+    renderAt()
+    await userEvent.type(screen.getByTestId('email-input'), 'founder@acme.dev')
+    await userEvent.click(screen.getByTestId('email-submit'))
+    await waitFor(() => expect(screen.getByTestId('magic-link-sent')).toBeTruthy())
+  }
+
+  it('renders the Resend control in the sent state', async () => {
+    await reachSentState()
+    expect(screen.getByTestId('magic-link-resend')).toBeTruthy()
+  })
+
+  it('renders the GitHub-OAuth fallback control in the sent state', async () => {
+    await reachSentState()
+    expect(screen.getByTestId('magic-link-github-fallback')).toBeTruthy()
+  })
+
+  it('clicking Resend re-POSTs /auth/email/start', async () => {
+    await reachSentState()
+    // First send already happened (1 call). Click resend → second call.
+    ;(globalThis as any).fetch.mockClear()
+    ;(globalThis as any).fetch.mockResolvedValue({ status: 202 })
+    await userEvent.click(screen.getByTestId('magic-link-resend'))
+    await waitFor(() => expect((globalThis as any).fetch).toHaveBeenCalledTimes(1))
+    const [url, init] = (globalThis as any).fetch.mock.calls[0]
+    expect(String(url)).toContain('/auth/email/start')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(init.body).email).toBe('founder@acme.dev')
+  })
+
+  it('clicking the GitHub fallback triggers the OAuth redirect', async () => {
+    await reachSentState()
+    await userEvent.click(screen.getByTestId('magic-link-github-fallback'))
+    expect(window.location.href).toContain('/auth/github/start?return_to=')
+  })
+
+  it('surfaces a resend error inline without leaving the sent state', async () => {
+    await reachSentState()
+    ;(globalThis as any).fetch.mockClear()
+    ;(globalThis as any).fetch.mockResolvedValue({
+      status: 500,
+      json: async () => ({ message: 'relay down' }),
+    })
+    await userEvent.click(screen.getByTestId('magic-link-resend'))
+    await waitFor(() =>
+      expect(screen.getByTestId('magic-link-resend-error').textContent).toContain('relay down'),
+    )
+    // Still in the sent state — the recovery controls remain available.
+    expect(screen.getByTestId('magic-link-github-fallback')).toBeTruthy()
+  })
+})
+
+// ─── D2: cli_session is preserved through the auth round-trip ────────────
+// /login?cli_session=<id> must forward the id through the OAuth + magic-link
+// return_to so LoginCallbackPage can POST /auth/cli/{id}/complete after
+// sign-in. Before this, App.tsx forwarded the param to /login then dropped
+// it, and the CLI device-flow never completed from the web side.
+describe('LoginPage — D2 cli_session preservation', () => {
+  it('appends ?cli_session=<id> to the GitHub OAuth return_to', async () => {
+    ;(window as any).location.search = '?cli_session=sess_abc'
+    renderAt('/login?cli_session=sess_abc')
+    await userEvent.click(screen.getByTestId('oauth-github'))
+    // return_to is URL-encoded once on the way into the github/start URL.
+    const href = decodeURIComponent(window.location.href)
+    expect(href).toContain('/login/callback?cli_session=sess_abc')
+  })
+
+  it('appends cli_session to the magic-link return_to', async () => {
+    ;(window as any).location.search = '?cli_session=sess_xyz'
+    ;(globalThis as any).fetch.mockResolvedValue({ status: 202 })
+    renderAt('/login?cli_session=sess_xyz')
+    await userEvent.type(screen.getByTestId('email-input'), 'founder@acme.dev')
+    await userEvent.click(screen.getByTestId('email-submit'))
+    await waitFor(() => expect((globalThis as any).fetch).toHaveBeenCalled())
+    const [, init] = (globalThis as any).fetch.mock.calls[0]
+    expect(JSON.parse(init.body).return_to).toContain('/login/callback?cli_session=sess_xyz')
+  })
+
+  it('omits cli_session from return_to when absent', async () => {
+    renderAt()
+    await userEvent.click(screen.getByTestId('oauth-github'))
+    const href = decodeURIComponent(window.location.href)
+    expect(href).toContain('/login/callback')
+    expect(href).not.toContain('cli_session')
+  })
+})
