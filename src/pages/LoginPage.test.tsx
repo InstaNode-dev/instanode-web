@@ -13,6 +13,8 @@ vi.mock('../api', async () => {
     setToken: vi.fn(),
     clearToken: vi.fn(),
     fetchMe: vi.fn(),
+    getToken: vi.fn(() => null),
+    completeCliSession: vi.fn(() => Promise.resolve({ ok: true })),
   }
 })
 
@@ -295,5 +297,57 @@ describe('LoginPage — D2 cli_session preservation', () => {
     const href = decodeURIComponent(window.location.href)
     expect(href).toContain('/login/callback')
     expect(href).not.toContain('cli_session')
+  })
+})
+
+// ─── D2: already-signed-in CLI device-flow completion ────────────────────
+// An ALREADY-authed user who runs `instant login` lands on /login?cli_session=
+// <id> with a live token. They never take the OAuth/magic-link return path
+// (LoginCallbackPage) that fires completeCliSession, so LoginPage itself must
+// fire it on mount and show a "return to your terminal" confirmation instead of
+// the sign-in form again.
+describe('LoginPage — D2 already-authed CLI completion', () => {
+  it('fires completeCliSession on mount when authed + cli_session present, shows confirmation', async () => {
+    ;(api.getToken as any).mockReturnValue('ink_live_session')
+    ;(window as any).location.search = '?cli_session=sess_authed'
+    renderAt('/login?cli_session=sess_authed')
+    await waitFor(() => expect(screen.getByTestId('cli-approved')).toBeTruthy())
+    expect(api.completeCliSession).toHaveBeenCalledTimes(1)
+    expect(api.completeCliSession).toHaveBeenCalledWith('sess_authed')
+    // The terminal-return confirmation replaces the sign-in form entirely.
+    expect(screen.getByTestId('cli-approved-ok').textContent).toContain('return to your terminal')
+    expect(screen.queryByTestId('oauth-github')).toBeNull()
+  })
+
+  it('does NOT fire completeCliSession when authed but no cli_session', async () => {
+    ;(api.getToken as any).mockReturnValue('ink_live_session')
+    ;(window as any).location.search = ''
+    renderAt('/login')
+    // Mount effect runs; without a cli_session it must be a no-op and the
+    // normal sign-in form renders.
+    await waitFor(() => expect(screen.getByTestId('oauth-github')).toBeTruthy())
+    expect(api.completeCliSession).not.toHaveBeenCalled()
+    expect(screen.queryByTestId('cli-approved')).toBeNull()
+  })
+
+  it('does NOT fire completeCliSession when cli_session present but NOT authed (fresh-login path)', async () => {
+    ;(api.getToken as any).mockReturnValue(null)
+    ;(window as any).location.search = '?cli_session=sess_fresh'
+    renderAt('/login?cli_session=sess_fresh')
+    // A signed-out user's cli_session rides through return_to to the callback
+    // page — LoginPage must NOT complete it here; it shows the sign-in form.
+    await waitFor(() => expect(screen.getByTestId('oauth-github')).toBeTruthy())
+    expect(api.completeCliSession).not.toHaveBeenCalled()
+  })
+
+  it('surfaces a non-blocking failure note when completion fails', async () => {
+    ;(api.getToken as any).mockReturnValue('ink_live_session')
+    ;(api.completeCliSession as any).mockResolvedValue({ ok: false })
+    ;(window as any).location.search = '?cli_session=sess_dead'
+    renderAt('/login?cli_session=sess_dead')
+    await waitFor(() => expect(screen.getByTestId('cli-approved-failed')).toBeTruthy())
+    // Still confirms the user is signed in; points them back at the CLI.
+    expect(screen.getByTestId('cli-approved-failed').textContent).toContain('signed in')
+    expect(screen.getByTestId('cli-approved-failed').textContent).toContain('instant login')
   })
 })

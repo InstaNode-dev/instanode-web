@@ -191,4 +191,83 @@ test.describe('D2 — CLI device-flow completion', () => {
     await expect(page).toHaveURL(/\/pricing$/)
     expect(completeCalled).toBe(false)
   })
+
+  // D2-authed: an ALREADY-signed-in user who runs `instant login` lands on
+  // /login?cli_session=<id> with a live token in localStorage. They never take
+  // the OAuth/magic-link callback path, so LoginPage itself must POST
+  // /auth/cli/{id}/complete on mount and show a terminal-return confirmation
+  // instead of the sign-in form.
+  const TOKEN_LS_KEY = 'instanode.token'
+
+  test('already-authed: LoginPage completes the CLI session and confirms', async ({ page }) => {
+    const completeCap = { id: '', count: 0 }
+    await page.route(CLI_COMPLETE_PATH, (route: Route) => {
+      completeCap.count += 1
+      const m = new URL(route.request().url()).pathname.match(/\/auth\/cli\/([^/]+)\/complete$/)
+      completeCap.id = m ? decodeURIComponent(m[1]) : ''
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true }) })
+    })
+    // Seed a live session token BEFORE the app bundle runs so getToken() returns it.
+    await page.addInitScript(([k, v]) => {
+      try { localStorage.setItem(k, v) } catch {}
+    }, [TOKEN_LS_KEY, 'ink_live_session'] as const)
+
+    await page.goto(`/login?cli_session=${CLI_SESSION_ID}`)
+    await expect(page.getByTestId('cli-approved-ok')).toBeVisible()
+    await expect(page.getByTestId('cli-approved-ok')).toContainText('return to your terminal')
+    // The sign-in form must NOT render — the user came from a terminal.
+    await expect(page.getByTestId('oauth-github')).toHaveCount(0)
+    await expect.poll(() => completeCap.count).toBe(1)
+    expect(completeCap.id).toBe(CLI_SESSION_ID)
+  })
+
+  test('already-authed: a completion failure shows the non-blocking failure note', async ({ page }) => {
+    await page.route(CLI_COMPLETE_PATH, (route: Route) =>
+      route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ error: 'session_not_found' }) }),
+    )
+    await page.addInitScript(([k, v]) => {
+      try { localStorage.setItem(k, v) } catch {}
+    }, [TOKEN_LS_KEY, 'ink_live_session'] as const)
+
+    await page.goto(`/login?cli_session=${CLI_SESSION_ID}`)
+    await expect(page.getByTestId('cli-approved-failed')).toBeVisible()
+    await expect(page.getByTestId('cli-approved-failed')).toContainText('instant login')
+  })
+})
+
+// ─── account_exists claim recovery — login CTA on the 409 dead-end ───────────
+
+test.describe('account_exists claim recovery via login CTA', () => {
+  const CLAIM_PATH = '**/claim'
+
+  function buildClaimJWT(rt: string[] = ['postgres'], tok: string[] = ['abc12345xyz']): string {
+    const b64url = (obj: unknown) =>
+      Buffer.from(JSON.stringify(obj)).toString('base64')
+        .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+    const header = b64url({ alg: 'HS256', typ: 'JWT' })
+    const payload = b64url({ rt, tok, exp: Math.floor(Date.now() / 1000) + 3600 })
+    return `${header}.${payload}.sig`
+  }
+
+  test('account_exists (409) renders a "Log in to claim" CTA carrying the token through next=', async ({ page }) => {
+    const jwt = buildClaimJWT()
+    await page.route(CLAIM_PATH, (route: Route) => {
+      if (route.request().method() !== 'POST') return route.continue()
+      return route.fulfill({
+        status: 409,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: false, error: 'account_exists', message: 'An account already exists for this email. Sign in instead.' }),
+      })
+    })
+    await page.goto(`/claim?t=${jwt}`)
+    await page.getByTestId('claim-email').fill('taken@acme.dev')
+    await page.getByTestId('claim-submit').click()
+    const cta = page.getByTestId('claim-account-exists-login')
+    await expect(cta).toBeVisible()
+    const href = await cta.getAttribute('href')
+    expect(href).toContain('/login?next=')
+    expect(decodeURIComponent(href ?? '')).toContain(`/claim?t=${jwt}`)
+    // The claim is still refused — no funnel mounted.
+    await expect(page.getByTestId('claim-funnel')).toHaveCount(0)
+  })
 })

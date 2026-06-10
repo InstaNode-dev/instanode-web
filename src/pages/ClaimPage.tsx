@@ -108,6 +108,12 @@ export function ClaimPage() {
   const [explainerOpen, setExplainerOpen] = useState(true)
   const [checkoutErr, setCheckoutErr] = useState<string | null>(null)
   const [checkoutPlan, setCheckoutPlan] = useState<'hobby' | 'pro' | null>(null)
+  // account_exists recovery: when /claim is refused because the email already
+  // has an account (api emits error=account_exists, status 409/400), we keep
+  // the claim correctly refused but surface a login CTA so the user has a way
+  // to actually log in (previously the copy said "log in first" with no
+  // control). Tracks whether the last claim failure was that specific case.
+  const [accountExists, setAccountExists] = useState(false)
 
   useEffect(() => {
     if (!token) return
@@ -147,6 +153,7 @@ export function ClaimPage() {
 
   const submit = async () => {
     setErr(null)
+    setAccountExists(false)
     if (!email.trim()) {
       setErr('Email is required.')
       return
@@ -179,6 +186,16 @@ export function ClaimPage() {
     } catch (e: any) {
       setStage('error')
       setErr(e?.message ?? 'Claim failed. The link may have already been used.')
+      // The api refuses a claim whose email already has an account
+      // (error=account_exists, HTTP 409). The refusal is correct — we don't
+      // claim into an existing account from an unauthenticated form — but the
+      // user is told to "log in first" and needs a control to do so. Flag that
+      // specific case so the email screen renders a login CTA that carries the
+      // claim token through ?next= and resumes the claim after sign-in. We key
+      // on the error CODE, not the status: account_exists and already_claimed
+      // are BOTH 409 (api/internal/handlers/onboarding.go), and only the former
+      // is recoverable by logging in — already_claimed wants a fresh agent link.
+      setAccountExists(e?.code === 'account_exists')
     }
   }
 
@@ -507,6 +524,21 @@ export function ClaimPage() {
           <div role="alert" data-testid="claim-error" style={{ marginBottom: 12, padding: '10px 12px', borderLeft: '2px solid var(--rose)', fontSize: 12.5, fontFamily: 'var(--font-mono)', color: 'var(--text)' }}>
             {err}
           </div>
+        )}
+
+        {/* account_exists recovery: the claim was (correctly) refused because
+            this email already has an account. Surface a login CTA so the user
+            can actually sign in — carry the claim token through ?next= so the
+            claim resumes after login. */}
+        {accountExists && (
+          <Link
+            to={`/login?next=${encodeURIComponent(`/claim?t=${token}`)}`}
+            className="btn btn-primary"
+            data-testid="claim-account-exists-login"
+            style={{ width: '100%', justifyContent: 'center', marginBottom: 12 }}
+          >
+            Log in to claim →
+          </Link>
         )}
 
         <button
