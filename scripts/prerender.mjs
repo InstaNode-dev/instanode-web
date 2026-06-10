@@ -514,17 +514,35 @@ async function main() {
   await writeFile(resolve(DIST, '404.html'), notFoundBody, 'utf-8')
   console.log('prerender: wrote dist/404.html with rendered NotFoundPage')
 
-  // Step 5: copy /llms.txt from the content repo to dist root. The
-  // llms.txt convention (https://llmstxt.org) expects the file at the
-  // domain root.
-  const llmsSource = resolve(ROOT, '.content/llms.txt')
+  // Step 5: publish /llms.txt at the dist root. The llms.txt convention
+  // (https://llmstxt.org) expects the file at the domain root.
+  //
+  // SOURCE PRECEDENCE (fixed 2026-06-10): prefer the committed, post-
+  // fetch-content `public/llms.txt` over the raw `.content/llms.txt`. This
+  // matters because scripts/fetch-content.mjs applies a `requireMarkers`
+  // lock-step guard: when the content repo HEAD is missing a contract marker
+  // documented ahead of its upstream landing, fetch-content PRESERVES the
+  // committed `public/llms.txt` instead of reverting to the stale upstream.
+  // The previous version of this step copied straight from `.content/llms.txt`,
+  // bypassing that guard entirely — so the SERVED /llms.txt silently reverted
+  // to upstream HEAD even though `public/llms.txt` (and llmsContract.test.ts)
+  // carried the corrected contract. We now publish the guarded copy. Vite has
+  // already copied `public/llms.txt` → `dist/llms.txt` during `vite build`
+  // (this script runs after), so dist is the authoritative guarded copy; we
+  // fall back to public/ then .content/ only if it's somehow absent.
+  const llmsCandidates = [
+    resolve(DIST, 'llms.txt'),       // vite-copied public/llms.txt (guarded)
+    resolve(ROOT, 'public/llms.txt'),
+    resolve(ROOT, '.content/llms.txt'),
+  ]
+  const llmsSource = llmsCandidates.find((p) => existsSync(p))
   let llmsBaseContent = ''
-  if (existsSync(llmsSource)) {
+  if (llmsSource) {
     llmsBaseContent = await readFile(llmsSource, 'utf-8')
     await writeFile(resolve(DIST, 'llms.txt'), llmsBaseContent, 'utf-8')
-    console.log('prerender: copied llms.txt to dist root')
+    console.log(`prerender: published llms.txt to dist root (source: ${llmsSource.replace(ROOT + '/', '')})`)
   } else {
-    console.warn('prerender: no .content/llms.txt found, skipping')
+    console.warn('prerender: no llms.txt found in dist/public/.content, skipping')
   }
 
   // Step 6: emit .md mirror routes for every HTML page so LLMs and

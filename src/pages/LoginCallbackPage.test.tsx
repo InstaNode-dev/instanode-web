@@ -16,6 +16,7 @@ vi.mock('../api', async () => {
     ...actual,
     setToken: vi.fn(),
     fetchMe: vi.fn(),
+    completeCliSession: vi.fn(() => Promise.resolve({ ok: true })),
   }
 })
 
@@ -38,6 +39,7 @@ function renderCallback(search: string) {
         <Route path="/login/callback" element={<LoginCallbackPage />} />
         <Route path="/app" element={<div data-testid="app-landed">app</div>} />
         <Route path="/app/billing" element={<div data-testid="billing-landed">billing</div>} />
+        <Route path="/pricing" element={<div data-testid="pricing-landed">pricing</div>} />
       </Routes>
     </MemoryRouter>,
   )
@@ -83,6 +85,38 @@ describe('LoginCallbackPage', () => {
     ;(api.fetchMe as any).mockRejectedValue({})
     renderCallback('?session_token=bad')
     await waitFor(() => expect(screen.getByText(/Session token rejected by the API/)).toBeTruthy())
+  })
+
+  // ---- COMMERCE-FIRST REDIRECT (2026-06-10) ----
+  // Post-auth landing routes by the signed-in user's plan tier unless a
+  // deep-link return_to is present. fetchMe() resolves to the adapted
+  // AuthMeResponse shape ({ user: { tier } }).
+
+  it('commerce-first: free tier → /pricing', async () => {
+    ;(api.fetchMe as any).mockResolvedValue({ user: { tier: 'free' } })
+    renderCallback('?session_token=abc')
+    await waitFor(() => expect(screen.getByTestId('pricing-landed')).toBeTruthy())
+  })
+
+  it('commerce-first: paid+eligible tier (pro) → /app/billing', async () => {
+    ;(api.fetchMe as any).mockResolvedValue({ user: { tier: 'pro' } })
+    renderCallback('?session_token=abc')
+    await waitFor(() => expect(screen.getByTestId('billing-landed')).toBeTruthy())
+  })
+
+  it('commerce-first: top tier (team) → /app, never a Team checkout', async () => {
+    ;(api.fetchMe as any).mockResolvedValue({ user: { tier: 'team' } })
+    renderCallback('?session_token=abc')
+    await waitFor(() => expect(screen.getByTestId('app-landed')).toBeTruthy())
+  })
+
+  it('commerce-first: a saved /app deep-link overrides the free-tier pricing push', async () => {
+    ;(api.fetchMe as any).mockResolvedValue({ user: { tier: 'free' } })
+    localStorage.setItem('instanode.return_to', '/app/checkout?plan=pro')
+    renderCallback('?session_token=abc')
+    // Deep-link wins → does NOT land on /pricing.
+    await waitFor(() => expect(screen.queryByTestId('pricing-landed')).toBeNull())
+    expect(localStorage.getItem('instanode.return_to')).toBeNull()
   })
 
   // ---- AUTH-004 (cookie-exchange) flow ----
@@ -163,5 +197,38 @@ describe('LoginCallbackPage', () => {
 
     expect(fetchSpy).not.toHaveBeenCalled()
     expect(api.setToken).toHaveBeenCalledWith('legacy123')
+  })
+
+  // ---- D2: CLI device-flow completion ----
+  // When ?cli_session=<id> rides along on the callback, the page must POST
+  // /auth/cli/{id}/complete (via completeCliSession) AFTER the session token
+  // is stored + verified, then still navigate the browser user to /app.
+
+  it('D2: completes the CLI session when ?cli_session is present, then navigates', async () => {
+    ;(api.fetchMe as any).mockResolvedValue({ ok: true })
+    renderCallback('?session_token=abc&cli_session=cli_123')
+    await waitFor(() => expect(screen.getByTestId('app-landed')).toBeTruthy())
+    expect(api.completeCliSession).toHaveBeenCalledTimes(1)
+    expect(api.completeCliSession).toHaveBeenCalledWith('cli_123')
+    // The session token is stored BEFORE the completion call so the api
+    // gets the authenticated Bearer.
+    expect(api.setToken).toHaveBeenCalledWith('abc')
+  })
+
+  it('D2: does NOT call completeCliSession when cli_session is absent', async () => {
+    ;(api.fetchMe as any).mockResolvedValue({ ok: true })
+    renderCallback('?session_token=abc')
+    await waitFor(() => expect(screen.getByTestId('app-landed')).toBeTruthy())
+    expect(api.completeCliSession).not.toHaveBeenCalled()
+  })
+
+  it('D2: a CLI-completion failure never blocks the user sign-in navigation', async () => {
+    ;(api.fetchMe as any).mockResolvedValue({ ok: true })
+    // completeCliSession is best-effort and swallows errors itself, but even
+    // if it rejected, the browser user must still land on /app.
+    ;(api.completeCliSession as any).mockResolvedValue({ ok: false })
+    renderCallback('?session_token=abc&cli_session=cli_dead')
+    await waitFor(() => expect(screen.getByTestId('app-landed')).toBeTruthy())
+    expect(api.completeCliSession).toHaveBeenCalledWith('cli_dead')
   })
 })

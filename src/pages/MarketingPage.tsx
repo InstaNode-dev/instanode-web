@@ -94,6 +94,13 @@ const ROUTES = {
   playground: '#playground',
 } as const
 
+// Team is sales-assisted only (TEAM-GATE, 2026-06-04 CEO directive): it is NOT
+// self-serve and must not route to /app/checkout until its dedicated-infra
+// delivery is proven built — the server-side gate rejects a Team checkout with
+// 400 tier_not_yet_available. The Team CTA points here, matching the
+// contact-sales action PricingPage.tsx and BillingPage.tsx already use.
+const SALES_MAILTO_TEAM = 'mailto:sales@instanode.dev?subject=Team%20plan%20enquiry'
+
 type Service = {
   id: 'pg' | 'rd' | 'mg' | 'vc' | 'qu' | 'st' | 'wh' | 'dp'
   name: string
@@ -203,12 +210,13 @@ const PLANS: Plan[] = [
     // Team tier — $199/mo. strict-80% margin redesign (2026-06-05): every
     // Team limit is now a finite plans.yaml cap (was -1/unlimited). Above
     // these caps = Enterprise (contact sales).
-    // NOTE (pre-existing, out of scope here): this CTA still points at the
-    // self-serve /app/checkout?plan=team path, which the server-side Team
-    // gate rejects with 400 tier_not_yet_available. The PricingPage Team CTA
-    // already uses a contact-sales mailto. This MarketingPage CTA should be
-    // reconciled with the gate in a follow-up (not changed here — the
-    // strict-margin task is explicitly copy-only and must not touch the gate).
+    // TEAM-GATE reconciliation (2026-06-08): the CTA previously pointed at the
+    // self-serve /app/checkout?plan=team path, which the server-side Team gate
+    // rejects with 400 tier_not_yet_available — so the homepage was offering a
+    // tier the platform can't sell. Now reconciled with PricingPage.tsx +
+    // BillingPage.tsx: Team is contact-sales only until its delivery is proven
+    // built. Do NOT re-point this at /app/checkout. Ref TEAM-GATE directive
+    // (2026-06-04) + docs/sessions/2026-06-04/TEAM-PLAN-GATE-AND-BUILD.md.
     id: 'team',
     name: 'Team',
     tagline: 'For the engineering org. Dedicated infra, RBAC + audit, with SSO & SLA on the way.',
@@ -221,8 +229,8 @@ const PLANS: Plan[] = [
       'Need more? Enterprise — contact sales',
     ],
     cta: {
-      label: 'Start team →',
-      href: '/app/checkout?plan=team&frequency=monthly',
+      label: 'Contact sales →',
+      href: SALES_MAILTO_TEAM,
       variant: 'secondary',
     },
   },
@@ -311,7 +319,7 @@ export function MarketingPage() {
           <p className="mkt-hero-sub">
             Postgres, Redis, MongoDB, vectors, queues, storage, webhooks, and deployments.{' '}
             <strong>Provisioned in &lt;2 seconds.</strong>{' '}
-            No signup, no Docker, no waitlist.
+            Self-serve from the first call to a paid plan — no signup, no Docker, no sales call.
           </p>
           <HeroPromptCard />
 

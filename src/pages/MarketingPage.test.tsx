@@ -121,6 +121,46 @@ describe('MarketingPage — claim consistency (T18 P1-4 / P1-6)', () => {
     expect(text).toMatch(/~60s/)
   })
 
+  // TEAM-GATE reconciliation (2026-06-08): the homepage Team tile's CTA used
+  // to point at the self-serve /app/checkout?plan=team path — a tier the
+  // server-side gate rejects with 400 tier_not_yet_available, so the homepage
+  // was marketing a plan the platform can't actually sell. Team is
+  // contact-sales only until its delivery is proven built (CEO TEAM-GATE
+  // directive). These guards pin the homepage Team CTA to a contact-sales
+  // mailto and forbid the self-serve checkout link from creeping back, AND
+  // confirm Team is NOT badged "Most popular" (Pro is the highlighted tier).
+  it('homepage Team tile CTA is a contact-sales mailto, NOT a self-serve checkout', () => {
+    const { container } = render(
+      <MemoryRouter initialEntries={['/']}>
+        <MarketingPage />
+      </MemoryRouter>,
+    )
+    const teamCta = findAnchorByText('Contact sales →')
+    expect(teamCta).not.toBeNull()
+    expect(teamCta!.getAttribute('href')).toContain('mailto:sales@instanode.dev')
+    // The retired self-serve Team checkout link must not exist anywhere on the page.
+    const hrefs = Array.from(container.querySelectorAll('a')).map((a) => a.getAttribute('href') ?? '')
+    expect(hrefs.some((h) => h.includes('plan=team'))).toBe(false)
+    // And the old buyable label must be gone.
+    expect(findAnchorByText('Start team →')).toBeNull()
+  })
+
+  it('only Pro is badged "Most popular" — Team must not be highlighted/badged as buyable', () => {
+    const { container } = render(
+      <MemoryRouter initialEntries={['/']}>
+        <MarketingPage />
+      </MemoryRouter>,
+    )
+    const badges = Array.from(container.querySelectorAll('.mkt-featured-flag')).filter(
+      (el) => (el.textContent ?? '').trim() === 'Most popular',
+    )
+    expect(badges.length).toBe(1)
+    // The badge sits inside the Pro card, not the Team card.
+    const card = badges[0].closest('.mkt-price-card')
+    expect(card?.textContent).toContain('Pro')
+    expect(card?.textContent).not.toContain('Team')
+  })
+
   // BIZ-3 (2026-05-29): the landing pricing tile shipped "1 small deployment"
   // and "10 medium deployments" copy from the days when /deploy/new had a
   // deployment_size field. The backend dropped that field; marketing
