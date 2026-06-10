@@ -808,7 +808,10 @@ function PricingStyles() {
       .pricing-feature-label { font-weight: 500; font-size: 13px; }
       .pricing-feature-sub {
         font-family: var(--font-mono);
-        font-size: 10.5px; color: var(--text-faint);
+        /* WCAG AA: --text-muted (5.1:1 on --surface) not --text-faint (2.4:1).
+           These uppercase sub-labels ("NATS STORAGE", "PGVECTOR", "24h ttl")
+           are real content the user reads. */
+        font-size: 10.5px; color: var(--text-muted);
         text-transform: uppercase; letter-spacing: 0.06em;
       }
 

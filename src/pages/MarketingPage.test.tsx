@@ -212,3 +212,72 @@ describe('MarketingPage — claim consistency (T18 P1-4 / P1-6)', () => {
     expect(text).not.toMatch(/medium deployments/i)
   })
 })
+
+// ─── 2026-06-11 a11y + email-standardization fixes ─────────────────────────
+describe('MarketingPage — a11y + support-email consistency', () => {
+  function renderHome() {
+    return render(
+      <MemoryRouter initialEntries={['/']}>
+        <MarketingPage />
+      </MemoryRouter>,
+    )
+  }
+
+  it("brand link aria-label contains the visible text 'instanode.dev' (WCAG 2.5.3 Label in Name)", () => {
+    renderHome()
+    const brand = document.querySelector('a.mkt-brand-link') as HTMLAnchorElement
+    expect(brand).not.toBeNull()
+    const label = brand.getAttribute('aria-label') ?? ''
+    // The brand renders "instanode.dev" — the accessible name must include it.
+    expect(label).toContain('instanode.dev')
+    // The visible text the brand renders, sans markup.
+    expect((brand.textContent ?? '').replace(/\s+/g, '')).toContain('instanode.dev')
+  })
+
+  it('footer column headers are <h3>, not <h4> (no skipped heading level)', () => {
+    renderHome()
+    const footerCols = Array.from(document.querySelectorAll('.mkt-footer-col'))
+    const headers = footerCols.map((c) => c.querySelector('h1,h2,h3,h4,h5,h6'))
+    // Every footer column has a heading and it's an <h3>.
+    expect(headers.length).toBeGreaterThanOrEqual(2)
+    for (const h of headers) {
+      expect(h).not.toBeNull()
+      expect(h!.tagName).toBe('H3')
+    }
+    // And no <h4> anywhere skips the level on the page.
+    expect(document.querySelector('.mkt-footer-col h4')).toBeNull()
+  })
+
+  it('heading levels never skip (no <hN> without an <hN-1> before it)', () => {
+    renderHome()
+    const levels = Array.from(document.querySelectorAll('h1,h2,h3,h4,h5,h6')).map((h) =>
+      Number(h.tagName[1]),
+    )
+    let max = 0
+    for (const lvl of levels) {
+      // A heading may be at most one deeper than the deepest seen so far.
+      expect(lvl).toBeLessThanOrEqual(max + 1)
+      if (lvl > max) max = lvl
+    }
+  })
+
+  it("general-contact CTA uses the canonical contact@ address, not hello@", () => {
+    renderHome()
+    const mailtos = Array.from(document.querySelectorAll('a[href^="mailto:"]')).map(
+      (a) => a.getAttribute('href') ?? '',
+    )
+    // No hello@ anywhere on the homepage.
+    expect(mailtos.some((h) => h.includes('hello@instanode.dev'))).toBe(false)
+    // The "talk to us" CTA points at contact@.
+    const talk = findAnchorByText('talk to us')
+    expect(talk).not.toBeNull()
+    expect(talk!.getAttribute('href')).toContain('mailto:contact@instanode.dev')
+  })
+
+  it('Team CTA still uses sales@ (lead capture is a deliberate split)', () => {
+    renderHome()
+    const teamCta = findAnchorByText('Contact sales →')
+    expect(teamCta).not.toBeNull()
+    expect(teamCta!.getAttribute('href')).toContain('mailto:sales@instanode.dev')
+  })
+})

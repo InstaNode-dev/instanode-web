@@ -9,6 +9,7 @@ import { UpgradeButton } from '../components/UpgradeButton'
 import * as api from '../api'
 import type { Resource, ActivityItem, DashboardDeployment } from '../api'
 import { useDashboardCtx } from '../hooks/useDashboardCtx'
+import { connectionLimitFor, objectStorageLimitGBFor } from '../lib/planLimits'
 
 // D6 (2026-05-18): the hardcoded TIER_LIMIT_GB table was dropped. It drifted
 // from api/plans.yaml on every tier change (every paid tier was wrong at one
@@ -144,33 +145,47 @@ export function OverviewPage() {
 
   // computed stats — no /overview endpoint exists, derived client-side.
   //
-  // D6 (2026-05-18): storage now uses server-supplied per-resource limits.
-  // Both the used total and the limit total come from the same byte-count
-  // fields (`storage_bytes` / `storage_limit_bytes`) and are converted with
-  // the same binary base — so the numerator and denominator no longer mix
-  // decimal MB with binary MiB. A resource with `storage_limit_bytes < 0`
-  // is unlimited; if any resource is unlimited the tile drops the % bar.
-  const totalStorageBytes = resources.reduce((s, r) => s + r.storage_bytes, 0)
-  const storageUnlimited = resources.some((r) => (r.storage_limit_bytes ?? 0) < 0)
-  const totalStorageLimitBytes = resources.reduce(
-    (s, r) => s + ((r.storage_limit_bytes ?? 0) > 0 ? r.storage_limit_bytes : 0),
-    0,
-  )
-  const totalStorageGiB = totalStorageBytes / BYTES_PER_GIB
-  const totalStorageLimitGiB = totalStorageLimitBytes / BYTES_PER_GIB
+  // OBJECT-STORAGE TILE (2026-06-11 tile-accuracy fix).
+  //
+  // The tile previously summed `storage_limit_bytes` across EVERY resource for
+  // the denominator. That conflated unlike services — a Pro user's "STORAGE"
+  // denominator read ~81 GiB because it added object storage (50 GB) + pg
+  // (10 GB) + mongo (5 GB) + vector (10 GB) + queue (…) into one number, which
+  // is meaningless as a single "storage" figure. The honest tile reflects the
+  // OBJECT-STORE cap specifically (plans.yaml storage_storage_mb — 50 GB on
+  // Pro), bound from the per-tier registry mirror so a tier change can't drift
+  // it. The numerator is the bytes used by the user's `storage`-type resources
+  // (the object store), not every resource's bytes.
+  const objectStorageBytes = resources
+    .filter((r) => r.resource_type === 'storage')
+    .reduce((s, r) => s + r.storage_bytes, 0)
+  const objectStorageLimitGB = objectStorageLimitGBFor(tier) // -1 → unlimited
+  const storageUnlimited = objectStorageLimitGB < 0
+  // Bytes-vs-decimal-GB note: plans.yaml states the object cap in decimal GB
+  // ("50 GB"). storage_bytes is a raw byte count. We render the used figure in
+  // GiB (binary) for the numerator since that's the on-disk unit, and the cap
+  // in GB (decimal) to match the published tier number — they're labelled
+  // distinctly (used "GiB" vs the cap), and the % bar divides like-for-like by
+  // converting the cap to bytes with the decimal base it was authored in.
+  const objectStorageLimitBytes = storageUnlimited ? -1 : objectStorageLimitGB * 1000 * 1000 * 1000
+  const totalStorageGiB = objectStorageBytes / BYTES_PER_GIB
   const storagePct =
-    !storageUnlimited && totalStorageLimitBytes > 0
-      ? Math.round((totalStorageBytes / totalStorageLimitBytes) * 100)
+    !storageUnlimited && objectStorageLimitBytes > 0
+      ? Math.round((objectStorageBytes / objectStorageLimitBytes) * 100)
       : 0
   // Connections tile: the API never emits `connections_in_use`, so a numerator
   // sourced from it is always 0 — show the per-tier connection ceiling only.
-  // `-1` (team/growth unlimited) is excluded from the sum so it can't corrupt
-  // the denominator; if any resource is unlimited the tile reports ∞.
-  const connUnlimited = resources.some((r) => (r.connections_limit ?? 0) < 0)
-  const connLim = resources.reduce(
-    (s, r) => s + ((r.connections_limit ?? 0) > 0 ? (r.connections_limit as number) : 0),
-    0,
-  )
+  //
+  // 2026-06-11 fix: the ceiling now comes from the per-tier registry
+  // (connectionLimitFor), NOT from summing per-resource `connections_limit`.
+  // The old sum flipped the whole tile to ∞ the instant ANY resource carried
+  // connections_limit < 0 — and redis/queue/storage/webhook are legitimately
+  // -1 (they take no SQL-style connections). So a Pro user (cap 20) with a
+  // single Redis saw "∞ unlimited". The tier's connection-bearing cap
+  // (postgres == mongodb == vector) is the honest number; it's only ∞ when
+  // plans.yaml itself sets that cap to -1 (no tier does today).
+  const connLim = connectionLimitFor(tier)
+  const connUnlimited = connLim < 0
   const recent = [...resources].sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at)).slice(0, 4)
 
   const now = Date.now()
@@ -186,13 +201,13 @@ export function OverviewPage() {
   const deployHealthy = deployments.filter((d) => d.status === 'running').length
   const webhookCount = resources.filter((r) => r.resource_type === 'webhook').length
 
-  const storageSub =
-    resources.length === 0
-      ? tier
-      : storageUnlimited
-        ? `unlimited · ${tier} tier`
-        : `${storagePct}% of ${tier} tier`
-  const connSub = connUnlimited ? 'unlimited' : connLim === 0 ? '' : `${connLim} max`
+  const storageSub = storageUnlimited
+    ? `unlimited · ${tier} tier`
+    : `${storagePct}% of ${tier} object cap`
+  // Connection tile sub-line: name the connection-bearing services so the
+  // number isn't read as "every resource". Postgres/Mongo/Vector share the
+  // same per-tier cap today, so one figure is honest for all three.
+  const connSub = connUnlimited ? 'unlimited' : `${connLim} per db · ${tier} tier`
   const deploySub = deployCount === 0 ? 'none yet' : `${deployHealthy}/${deployCount} healthy`
   const vaultSub = vaultCount === 0 ? '' : `scoped to ${env}`
 
@@ -214,20 +229,23 @@ export function OverviewPage() {
             Wire up real series in a follow-up (W7-G) once /api/v1/
             stats/series is live. */}
         <Stat k="resources" v={loading ? '—' : envScopedCount.toString()} d={newThisWeek === 0 ? '—' : `+${newThisWeek} this week`} series={undefined} />
-        {/* Storage tile — used + limit both in binary GiB from the server's
-            per-resource byte counts. "∞" denominator when any resource is
-            unlimited (team/growth-tier headroom). */}
+        {/* Object-storage tile — used (object-store bytes, binary GiB) over the
+            tier's object-store cap (plans.yaml storage_storage_mb, shown in the
+            published GB). NOT a sum across pg/mongo/vector/queue. "∞" only when
+            the tier's object cap is itself unlimited (no tier today). */}
         <Stat
-          k={`storage / ${storageUnlimited || totalStorageLimitGiB <= 0 ? '∞' : totalStorageLimitGiB.toFixed(1)} GiB`}
+          k={`object storage / ${storageUnlimited ? '∞' : `${objectStorageLimitGB} GB`}`}
           v={loading ? '—' : totalStorageGiB.toFixed(2)}
           unit="GiB"
           d={storageSub}
           dCls="dim"
           series={undefined}
         />
-        {/* Connections tile shows the aggregate per-tier connection ceiling.
-            The API does not emit a live in-use count, so a numerator would
-            always read 0 — show the ceiling honestly instead. */}
+        {/* Connection-limit tile shows the tier's per-database connection
+            ceiling (postgres/mongodb/vector share it). The API emits no live
+            in-use count, so the ceiling is the honest figure. Bound to the
+            per-tier registry, not a per-resource sum (which used to read ∞ the
+            moment a redis/queue resource — legitimately -1 — was present). */}
         <Stat k="connection limit" v={loading ? '—' : connUnlimited ? '∞' : connLim.toString()} d={connSub} dCls="dim" series={undefined} />
         <Stat k="deployments" v={loading ? '—' : deployCount.toString()} d={deploySub} series={undefined} />
         <Stat k="webhooks · 24h" v={loading ? '—' : webhookCount.toString()} d="" series={undefined} />
@@ -365,25 +383,46 @@ export function OverviewPage() {
               and is out of scope for FIX-G. */}
           <Card title="Recent activity" right="last 20 events" className="" style={{ padding: 0 }}>
             <div className="feed">
-              {activity.map((a) => (
-                <div key={a.id} className="feed-row">
-                  <span className={`dot ${a.level}`} />
-                  {/* W12 XSS hardening (2026-05-14): a.text used to be
-                      rendered via dangerouslySetInnerHTML so server-emitted
-                      <strong>/<code> tags would format. The risk: if any
-                      future server path interpolated a user-controlled
-                      resource name into a summary, that name would execute
-                      as HTML. The current /api/v1/audit summaries never
-                      include user-controlled bytes, but the client-side
-                      synth fallback in api/index.ts did. We now render
-                      activity text as plain JSX. Bold formatting goes
-                      away; XSS surface closes. Follow-up: switch the
-                      server to emit structured fields ({event, resource_name})
-                      so the client can format safely with JSX. */}
-                  <span className="text">{stripHtmlTags(a.text)}</span>
-                  <RelTime at={a.at} />
-                </div>
-              ))}
+              {/* 2026-06-11: drop rows whose summary is empty after tag-strip.
+                  A Pro account with real resources was rendering ~20 blank "—"
+                  feed rows: the audit endpoint returned events whose `summary`
+                  was empty/whitespace, and the old map painted one content-less
+                  row each. Rendering blank rows is worse than rendering fewer —
+                  filter to rows with real text, then show a single honest
+                  empty-state if nothing survives (rather than a wall of "—"). */}
+              {(() => {
+                const rows = activity
+                  .map((a) => ({ ...a, body: stripHtmlTags(a.text).trim() }))
+                  .filter((a) => a.body.length > 0)
+                if (rows.length === 0) {
+                  return (
+                    <div
+                      className="feed-row"
+                      data-testid="recent-activity-empty"
+                      style={{ gridTemplateColumns: '1fr', color: 'var(--text-faint)', fontSize: 12.5 }}
+                    >
+                      {loading ? 'loading activity…' : 'no activity yet — your agent’s actions show up here'}
+                    </div>
+                  )
+                }
+                return rows.map((a) => (
+                  <div key={a.id} className="feed-row">
+                    <span className={`dot ${a.level}`} />
+                    {/* W12 XSS hardening (2026-05-14): a.text used to be
+                        rendered via dangerouslySetInnerHTML so server-emitted
+                        <strong>/<code> tags would format. The risk: if any
+                        future server path interpolated a user-controlled
+                        resource name into a summary, that name would execute
+                        as HTML. The current /api/v1/audit summaries never
+                        include user-controlled bytes, but the client-side
+                        synth fallback in api/index.ts did. We now render
+                        activity text as plain JSX. Bold formatting goes
+                        away; XSS surface closes. */}
+                    <span className="text">{a.body}</span>
+                    <RelTime at={a.at} />
+                  </div>
+                ))
+              })()}
             </div>
           </Card>
         </div>

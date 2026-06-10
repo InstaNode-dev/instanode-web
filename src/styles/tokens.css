@@ -13,6 +13,14 @@
   --border-hi: #2c2c38;
   --text: #f4f4f6;
   --text-dim: #91919c;
+  /* --text-muted: AA-passing tier for SMALL, de-emphasized labels that must
+     still be readable (pricing feature sub-labels, footer column headers).
+     --text-faint (#50505a) is intentionally a ghost tier and clears only
+     ~2.4:1 on --surface, which fails WCAG AA (≥4.5:1) for the ~10.5px
+     uppercase sub-labels. #82828e clears 5.1:1 on --surface (#0d0d11) and
+     5.3:1 on --ink (#08080a). Use --text-muted, not --text-faint, for any
+     text the user is expected to read. */
+  --text-muted: #82828e;
   --text-faint: #50505a;
   --text-ghost: #2a2a33;
 
@@ -70,6 +78,9 @@ html[data-theme='light'] {
   --border-hi: #c4c6ce;
   --text: #18181c;
   --text-dim: #4d4d57;
+  /* Light-mode --text-muted: #62626c clears 6.0:1 on white / 5.7:1 on --ink
+     (#f7f8fa) — comfortably past AA for the small sub-labels. */
+  --text-muted: #62626c;
   --text-faint: #80808a;
   --text-ghost: #d1d3da;
 
@@ -98,6 +109,9 @@ html[data-theme='light'] {
     --border-hi: #c4c6ce;
     --text: #18181c;
     --text-dim: #4d4d57;
+    /* Light-mode --text-muted (system-preference path) — mirror the explicit
+       data-theme=light value above. */
+    --text-muted: #62626c;
     --text-faint: #80808a;
     --text-ghost: #d1d3da;
 

@@ -263,7 +263,10 @@ function PublicFooter() {
                 served as text/markdown — a visitor saw unrendered
                 "## Reporting a vulnerability" source. */}
             <a href="/security">Security</a>
-            <a href="mailto:hello@instanode.dev">Contact</a>
+            {/* 2026-06-11: standardized on contact@ — the canonical support
+                address (FAQ, cancel/downgrade, billing, terms, content repo).
+                sales@ is reserved for Team/Enterprise lead capture. */}
+            <a href="mailto:contact@instanode.dev">Contact</a>
           </div>
         </div>
       </div>
@@ -491,7 +494,9 @@ function PublicShellStyles() {
       .public-footer-h {
         font-family: var(--font-mono);
         font-size: 10.5px;
-        color: var(--text-faint);
+        /* WCAG AA: --text-muted (5.1:1 on --surface) not --text-faint (2.4:1).
+           Footer column headers ("Product", "Legal") are read content. */
+        color: var(--text-muted);
         text-transform: uppercase;
         letter-spacing: 0.06em;
         margin-bottom: 4px;
