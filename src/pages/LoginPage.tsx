@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { Brand } from '../components/Common'
 import { setToken, clearToken, fetchMe, getToken, completeCliSession } from '../api'
@@ -70,20 +70,27 @@ export function LoginPage() {
   // same function, best-effort (completeCliSession swallows its own errors), and
   // a failure surfaces a note but does NOT hard-block.
   const [cliApproved, setCliApproved] = useState<null | 'ok' | 'failed'>(null)
+  // Ref guard so completeCliSession fires EXACTLY once. React StrictMode (and
+  // any fast remount) double-invokes mount effects in dev; the server side is
+  // idempotent, but firing one POST keeps the behaviour deterministic and
+  // avoids a duplicate device-flow completion. We deliberately do NOT abort the
+  // state update on effect cleanup: under StrictMode the first pass's cleanup
+  // fires before the async resolves, and gating on a per-pass `cancelled` flag
+  // (combined with the fire-once ref preventing the second pass from re-firing)
+  // would drop the result entirely and never render the confirmation. A
+  // setState after unmount is a no-op in React 19, so firing once and always
+  // committing the outcome is correct here.
+  const cliFiredRef = useRef(false)
   useEffect(() => {
     const cli = readCliSession()
     // Only the already-authed path runs here. A fresh-login user has no token
     // yet; their cli_session rides through return_to to LoginCallbackPage.
-    if (!cli || !getToken()) return
-    let cancelled = false
-    ;(async () => {
+    if (!cli || !getToken() || cliFiredRef.current) return
+    cliFiredRef.current = true
+    void (async () => {
       const { ok } = await completeCliSession(cli)
-      if (cancelled) return
       setCliApproved(ok ? 'ok' : 'failed')
     })()
-    return () => {
-      cancelled = true
-    }
   }, [])
 
   // sendMagicLink — POST /auth/email/start. Extracted from submitEmail so the
@@ -160,11 +167,9 @@ export function LoginPage() {
       navigate(dest, { replace: true })
     } catch (e: any) {
       clearToken()
-      setErr(
-        e?.status === 401
-          ? 'Token rejected. Mint a fresh PAT or use the claim link from your agent.'
-          : `Couldn't reach the API: ${e?.message ?? 'unknown error'}`,
-      )
+      const rejected = 'Token rejected. Mint a fresh PAT or use the claim link from your agent.'
+      const unreachable = `Couldn't reach the API: ${e?.message ?? 'unknown error'}`
+      setErr(e?.status === 401 ? rejected : unreachable)
       setBusy(false)
     }
   }
