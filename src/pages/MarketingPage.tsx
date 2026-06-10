@@ -225,7 +225,7 @@ const PLANS: Plan[] = [
     features: [
       '50 GB Postgres · 1.5 GB Redis · 40 GB MongoDB',
       '100 deployments · 50 custom domains',
-      '90-day backups · self-serve restore · RBAC + audit',
+      '90-day backups · self-serve restore (Redis backup-only) · RBAC + audit',
       'Need more? Enterprise — contact sales',
     ],
     cta: {
@@ -465,7 +465,12 @@ export function MarketingPage() {
                 <div className="r"><span className="k">size</span><span className="v">10 MB / 2 conn</span></div>
                 <div className="r"><span className="k">expires</span><span className="v dim">in 24h</span></div>
                 <div className="r" style={{ marginTop: 8 }}>
-                  <span className="k">backup</span><span className="v ok">enabled</span>
+                  {/* Anonymous/free resources have NO backup coverage
+                      (plans.yaml backup_retention_days=0; the worker's
+                      scheduler never enqueues them) — the old "enabled"
+                      badge overstated the free tier. Backups start on
+                      paid tiers. */}
+                  <span className="k">backup</span><span className="v dim">on paid tiers</span>
                 </div>
                 <div className="r"><span className="k">tls</span><span className="v ok">required</span></div>
               </div>
