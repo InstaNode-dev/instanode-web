@@ -204,7 +204,7 @@ jobs:
 
       - name: Upload LIVE trace + ledger on failure
         if: failure() && env.RUN == '1'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: e2e-prod-trace-${{ github.run_id }}
           path: |
