@@ -204,6 +204,29 @@ describe('ClaimPage — email entry (pre-claim)', () => {
     expect(screen.getByText(/missing claim link/i)).toBeTruthy()
   })
 
+  // F6 (2026-06-10): the tokenless dead-end must point recovery at the one
+  // working auth path — GitHub OAuth.
+  it('surfaces a GitHub OAuth CTA on the tokenless "Missing claim link" state', () => {
+    render(
+      <MemoryRouter initialEntries={['/claim']}>
+        <ClaimPage />
+      </MemoryRouter>,
+    )
+    const cta = screen.getByTestId('claim-github-oauth')
+    expect(cta).toBeTruthy()
+    expect(cta.textContent).toContain('GitHub')
+  })
+
+  it('the tokenless GitHub CTA triggers the OAuth redirect', () => {
+    render(
+      <MemoryRouter initialEntries={['/claim']}>
+        <ClaimPage />
+      </MemoryRouter>,
+    )
+    fireEvent.click(screen.getByTestId('claim-github-oauth'))
+    expect(hrefSetTo).toContain('/auth/github/start?return_to=')
+  })
+
   // §10.21: previously a malformed/expired JWT left the page blank with
   // just the email form. Now it renders an explicit error banner with a
   // pricing CTA so the user knows to ask their agent for a fresh link.
@@ -225,6 +248,20 @@ describe('ClaimPage — email entry (pre-claim)', () => {
     // No email form
     expect(screen.queryByTestId('claim-email')).toBeNull()
     expect(screen.queryByTestId('claim-submit')).toBeNull()
+  })
+
+  // F6: the invalid/expired state also surfaces GitHub OAuth as a primary
+  // recovery CTA (a user with an expired token may already have an account).
+  it('surfaces a GitHub OAuth CTA on the invalid/expired-link state', async () => {
+    render(
+      <MemoryRouter initialEntries={['/claim?t=not-a-valid-jwt-blob']}>
+        <ClaimPage />
+      </MemoryRouter>,
+    )
+    await waitFor(() => expect(screen.getByTestId('claim-invalid')).toBeTruthy())
+    expect(screen.getByTestId('claim-github-oauth')).toBeTruthy()
+    // The pricing link is still present, now as a secondary action.
+    expect(screen.getByTestId('claim-invalid-pricing')).toBeTruthy()
   })
 })
 

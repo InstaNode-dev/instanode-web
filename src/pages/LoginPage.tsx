@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { Brand } from '../components/Common'
 import { setToken, clearToken, fetchMe } from '../api'
+import { postAuthDestination } from '../lib/postAuthDestination'
 
 const OAUTH_API_BASE_DEFAULT = 'https://api.instanode.dev'
 const OAUTH_CALLBACK_PATH = '/login/callback'
@@ -10,9 +11,28 @@ function resolveApiBase(): string {
   return (typeof window !== 'undefined' && (window as any).__INSTANODE_API_URL__) || OAUTH_API_BASE_DEFAULT
 }
 
+// readCliSession — pull the CLI device-flow session id off /login's query
+// string. The api emits /login?cli_session=<id>; CliAuthRedirect normalises
+// the legacy ?s= form to it. We forward this id through the OAuth /
+// magic-link `return_to` so it survives the round-trip and LoginCallbackPage
+// can POST /auth/cli/{id}/complete after sign-in (D2). Returns '' when absent.
+function readCliSession(): string {
+  if (typeof window === 'undefined') return ''
+  return new URLSearchParams(window.location.search).get('cli_session') ?? ''
+}
+
+// buildCallbackReturnTo — the post-auth landing URL the api redirects back
+// to. When a CLI device-flow session is in flight we append ?cli_session=<id>
+// so the callback page can complete it. Same-origin by construction.
+function buildCallbackReturnTo(): string {
+  const base = window.location.origin + OAUTH_CALLBACK_PATH
+  const cli = readCliSession()
+  return cli ? `${base}?cli_session=${encodeURIComponent(cli)}` : base
+}
+
 function startGitHubOAuth() {
   const apiBase = resolveApiBase()
-  const returnTo = encodeURIComponent(window.location.origin + OAUTH_CALLBACK_PATH)
+  const returnTo = encodeURIComponent(buildCallbackReturnTo())
   window.location.href = `${apiBase}/auth/github/start?return_to=${returnTo}`
 }
 
@@ -36,18 +56,20 @@ export function LoginPage() {
   const [emailSent, setEmailSent] = useState(false)
   const [emailErr, setEmailErr] = useState<string | null>(null)
 
-  const submitEmail = async (e: React.FormEvent) => {
-    e.preventDefault()
+  // sendMagicLink — POST /auth/email/start. Extracted from submitEmail so the
+  // "Resend" affordance in the sent-confirmation state (F4) can re-fire the
+  // exact same request without duplicating the fetch + error handling.
+  const sendMagicLink = async () => {
     setEmailErr(null)
     if (!email.includes('@')) {
       setEmailErr('Enter a valid email.')
-      return
+      return false
     }
     setEmailBusy(true)
     try {
       const apiBase = resolveApiBase()
       const url = apiBase + '/auth/email/start'
-      const returnTo = window.location.origin + OAUTH_CALLBACK_PATH
+      const returnTo = buildCallbackReturnTo()
       const resp = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -59,11 +81,18 @@ export function LoginPage() {
         throw new Error((body && body.message) || resp.statusText)
       }
       setEmailSent(true)
+      return true
     } catch (e: any) {
       setEmailErr(e?.message ?? 'Could not send the magic link.')
+      return false
     } finally {
       setEmailBusy(false)
     }
+  }
+
+  const submitEmail = async (e: React.FormEvent) => {
+    e.preventDefault()
+    await sendMagicLink()
   }
 
   const submit = async (e: React.FormEvent) => {
@@ -76,23 +105,28 @@ export function LoginPage() {
     setBusy(true)
     setToken(token.trim())
     try {
-      await fetchMe()
+      const me = await fetchMe()
       // BUG-P013 (P1, 2026-05-29): when CheckoutPage's second-layer auth
       // gate redirects an unauth user it issues `/login?next=<encoded
       // path>` (a hard window.location.assign, so React Router state is
       // dropped). Read `next=` from the query string FIRST, fall back to
-      // `loc.state.from` (the App-level AuthGate path), then `/app`.
+      // `loc.state.from` (the App-level AuthGate path).
       // /login itself is never a valid landing — reject so a stale
       // bookmark doesn't trap the user in a loop.
       const queryNext = typeof window !== 'undefined'
         ? new URLSearchParams(window.location.search).get('next')
         : null
-      const candidate = queryNext ?? loc.state?.from ?? '/app'
+      const candidate = queryNext ?? loc.state?.from ?? ''
       // Only honour relative same-origin paths so a forged
-      // /login?next=https://evil.com cannot phish the post-signin nav.
-      const dest = candidate.startsWith('/') && !candidate.startsWith('//') && candidate !== '/login'
-        ? candidate
-        : '/app'
+      // /login?next=https://evil.com cannot phish the post-signin nav;
+      // /login itself is never a valid landing (loop guard).
+      const next = candidate && candidate !== '/login' ? candidate : undefined
+      // COMMERCE-FIRST REDIRECT (2026-06-10): with no explicit deep-link,
+      // route by plan tier — free → /pricing, paid-but-eligible →
+      // /app/billing, top tier → /app. An explicit safe `next` always wins.
+      // postAuthDestination drops unsafe (off-origin / protocol-relative)
+      // next values back to the tier rule.
+      const dest = postAuthDestination(me?.user?.tier, next)
       navigate(dest, { replace: true })
     } catch (e: any) {
       clearToken()
@@ -157,8 +191,57 @@ export function LoginPage() {
             <span style={{ flex: 1, height: 1, background: 'var(--border)' }} />
           </div>
           {emailSent ? (
-            <div role="status" data-testid="magic-link-sent" style={{ padding: '10px 12px', borderLeft: '2px solid var(--accent)', fontSize: 13, fontFamily: 'var(--font-mono)', color: 'var(--text)' }}>
-              Check your inbox — we sent a sign-in link to <strong>{email}</strong>. Expires in 15 min.
+            // F4 (2026-06-10): the "we sent a link" state used to be a silent
+            // dead-end. Email delivery is currently 100%-failing (Brevo sender
+            // unvalidated — see CLAUDE.md P0), so a static "check your inbox"
+            // banner traps every magic-link user with no recovery. We now
+            // surface (a) a "Didn't get it? Resend" affordance and (b) a
+            // "continue with GitHub" fallback that routes the user to the one
+            // working auth path.
+            <div data-testid="magic-link-sent">
+              <div role="status" style={{ padding: '10px 12px', borderLeft: '2px solid var(--accent)', fontSize: 13, fontFamily: 'var(--font-mono)', color: 'var(--text)' }}>
+                Check your inbox — we sent a sign-in link to <strong>{email}</strong>. Expires in 15 min.
+              </div>
+
+              {emailErr && (
+                <div role="alert" data-testid="magic-link-resend-error" style={{ marginTop: 10, padding: '10px 12px', borderLeft: '2px solid var(--rose)', fontSize: 12.5, fontFamily: 'var(--font-mono)', color: 'var(--text)' }}>
+                  {emailErr}
+                </div>
+              )}
+
+              <div style={{ marginTop: 12, fontSize: 12, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)', lineHeight: 1.6 }}>
+                Didn't get it?{' '}
+                <button
+                  type="button"
+                  onClick={() => { void sendMagicLink() }}
+                  disabled={emailBusy}
+                  data-testid="magic-link-resend"
+                  style={{
+                    background: 'transparent',
+                    border: 'none',
+                    padding: 0,
+                    color: 'var(--accent)',
+                    fontFamily: 'var(--font-mono)',
+                    fontSize: 12,
+                    cursor: emailBusy ? 'default' : 'pointer',
+                    textDecoration: 'underline',
+                  }}
+                >
+                  {emailBusy ? 'Resending…' : 'Resend the link'}
+                </button>
+                {' '}— or change the address above and resend.
+              </div>
+
+              <button
+                type="button"
+                className="btn btn-secondary"
+                style={{ width: '100%', justifyContent: 'center', gap: 10, marginTop: 14 }}
+                onClick={startGitHubOAuth}
+                data-testid="magic-link-github-fallback"
+              >
+                <span aria-hidden="true" style={{ color: 'var(--accent)', fontFamily: 'var(--font-mono)' }}>▢</span>
+                <span>or continue with GitHub</span>
+              </button>
             </div>
           ) : (
             <form onSubmit={submitEmail}>

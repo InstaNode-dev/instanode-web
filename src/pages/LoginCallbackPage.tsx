@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Brand } from '../components/Common'
-import { setToken, fetchMe, getAPIBaseURL } from '../api'
+import { setToken, fetchMe, getAPIBaseURL, completeCliSession } from '../api'
+import { postAuthDestination } from '../lib/postAuthDestination'
 
 // AUTH-004 (api PR #176, 2026-05-29): the OAuth/magic-link browser
 // callback no longer puts the session JWT in the URL — it sets a Secure;
@@ -66,16 +67,47 @@ export function LoginCallbackPage() {
         const token = legacyToken ?? (await exchangeCookieForToken())
         if (cancelled) return
         setToken(token)
-        // Verify the token actually works before navigating.
-        await fetchMe()
+        // Verify the token actually works before navigating. We also keep the
+        // result: the commerce-first redirect (below) routes by the signed-in
+        // user's plan tier.
+        const me = await fetchMe()
         if (cancelled) return
-        // Restore the original destination (set by 401 interceptor pre-login)
-        // or default to the authenticated overview.
+        // D2 (2026-06-10): CLI device-flow completion. The CLI opened
+        // /login?cli_session=<id>; LoginPage forwarded the id through the
+        // OAuth/magic-link return_to so it lands here as ?cli_session=<id>.
+        // Now that the browser user is authenticated (token stored, /auth/me
+        // verified), POST /auth/cli/{id}/complete with that session Bearer to
+        // flip the pending CLI session so the CLI's next poll returns its
+        // api_key. Best-effort: completeCliSession swallows failures and never
+        // throws — a CLI-completion error must NOT trap the browser user on
+        // this screen. We don't await it before navigating beyond storing the
+        // outcome; the api call itself is fast and idempotent server-side.
+        const cliSession = params.get('cli_session')
+        if (cliSession) {
+          await completeCliSession(cliSession)
+          if (cancelled) return
+        }
+        // COMMERCE-FIRST REDIRECT (2026-06-10,
+        // memory project_commerce_first_redirect_at_interactions): post-auth
+        // landing is a scarce interaction, so we push commerce by tier unless
+        // the user has an explicit deep-link destination.
+        //
+        // Precedence (encoded in postAuthDestination):
+        //   1. A saved return_to deep-link (set by the 401 interceptor pre-
+        //      login, or a login→checkout flow) ALWAYS wins — never override a
+        //      deliberate destination, and never loop pricing→login→pricing.
+        //      We keep the historical /app-prefix guard here: only an /app/*
+        //      return_to is treated as a deep-link (a stray /pricing in
+        //      localStorage must not pre-empt the tier rule).
+        //   2. Otherwise route by plan tier: free → /pricing, paid-but-
+        //      eligible → /app/billing, top tier (team) → /app. NEVER a Team
+        //      checkout.
         const returnTo = (() => {
           try { return localStorage.getItem('instanode.return_to') ?? '' } catch { return '' }
         })()
         try { localStorage.removeItem('instanode.return_to') } catch {}
-        const dest = returnTo && returnTo.startsWith('/app') ? returnTo : '/app'
+        const next = returnTo && returnTo.startsWith('/app') ? returnTo : undefined
+        const dest = postAuthDestination(me?.user?.tier, next)
         nav(dest, { replace: true })
       } catch (e: any) {
         if (cancelled) return

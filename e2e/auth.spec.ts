@@ -28,14 +28,21 @@ test.describe('Auth gate', () => {
     await expect(page).toHaveURL(/\/login$/)
   })
 
-  test('login accepts valid token, lands on overview', async ({ page }) => {
-    await installAPIFake(page)
+  test('login accepts valid token, lands on the commerce-first destination for its tier', async ({ page }) => {
+    // COMMERCE-FIRST REDIRECT (2026-06-10, memory
+    // project_commerce_first_redirect_at_interactions): a plain login (no
+    // ?next= deep-link) routes by plan tier — free → /pricing, paid +
+    // upgrade-eligible → /app/billing, team → /app. Pin the mocked tier
+    // EXPLICITLY so the asserted destination is deterministic.
+    await installAPIFake(page, { tier: 'hobby' })
     await page.goto('/login')
     await page.getByTestId('toggle-token-form').click()
     await page.getByTestId('token-input').fill('ink_VALID')
     await page.getByTestId('login-submit').click()
-    // LoginPage navigates to /app on success (see LoginPage.tsx).
-    await expect(page).toHaveURL(/\/app\/?$/)
+    // hobby = paid + upgrade-eligible → the in-app upgrade/billing surface
+    // (see src/lib/postAuthDestination.ts; the full per-tier matrix is
+    // covered by e2e/commerce-first-redirect.spec.ts).
+    await expect(page).toHaveURL(/\/app\/billing$/)
   })
 
   test('OAuth buttons redirect to backend handlers', async ({ page }) => {

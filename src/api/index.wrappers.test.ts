@@ -48,6 +48,7 @@ import {
   fetchBillingUsage,
   fetchTeamSummary,
   fetchQuotaWall,
+  completeCliSession,
   setToken,
   APIError,
 } from './index'
@@ -564,5 +565,40 @@ describe('activity + PAT wrappers', () => {
     await revokeAPIKey('k1')
     expect(lastPath()).toMatch(/\/auth\/api-keys\/k1$/)
     expect(lastInit().method).toBe('DELETE')
+  })
+
+  // ─── D2: CLI device-flow completion ────────────────────────────────────
+  it('completeCliSession POSTs /auth/cli/{id}/complete with the session Bearer', async () => {
+    queue(jsonResponse({ ok: true }))
+    const r = await completeCliSession('cli_42')
+    expect(r.ok).toBe(true)
+    expect(lastPath()).toMatch(/\/auth\/cli\/cli_42\/complete$/)
+    expect(lastInit().method).toBe('POST')
+    // call() attaches the stored token as a Bearer.
+    expect(headerOf(0, 'Authorization')).toBe('Bearer test-token')
+  })
+
+  it('completeCliSession URL-encodes the session id', async () => {
+    queue(jsonResponse({ ok: true }))
+    await completeCliSession('a/b c')
+    expect(lastPath()).toContain('/auth/cli/a%2Fb%20c/complete')
+  })
+
+  it('completeCliSession returns {ok:false} on an empty id without calling fetch', async () => {
+    const r = await completeCliSession('')
+    expect(r.ok).toBe(false)
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('completeCliSession swallows a server error and returns {ok:false}', async () => {
+    queue(jsonResponse({ error: 'session_not_found' }, { status: 404 }))
+    const r = await completeCliSession('cli_dead')
+    expect(r.ok).toBe(false)
+  })
+
+  it('completeCliSession swallows a network throw and returns {ok:false}', async () => {
+    fetchMock.mockRejectedValueOnce(new Error('network'))
+    const r = await completeCliSession('cli_net')
+    expect(r.ok).toBe(false)
   })
 })
