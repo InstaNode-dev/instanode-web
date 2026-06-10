@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { Brand } from '../components/Common'
 import { setToken, clearToken, fetchMe } from '../api'
+import { postAuthDestination } from '../lib/postAuthDestination'
 
 const OAUTH_API_BASE_DEFAULT = 'https://api.instanode.dev'
 const OAUTH_CALLBACK_PATH = '/login/callback'
@@ -104,23 +105,28 @@ export function LoginPage() {
     setBusy(true)
     setToken(token.trim())
     try {
-      await fetchMe()
+      const me = await fetchMe()
       // BUG-P013 (P1, 2026-05-29): when CheckoutPage's second-layer auth
       // gate redirects an unauth user it issues `/login?next=<encoded
       // path>` (a hard window.location.assign, so React Router state is
       // dropped). Read `next=` from the query string FIRST, fall back to
-      // `loc.state.from` (the App-level AuthGate path), then `/app`.
+      // `loc.state.from` (the App-level AuthGate path).
       // /login itself is never a valid landing — reject so a stale
       // bookmark doesn't trap the user in a loop.
       const queryNext = typeof window !== 'undefined'
         ? new URLSearchParams(window.location.search).get('next')
         : null
-      const candidate = queryNext ?? loc.state?.from ?? '/app'
+      const candidate = queryNext ?? loc.state?.from ?? ''
       // Only honour relative same-origin paths so a forged
-      // /login?next=https://evil.com cannot phish the post-signin nav.
-      const dest = candidate.startsWith('/') && !candidate.startsWith('//') && candidate !== '/login'
-        ? candidate
-        : '/app'
+      // /login?next=https://evil.com cannot phish the post-signin nav;
+      // /login itself is never a valid landing (loop guard).
+      const next = candidate && candidate !== '/login' ? candidate : undefined
+      // COMMERCE-FIRST REDIRECT (2026-06-10): with no explicit deep-link,
+      // route by plan tier — free → /pricing, paid-but-eligible →
+      // /app/billing, top tier → /app. An explicit safe `next` always wins.
+      // postAuthDestination drops unsafe (off-origin / protocol-relative)
+      // next values back to the tier rule.
+      const dest = postAuthDestination(me?.user?.tier, next)
       navigate(dest, { replace: true })
     } catch (e: any) {
       clearToken()

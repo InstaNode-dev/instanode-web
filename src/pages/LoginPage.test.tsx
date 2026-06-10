@@ -27,6 +27,9 @@ function renderAt(url = '/login') {
         {/* BUG-P013 round-trip route — when /login?next=/app/checkout?…
             preserves the plan + frequency, post-signin must land here. */}
         <Route path="/app/checkout" element={<div>CHECKOUT PAGE</div>} />
+        {/* Commerce-first landing surfaces. */}
+        <Route path="/pricing" element={<div>PRICING PAGE</div>} />
+        <Route path="/app/billing" element={<div>BILLING PAGE</div>} />
       </Routes>
     </MemoryRouter>,
   )
@@ -169,6 +172,36 @@ describe('LoginPage', () => {
     await userEvent.type(screen.getByTestId('token-input'), 'ink_secret')
     await userEvent.click(screen.getByTestId('login-submit'))
     await waitFor(() => expect(screen.getByText('APP HOME')).toBeTruthy())
+  })
+
+  // COMMERCE-FIRST REDIRECT (2026-06-10): with no deep-link, a free-tier PAT
+  // login is pushed to /pricing; a paid-but-eligible tier to /app/billing.
+  it('commerce-first: free-tier PAT login with no next → /pricing', async () => {
+    ;(api.fetchMe as any).mockResolvedValue({ user: { tier: 'free' } })
+    renderAt('/login')
+    await userEvent.click(screen.getByTestId('toggle-token-form'))
+    await userEvent.type(screen.getByTestId('token-input'), 'ink_secret')
+    await userEvent.click(screen.getByTestId('login-submit'))
+    await waitFor(() => expect(screen.getByText('PRICING PAGE')).toBeTruthy())
+  })
+
+  it('commerce-first: pro-tier PAT login with no next → /app/billing', async () => {
+    ;(api.fetchMe as any).mockResolvedValue({ user: { tier: 'pro' } })
+    renderAt('/login')
+    await userEvent.click(screen.getByTestId('toggle-token-form'))
+    await userEvent.type(screen.getByTestId('token-input'), 'ink_secret')
+    await userEvent.click(screen.getByTestId('login-submit'))
+    await waitFor(() => expect(screen.getByText('BILLING PAGE')).toBeTruthy())
+  })
+
+  it('commerce-first: a free-tier login with ?next= deep-link still honors the deep-link', async () => {
+    ;(api.fetchMe as any).mockResolvedValue({ user: { tier: 'free' } })
+    ;(window as any).location.search = '?next=%2Fapp%2Fcheckout%3Fplan%3Dhobby'
+    renderAt('/login?next=%2Fapp%2Fcheckout%3Fplan%3Dhobby')
+    await userEvent.click(screen.getByTestId('toggle-token-form'))
+    await userEvent.type(screen.getByTestId('token-input'), 'ink_secret')
+    await userEvent.click(screen.getByTestId('login-submit'))
+    await waitFor(() => expect(screen.getByText('CHECKOUT PAGE')).toBeTruthy())
   })
 })
 
