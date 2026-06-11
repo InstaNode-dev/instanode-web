@@ -60,6 +60,15 @@ import { NotFoundPage } from './pages/NotFoundPage'
 // procurement reviewer pasting /security into a browser sees the real
 // content on first byte instead of waiting for hydration.
 import { SecurityPage, LegalDocPage } from './pages/SecurityPage'
+// MaintenanceNotice — rendered into the prerendered HTML so the scheduled-
+// maintenance banner text is present on FIRST BYTE of every static page
+// (instanode.dev/, /pricing, /docs, …), not only after client hydration.
+// Gated by VITE_MAINTENANCE_MODE: when the flag is '1' at build time the
+// banner copy is spliced into dist/<route>/index.html; otherwise it renders
+// null and the static HTML is byte-identical to before. The dismissible
+// modal only fires on /app* + /login*, which are never pre-rendered, so SSR
+// emits the banner alone.
+import { MaintenanceNotice } from './components/MaintenanceNotice'
 
 // SSRRoutes — the SSG-only route tree. Mirrors the public surface of the
 // client AppRoutes (everything reachable without auth). The /app/* subtree
@@ -100,6 +109,10 @@ export function render(url: string): string {
   return renderToString(
     <StrictMode>
       <StaticRouter location={url}>
+        {/* Banner first so its copy is present at the top of the
+            prerendered body; modal is route-gated to /app*+/login* and
+            never fires on the public (prerendered) routes. */}
+        <MaintenanceNotice />
         <SSRRoutes />
       </StaticRouter>
     </StrictMode>

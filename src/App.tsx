@@ -9,6 +9,15 @@ import { BrowserRouter, Navigate, Route, Routes, useLocation, useParams } from '
 // sibling of <AppRoutes>. Renders null — no markup contribution.
 import { RouteTracker } from './components/RouteTracker'
 
+// MaintenanceNotice — customer-facing scheduled-maintenance notice. Sits
+// inside <BrowserRouter> (it reads window.location to decide whether the
+// dismissible modal applies on /app* + /login*) and OUTSIDE <AppRoutes> so
+// the sticky banner persists across every route change. The whole thing is
+// gated behind the build-time VITE_MAINTENANCE_MODE flag: when unset/'0' it
+// renders null and contributes zero markup (the default in CI + locally). It
+// is only '1' on the published GitHub Pages build (deploy-pages.yml).
+import { MaintenanceNotice } from './components/MaintenanceNotice'
+
 // Homepage — eagerly imported. It's the cold-load path and the most-visited
 // public surface, so it stays in the main entry chunk.
 import { MarketingPage } from './pages/MarketingPage'
@@ -430,6 +439,11 @@ export function App() {
           during a lazy-chunk fetch (an unmount would skip the
           setPageViewName for that navigation). */}
       <RouteTracker />
+      {/* MaintenanceNotice renders the sticky banner on every route (and a
+          one-time modal on /app* + /login*) when VITE_MAINTENANCE_MODE='1';
+          otherwise it returns null and adds no markup. Mounted above
+          AppRoutes so the banner sits at the top of the document flow. */}
+      <MaintenanceNotice />
       <AppRoutes />
     </BrowserRouter>
   )
