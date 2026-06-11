@@ -21,7 +21,18 @@ export default defineConfig({
   // self-skip anyway, but keeping them out of the default config means the
   // per-PR gate never boots a browser for a spec that always skips here, and
   // the two suites stay cleanly separated.
-  testIgnore: ['live-*.spec.ts'],
+  //
+  // auth-contract.spec.ts is ALSO excluded here: it makes UNCONDITIONAL real
+  // fetches to PROD (api.instanode.dev) to assert the AUTH-004 CORS envelope,
+  // so it does NOT belong in this mocked, same-origin (VITE_NO_PROXY=1) gate —
+  // it has its own dedicated config (playwright.auth-contract.config.ts) and
+  // workflow (auth-contract-e2e.yml) that run it against prod. Leaving it in
+  // the default glob made the required `playwright` job depend on prod being
+  // reachable: when the prod cluster is down/paused the fetch times out and
+  // the mocked gate fails for a reason that has nothing to do with the PR.
+  // The prod-targeting assertion still runs (and is allowed to go red while
+  // prod is down) in its own non-required workflow.
+  testIgnore: ['live-*.spec.ts', 'auth-contract.spec.ts'],
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,

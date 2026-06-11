@@ -44,6 +44,27 @@ jobs:
           # init (fail-open), so PR forks / unconfigured envs still build cleanly.
           VITE_NEWRELIC_LICENSE_KEY: ${{ secrets.VITE_NEWRELIC_LICENSE_KEY }}
           VITE_NEWRELIC_APP_ID: ${{ secrets.VITE_NEWRELIC_APP_ID }}
+          # ──────────────────────────────────────────────────────────────
+          # SCHEDULED-MAINTENANCE TOGGLE (src/components/MaintenanceNotice.tsx).
+          #
+          # '1' → the published Pages build renders the customer-facing
+          #       maintenance banner (every route) + a one-time dismissible
+          #       modal on /app* + /login*. This is ON because the prod
+          #       cluster (api.instanode.dev) is intentionally paused, so the
+          #       SPA loads but every API call fails — the banner explains the
+          #       downtime is scheduled and the data is safe.
+          #
+          # Gated to PUBLISH events only (push to main / manual dispatch) so a
+          # PR's `build` check produces a byte-identical, banner-OFF artifact —
+          # it never publishes (the deploy job below is PR-gated) and runs no
+          # tests, so this has zero effect on the required CI checks. The
+          # separate build-and-test / playwright / coverage / lighthouse jobs
+          # never set this var, so they build with the notice OFF.
+          #
+          # ▶ TO TURN THE BANNER OFF ON RESUME: set this to '0' (or delete the
+          #   line) and re-run this deploy — or revert the PR that added it.
+          #   The component renders null when the flag is unset/'0'.
+          VITE_MAINTENANCE_MODE: ${{ github.event_name != 'pull_request' && '1' || '0' }}
       # NOTE: do NOT `cp dist/index.html dist/404.html` here. prerender.mjs
       # already writes dist/404.html as the bare SPA shell so every /app/*
       # bookmark / shared link / magic-link callback rehydrates the React
