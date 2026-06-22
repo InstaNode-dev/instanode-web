@@ -55,7 +55,7 @@ jobs:
       RAW_API_URL: ${{ github.event.inputs.api_url || vars.E2E_LIVE_STAGING_API_URL || '' }}
       E2E_LIVE_RUN_ID: ${{ github.run_id }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-node@v6
         with:
