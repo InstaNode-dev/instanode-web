@@ -95,7 +95,7 @@ jobs:
             echo "RUN=1" >> "$GITHUB_ENV"
           fi
 
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         if: env.RUN == '1'
 
       - uses: actions/setup-node@v6
