@@ -33,7 +33,7 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.60.0",
-    "@size-limit/preset-app": "^12.1.0",
+    "@size-limit/file": "^12.1.0",
     "@testing-library/react": "^16.1.0",
     "@testing-library/user-event": "^14.5.2",
     "@types/node": "^25.9.2",
@@ -57,13 +57,11 @@
   "size-limit": [
     {
       "path": "dist/assets/index-*.js",
-      "limit": "350 KB",
-      "running": false
+      "limit": "350 KB"
     },
     {
       "path": "dist/assets/index-*.css",
-      "limit": "60 KB",
-      "running": false
+      "limit": "60 KB"
     }
   ]
 }
