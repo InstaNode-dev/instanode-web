@@ -47,24 +47,29 @@ jobs:
           # ──────────────────────────────────────────────────────────────
           # SCHEDULED-MAINTENANCE TOGGLE (src/components/MaintenanceNotice.tsx).
           #
-          # '1' → the published Pages build renders the customer-facing
-          #       maintenance banner (every route) + a one-time dismissible
-          #       modal on /app* + /login*. This is ON because the prod
-          #       cluster (api.instanode.dev) is intentionally paused, so the
-          #       SPA loads but every API call fails — the banner explains the
-          #       downtime is scheduled and the data is safe.
+          # DELIBERATELY UNSET. The component renders null when the flag is
+          # unset or '0', so the banner is off.
           #
-          # Gated to PUBLISH events only (push to main / manual dispatch) so a
-          # PR's `build` check produces a byte-identical, banner-OFF artifact —
-          # it never publishes (the deploy job below is PR-gated) and runs no
-          # tests, so this has zero effect on the required CI checks. The
-          # separate build-and-test / playwright / coverage / lighthouse jobs
-          # never set this var, so they build with the notice OFF.
+          # It was pinned to '1' on every publish build while the prod cluster
+          # was intentionally paused. That pause ended: api.instanode.dev now
+          # runs on Azure AKS with a real Let's Encrypt certificate, and the
+          # banner outlived the outage it described — telling every visitor
+          # "instanode is temporarily unavailable" while the platform was in
+          # fact serving, and putting a blocking modal in front of /login and
+          # /app. The header above this line already carried the removal
+          # instruction; it was simply never executed once the cluster
+          # returned.
           #
-          # ▶ TO TURN THE BANNER OFF ON RESUME: set this to '0' (or delete the
-          #   line) and re-run this deploy — or revert the PR that added it.
-          #   The component renders null when the flag is unset/'0'.
-          VITE_MAINTENANCE_MODE: ${{ github.event_name != 'pull_request' && '1' || '0' }}
+          # ▶ TO RE-ENABLE for a genuine maintenance window, add:
+          #       VITE_MAINTENANCE_MODE: '1'
+          #   and remove it again when the window closes. Verified green
+          #   before removal (2026-08-13): provision→psql, cache→redis-cli,
+          #   storage presign round-trip, and a real /stacks/new deploy
+          #   serving over a Let's Encrypt cert.
+          #
+          #   Do not re-pin it to a build-event expression — an expression
+          #   that is always true on publish is indistinguishable from "on
+          #   forever", which is exactly how this shipped for two months.
       # NOTE: do NOT `cp dist/index.html dist/404.html` here. prerender.mjs
       # already writes dist/404.html as the bare SPA shell so every /app/*
       # bookmark / shared link / magic-link callback rehydrates the React
